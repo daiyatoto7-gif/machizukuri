@@ -321,7 +321,8 @@
         autoSaveInterval: 5000,
         // 初期解放タイル: 中央横長6マス (6,7,8, 11,12,13)
         initialUnlocked: [6, 7, 8, 11, 12, 13],
-        storageHours: 8
+        storageHours: 8,
+        collectCooldown: 30000 // 30秒 (ミリ秒)
     };
 
     const BUILDINGS = {
@@ -357,6 +358,10 @@
     let raycaster, mouse;
     let tileMeshes = []; // { mesh, buildingMesh, overlayEl, particleSystem }
     let textureCache = {}; // 絵文字テクスチャキャッシュ
+    
+    // タップ判定用
+    let pointerDownPos = new THREE.Vector2();
+    let isDragging = false;
 
     // --- 初期化 ---
     function init() {
@@ -376,11 +381,16 @@
             gameState.tiles = Array(CONFIG.gridSize).fill(null).map((_, i) => ({
                 type: null, level: 0, finishTime: null, 
                 unlocked: CONFIG.initialUnlocked.includes(i),
-                stored: {}
+                stored: {},
+                lastCollectTime: 0
             }));
             log("New game data created.");
         } else {
-             gameState.tiles.forEach(t => { if(!t.stored) t.stored = {}; });
+             // データマイグレーション
+             gameState.tiles.forEach(t => { 
+                 if(!t.stored) t.stored = {}; 
+                 if(t.lastCollectTime === undefined) t.lastCollectTime = 0;
+             });
              log("Game data loaded.");
         }
 
@@ -475,7 +485,11 @@
 
         // イベント
         window.addEventListener('resize', onWindowResize, false);
+        
+        // タップ判定改善: pointerdown -> pointerupで判定
         renderer.domElement.addEventListener('pointerdown', onPointerDown, false);
+        renderer.domElement.addEventListener('pointerup', onPointerUp, false);
+        renderer.domElement.addEventListener('pointermove', onPointerMove, false);
         
         // 初期リサイズ実行
         setTimeout(onWindowResize, 100);
@@ -672,6 +686,7 @@
     // --- 状態同期 (ロジック -> 3D/UI) ---
     function sync3DState() {
         const reqRank = getRequiredRankForExpansion();
+        const now = Date.now();
         
         gameState.tiles.forEach((tile, i) => {
             const tObj = tileMeshes[i];
@@ -729,10 +744,13 @@
                 } else {
                     tObj.particles.active = false; // エフェクトOFF
                     // オーバーレイ: 資源回収アイコン
+                    // ★変更: 30秒ルール適用 (経過していない場合は表示しない)
                     let content = "";
                     let hasResource = false;
                     let maxRes = ""; let maxVal = 0;
-                    if(tile.stored) {
+                    const canCollect = (now - (tile.lastCollectTime || 0)) >= CONFIG.collectCooldown;
+
+                    if(tile.stored && canCollect) {
                         for(let r in tile.stored) {
                             if(tile.stored[r] >= 1) {
                                 hasResource = true;
@@ -785,6 +803,8 @@
                             if (tile.stored[r] < caps[r]) {
                                 tile.stored[r] = Math.min(caps[r], tile.stored[r] + amount);
                                 // 生産があったらDirtyにしてバブル表示更新
+                                // 30秒ルールがあるので、生産されても表示は変わらない可能性はあるが、
+                                // 時間経過で表示可能になる場合があるので定期更新する
                                 if(Math.floor(tile.stored[r]) >= 1) dirty = true;
                             }
                         }
@@ -793,18 +813,35 @@
             }
         });
 
-        if(dirty || true) { // タイマー更新のため常に同期
+        // 30秒経過チェックのために常に同期したいが重いので、適度に
+        if(dirty || (now % 1000 < 100)) { 
             sync3DState();
         }
         updateHeader();
     }
 
-    // --- インタラクション ---
+    // --- インタラクション (タップ/クリック判定改善) ---
+    
     function onPointerDown(event) {
+        // ドラッグ開始位置を記録
+        pointerDownPos.set(event.clientX, event.clientY);
+        isDragging = false;
+    }
+
+    function onPointerMove(event) {
+        // 少しでも動いたらドラッグとみなす
+        if (Math.abs(event.clientX - pointerDownPos.x) > 5 || Math.abs(event.clientY - pointerDownPos.y) > 5) {
+            isDragging = true;
+        }
+    }
+
+    function onPointerUp(event) {
+        // ドラッグしていたらクリックとみなさない
+        if (isDragging) return;
+
         event.preventDefault();
         
         // パネルが開いていたら閉じる（簡易化のため、背景クリックで閉じる）
-        // 実際はRaycastが外れたら閉じるなどが良い
         
         mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
         mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
@@ -821,11 +858,12 @@
 
             if (target && target.userData.index !== undefined) {
                 const idx = target.userData.index;
-                // 資源回収優先
+                
+                // 1. 資源回収を試みる
                 const collected = collectResource(idx);
-                if (collected) {
-                     // 回収だけ
-                } else {
+                
+                // 2. 回収できなかった場合（クールダウン中含む）、または回収後 -> 選択処理
+                if (!collected) {
                      selectTile(idx);
                 }
             }
@@ -870,6 +908,13 @@
     function collectResource(index) {
         const t = gameState.tiles[index];
         if(!t || !t.stored) return false;
+        
+        // ★変更: 30秒クールダウンチェック
+        const now = Date.now();
+        if ((now - (t.lastCollectTime || 0)) < CONFIG.collectCooldown) {
+            return false;
+        }
+
         let total = 0, txt = "";
         for(let r in t.stored) {
             const val = Math.floor(t.stored[r]);
@@ -882,6 +927,7 @@
             }
         }
         if(total > 0) {
+            t.lastCollectTime = now; // 時間記録
             updateHeader();
             sync3DState(); // バブル消す
             // フローティングテキスト
