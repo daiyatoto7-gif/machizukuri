@@ -562,10 +562,41 @@
         const hasImage = (type === 'house' && level >= 1 && level <= 10);
         const key = `${type}_lv${level}`;
         
+        // ヘルパー: Boxに戻す
+        const setToBox = () => {
+            if (mesh.geometry.type !== 'BoxGeometry') {
+                mesh.geometry.dispose();
+                mesh.geometry = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+                mesh.rotation.set(0, 0, 0); // 回転リセット
+            }
+            mesh.material.side = THREE.FrontSide;
+            mesh.material.transparent = true;
+        };
+
+        // ヘルパー: Plane(ビルボード)にする
+        const setToPlane = () => {
+            if (mesh.geometry.type !== 'PlaneGeometry') {
+                mesh.geometry.dispose();
+                // 少し大きめにする
+                mesh.geometry = new THREE.PlaneGeometry(1.8, 1.8);
+                // カメラの方を向く
+                mesh.quaternion.copy(camera.quaternion);
+            }
+            mesh.material.side = THREE.DoubleSide;
+            mesh.material.transparent = true;
+            mesh.material.alphaTest = 0.5; // 透過の抜きを綺麗にする
+        };
+
         // 1. キャッシュにあれば即適用
         if (textureCache[key] && textureCache[key] instanceof THREE.Texture) {
-            if (mesh.material.map !== textureCache[key]) {
-                mesh.material.map = textureCache[key];
+            const tex = textureCache[key];
+            if (tex.isImage) { // 画像テクスチャかどうか
+                setToPlane();
+            } else {
+                setToBox();
+            }
+            if (mesh.material.map !== tex) {
+                mesh.material.map = tex;
                 mesh.material.needsUpdate = true;
             }
             return;
@@ -573,12 +604,14 @@
 
         // 2. まずは絵文字テクスチャを生成してセット（これがデフォルト）
         const emojiTex = getEmojiTexture(BUILDINGS[type].icon);
-        mesh.material.map = emojiTex;
-        mesh.material.needsUpdate = true;
+        emojiTex.isImage = false; // フラグ
 
         // 画像がない範囲なら絵文字で確定、キャッシュへ
         if (!hasImage) {
             textureCache[key] = emojiTex;
+            setToBox();
+            mesh.material.map = emojiTex;
+            mesh.material.needsUpdate = true;
             return;
         }
 
@@ -587,7 +620,10 @@
             // ロード中フラグ
             textureCache[key] = 'loading';
             
-            // ★変更: 同一階層のファイルを探す
+            // とりあえず絵文字を出しておく
+            setToBox();
+            mesh.material.map = emojiTex;
+
             const path = `${type}_lv${level}.png`;
             
             textureLoader.load(
@@ -598,10 +634,12 @@
                     tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
                     tex.minFilter = THREE.LinearMipmapLinearFilter;
                     tex.magFilter = THREE.LinearFilter;
+                    tex.isImage = true; // 画像フラグ
                     
                     textureCache[key] = tex;
                     
-                    // ロード完了したので、もしこのメッシュがまだこのテクスチャを必要としていれば適用
+                    // 適用
+                    setToPlane();
                     mesh.material.map = tex;
                     mesh.material.needsUpdate = true;
                 },
@@ -609,6 +647,10 @@
                 (err) => {
                     // 失敗 (ファイルなしなど): 絵文字で確定
                     textureCache[key] = emojiTex;
+                    // Boxのまま絵文字適用
+                    setToBox();
+                    mesh.material.map = emojiTex;
+                    mesh.material.needsUpdate = true;
                 }
             );
         }
