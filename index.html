@@ -89,8 +89,8 @@
         .resource-bar {
             display: flex;
             flex-wrap: wrap;
-            gap: 15px;
-            font-size: 0.9em;
+            gap: 12px;
+            font-size: 0.85em;
             justify-content: center;
             padding: 0 10px;
             background: rgba(255,255,255,0.8);
@@ -235,14 +235,41 @@
             background: white; padding: 30px; border-radius: 10px; text-align: center;
             max-width: 400px; box-shadow: 0 5px 15px rgba(0,0,0,0.2);
             animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            position: relative;
         }
         @keyframes popIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
+        /* メニューボタン */
+        #menu-btn {
+            position: fixed;
+            top: 10px; right: 10px;
+            background: white;
+            width: 40px; height: 40px;
+            border-radius: 50%;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            display: flex; justify-content: center; align-items: center;
+            font-size: 24px;
+            cursor: pointer;
+            z-index: 50;
+        }
+        #menu-btn:hover { background: #f0f0f0; }
+
+        /* メニューコンテンツスタイル */
+        .shop-item {
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 10px;
+            margin: 10px 0;
+            text-align: left;
+        }
     </style>
 </head>
 <body>
 
 <div id="debug-log"></div>
+
+<div id="menu-btn" onclick="openMenu()">≡</div>
 
 <header>
     <div class="status-bar">
@@ -258,6 +285,7 @@
         <div class="res-item">🌲 <span id="display-wood">0</span></div>
         <div class="res-item">🪨 <span id="display-stone">0</span></div>
         <div class="res-item">🔩 <span id="display-iron">0</span></div>
+        <div class="res-item" style="border-left:1px solid #ddd; padding-left:10px; color:#e67e22;">👷 <span id="display-builders">0/4</span></div>
     </div>
 </header>
 
@@ -291,6 +319,17 @@
     </div>
 </div>
 
+<!-- メニューモーダル -->
+<div id="modal-menu" class="modal">
+    <div class="modal-content">
+        <h3 style="margin-top:0;">メニュー</h3>
+        <div id="menu-content" style="max-height:60vh; overflow-y:auto;">
+            <!-- Javascriptでコンテンツ挿入 -->
+        </div>
+        <button onclick="closeModal('modal-menu')" class="action-btn" style="background-color:#95a5a6; margin-top:20px;">閉じる</button>
+    </div>
+</div>
+
 <script>
     function log(msg, isError = false) {
         const el = document.getElementById('debug-log');
@@ -319,7 +358,8 @@
         autoSaveInterval: 5000,
         initialUnlocked: [6, 7, 8, 11, 12, 13],
         storageHours: 8,
-        collectCooldown: 30000 
+        collectCooldown: 30000,
+        initialMaxBuilders: 4
     };
 
     const BUILDINGS = {
@@ -346,6 +386,7 @@
         resources: { money: 200, food: 100, wood: 50, stone: 0, iron: 0 },
         tiles: [],
         inventory: [],
+        maxBuilders: CONFIG.initialMaxBuilders,
         lastSaveTime: Date.now()
     };
 
@@ -369,6 +410,9 @@
 
         loadGame();
         
+        // 旧データ互換性チェック
+        if (!gameState.maxBuilders) gameState.maxBuilders = CONFIG.initialMaxBuilders;
+
         if (gameState.tiles.length !== CONFIG.gridSize) {
             gameState.tiles = Array(CONFIG.gridSize).fill(null).map((_, i) => ({
                 type: null, level: 0, finishTime: null, 
@@ -465,7 +509,6 @@
 
     function createTiles() {
         const geometry = new THREE.BoxGeometry(1.6, 0.5, 1.6);
-        const lockedMat = new THREE.MeshStandardMaterial({ color: 0x95a5a6 });
         const unlockedMat = new THREE.MeshStandardMaterial({ color: 0xecf0f1 });
         
         const groundGeo = new THREE.PlaneGeometry(2.0, 2.0);
@@ -544,39 +587,34 @@
         
         reset() {
             const isVertical = Math.random() < 0.5;
-            const lanes = [-5, -3, -1, 1, 3, 5];
-            const lane = lanes[Math.floor(Math.random() * lanes.length)];
+            // 変更: 特定のレーンだけでなく、全体を歩けるようにランダム範囲を拡大
+            const lane = (Math.random() * 12) - 6; 
             
             this.speed = 0.02 + Math.random() * 0.02;
             
             let sx, sz, dx, dz;
+            const spawnDist = 9; // 出現位置を画面外に設定
             if (isVertical) {
                 sx = lane;
-                sz = (Math.random() < 0.5 ? -6 : 6);
+                sz = (Math.random() < 0.5 ? -spawnDist : spawnDist);
                 dx = 0; dz = sz > 0 ? -1 : 1;
             } else {
                 sz = lane;
-                sx = (Math.random() < 0.5 ? -6 : 6);
+                sx = (Math.random() < 0.5 ? -spawnDist : spawnDist);
                 dx = sx > 0 ? -1 : 1; dz = 0;
             }
 
             this.mesh.position.set(sx, 0, sz);
             this.direction = new THREE.Vector3(dx, 0, dz);
             
-            if (this.isOnGreenRoad(sx, sz, isVertical)) {
-                this.active = false;
-                this.mesh.visible = false;
-            } else {
-                this.active = true;
-                this.mesh.visible = true;
-            }
+            this.active = true;
+            this.updateVisibility();
         }
 
         isOnGreenRoad(x, z, isVertical) {
             const checkTile = (tx, tz) => {
                 const col = Math.round((tx + 4) / 2);
                 const row = Math.round((tz + 4) / 2);
-                // 画面外は開拓済み扱い（出現許可）
                 if (col < 0 || col > 4 || row < 0 || row > 4) return true;
                 const idx = row * 5 + col;
                 return gameState.tiles[idx] && gameState.tiles[idx].unlocked;
@@ -593,7 +631,6 @@
                 t2_unlocked = checkTile(Math.round(x), z + 1);
             }
 
-            // 両側が未開拓なら緑の道 -> true
             return (!t1_unlocked && !t2_unlocked);
         }
         
@@ -605,17 +642,25 @@
 
             this.mesh.position.addScaledVector(this.direction, this.speed);
             
-            if (Math.abs(this.mesh.position.x) > 7 || Math.abs(this.mesh.position.z) > 7) {
+            // 画面外に出たらリセット
+            if (Math.abs(this.mesh.position.x) > 10 || Math.abs(this.mesh.position.z) > 10) {
                 this.reset();
+                return;
             }
             
-            const isVertical = (this.direction.z !== 0);
-            if (this.isOnGreenRoad(this.mesh.position.x, this.mesh.position.z, isVertical)) {
-                this.active = false;
-                this.mesh.visible = false;
-            }
+            this.updateVisibility();
             
             this.mesh.position.y = Math.abs(Math.sin(Date.now() * 0.01)) * 0.05;
+        }
+
+        updateVisibility() {
+            const isVertical = (this.direction.z !== 0);
+            // 緑の道（未開拓エリア）にいるときは透明にする
+            if (this.isOnGreenRoad(this.mesh.position.x, this.mesh.position.z, isVertical)) {
+                this.mesh.visible = false;
+            } else {
+                this.mesh.visible = true;
+            }
         }
     }
 
@@ -688,7 +733,6 @@
                     grass.rotation.y = Math.random() * Math.PI;
                     group.add(grass);
                 }
-                // 小さな木も追加
                 if(Math.random() < 0.5) {
                     const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.3), new THREE.MeshStandardMaterial({color:0x8B4513}));
                     trunk.position.y = 0.15;
@@ -709,7 +753,6 @@
                 roof.rotation.y = Math.PI / 4;
                 roof.castShadow = true;
                 group.add(roof);
-                // 煙突
                 const chimney = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.4, 0.15), matStone);
                 chimney.position.set(0.2, 0.8, 0.2);
                 group.add(chimney);
@@ -731,9 +774,9 @@
                 const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.15, 0.4), new THREE.MeshStandardMaterial({color:0x8B4513}));
                 trunk.position.y = 0.2;
                 group.add(trunk);
-                const leaves = new THREE.Mesh(new THREE.ConeGeometry(0.4, 0.8, 8), matLeaf);
-                leaves.position.y = 0.7;
-                group.add(leaves);
+                const leaves2 = new THREE.Mesh(new THREE.ConeGeometry(0.4, 0.8, 8), matLeaf);
+                leaves2.position.y = 0.7;
+                group.add(leaves2);
                 const stump = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.2), new THREE.MeshStandardMaterial({color:0x8B4513}));
                 stump.position.set(0.4, 0.1, 0.4);
                 group.add(stump);
@@ -827,7 +870,7 @@
             const ground = tObj.groundMesh;
 
             if (!tile.unlocked) {
-                // 未開拓地: 地面は緑、タイルも緑、草モデル表示
+                // 未開拓地
                 ground.material.color.setHex(0x27ae60);
                 mesh.material.color.setHex(0x2ecc71);
                 tObj.buildingGroup.visible = true; 
@@ -851,7 +894,7 @@
                 }
                 return;
             } else {
-                // 開拓地: 地面はグレー、タイルは白
+                // 開拓地
                 ground.material.color.setHex(0x555555);
                 mesh.material.color.setHex(0xecf0f1);
             }
@@ -866,7 +909,6 @@
             if (tile.type) {
                 tObj.buildingGroup.visible = true;
                 
-                // 3Dモデル更新
                 const stateKey = `${tile.type}_${tile.level}`;
                 if (tObj.currentType !== stateKey) {
                     while(tObj.buildingGroup.children.length > 0){ 
@@ -910,7 +952,6 @@
                     overlay.innerHTML = content;
                 }
             } else {
-                // 空き地 (開拓済みだが建物なし)
                 tObj.buildingGroup.visible = false;
                 tObj.particles.active = false;
                 tObj.currentType = null;
@@ -1042,6 +1083,18 @@
     function payCost(c){ for(let k in c) gameState.resources[k]-=c[k]; updateHeader(); }
     function addXP(a){ gameState.xp+=a; if(gameState.xp>=getNextRankXP(gameState.rank)){ gameState.xp-=getNextRankXP(gameState.rank); gameState.rank++; document.getElementById('levelup-rank').innerText=gameState.rank; document.getElementById('modal-levelup').style.display='flex'; } }
 
+    // 現在の工事数を取得
+    function getActiveBuilders() {
+        return gameState.tiles.filter(t => t.finishTime !== null).length;
+    }
+
+    // 次の大工雇用コスト
+    function getBuilderCost() {
+        const extra = Math.max(0, gameState.maxBuilders - CONFIG.initialMaxBuilders);
+        // 最初の1人(4->5)は200,000。次はさらに1.5倍ずつ増える
+        return Math.floor(200000 * Math.pow(1.5, extra));
+    }
+
     function collectResource(index) {
         const t = gameState.tiles[index];
         if(!t || !t.stored) return false;
@@ -1111,6 +1164,11 @@
         
         if (!tile.type) {
             let html = "";
+            // 工事制限警告
+            if (getActiveBuilders() >= gameState.maxBuilders) {
+                html += `<div style="color:var(--danger-color); font-size:0.9em; font-weight:bold; margin-bottom:5px; text-align:center;">⚠️ 工事がいっぱいです！</div>`;
+            }
+
             if (gameState.inventory && gameState.inventory.length > 0) {
                 html += `<div class="inventory-section"><div class="inventory-title">📦 保管庫から再設置</div>`;
                 gameState.inventory.forEach((item, idx) => {
@@ -1171,6 +1229,9 @@
                 prodInfo += `${(r=='money'?'💰':r=='food'?'🌾':r=='wood'?'🌲':r=='stone'?'🪨':'🔩')}${val.toFixed(1)}/s `;
                 storeInfo += `<div>${(r=='money'?'💰':r=='food'?'🌾':r=='wood'?'🌲':r=='stone'?'🪨':'🔩')} ${Math.floor(tile.stored[r])}/${Math.floor(caps[r])}</div>`;
             }
+            
+            // 工事制限の確認
+            const buildersBusy = getActiveBuilders() >= gameState.maxBuilders;
 
             content.innerHTML = `
                 <div style="text-align:center;">
@@ -1185,7 +1246,8 @@
                          <strong>LvUP費用:</strong> ${cs.join(' ')}<br>
                          <strong>時間:</strong> ${formatTime(getBuildTime(tile.type, tile.level)/1000)}
                     </div>
-                    <button class="action-btn" onclick="actBuild('${tile.type}')" ${afford?'':'disabled'}>レベルアップ</button>
+                    ${buildersBusy ? '<p style="color:red; font-size:0.9em;">⚠️ 工事枠がいっぱいです</p>' : ''}
+                    <button class="action-btn" onclick="actBuild('${tile.type}')" ${afford && !buildersBusy ?'':'disabled'}>レベルアップ</button>
                     <button class="action-btn store-btn" onclick="actStore()">📦 回収（保管庫へ）</button>
                 </div>`;
         }
@@ -1193,6 +1255,13 @@
 
     window.actBuild = function(type) {
         if(selectedTileIndex===null) return;
+        
+        // 工事枠チェック
+        if (getActiveBuilders() >= gameState.maxBuilders) {
+            alert("⚠️ 大工が全員作業中です！\n工事が終わるのを待つか、ショップで大工を雇ってください。");
+            return;
+        }
+
         const t = gameState.tiles[selectedTileIndex];
         const lv = t.type===type ? t.level : 0;
         const c = getCost(type, lv);
@@ -1204,6 +1273,7 @@
             saveGame();
             sync3DState();
             updatePanelUI();
+            updateHeader(); // 大工数更新のため
         }
     }
     
@@ -1224,10 +1294,18 @@
         saveGame();
         sync3DState();
         updatePanelUI();
+        updateHeader(); // 大工数更新
     };
 
     window.actRestore = function(invIndex) {
         if(selectedTileIndex===null) return;
+        
+        // 工事枠チェック
+        if (getActiveBuilders() >= gameState.maxBuilders) {
+            alert("⚠️ 大工が全員作業中です！");
+            return;
+        }
+
         if(invIndex < 0 || invIndex >= gameState.inventory.length) return;
 
         const item = gameState.inventory[invIndex];
@@ -1243,6 +1321,7 @@
         saveGame();
         sync3DState();
         updatePanelUI();
+        updateHeader(); // 大工数更新
     };
     
     window.actExpand = function() {
@@ -1257,11 +1336,64 @@
         }
     }
 
+    window.openMenu = function() {
+        const modal = document.getElementById('modal-menu');
+        const content = document.getElementById('menu-content');
+        
+        const builderCost = getBuilderCost();
+        const canBuyBuilder = gameState.resources.money >= builderCost;
+
+        content.innerHTML = `
+            <div class="shop-item">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <strong>👷 大工の増員</strong><br>
+                        <span style="font-size:0.9em; color:#666;">現在の人数: ${gameState.maxBuilders}人</span>
+                    </div>
+                    <div style="text-align:right;">
+                        <span style="font-size:1.1em; font-weight:bold; color:#e67e22;">💰${builderCost.toLocaleString()}</span>
+                    </div>
+                </div>
+                <button class="action-btn" onclick="actBuyBuilder()" ${canBuyBuilder ? '' : 'disabled'}>
+                    購入する
+                </button>
+            </div>
+            
+            <div class="shop-item">
+                <strong>📝 ゲームについて</strong>
+                <p style="font-size:0.9em; color:#666;">
+                    同時工事数上限は購入するごとに価格が上昇します。
+                </p>
+            </div>
+        `;
+        
+        modal.style.display = 'flex';
+    };
+
+    window.actBuyBuilder = function() {
+        const cost = getBuilderCost();
+        if (gameState.resources.money >= cost) {
+            gameState.resources.money -= cost;
+            gameState.maxBuilders++;
+            saveGame();
+            updateHeader();
+            // メニューを更新
+            openMenu();
+        }
+    };
+
     function updateHeader() {
         for(let k in gameState.resources) document.getElementById('display-'+k).innerText = Math.floor(gameState.resources[k]).toLocaleString();
         document.getElementById('display-rank').innerText = gameState.rank;
         document.getElementById('display-next-xp').innerText = (getNextRankXP(gameState.rank)-gameState.xp).toLocaleString();
         document.getElementById('display-xp-bar').style.width = Math.min(100, (gameState.xp/getNextRankXP(gameState.rank))*100)+'%';
+        
+        // 大工表示更新
+        const active = getActiveBuilders();
+        const max = gameState.maxBuilders;
+        const builderEl = document.getElementById('display-builders');
+        builderEl.innerText = `${active}/${max}`;
+        builderEl.style.color = active >= max ? 'red' : '#2c3e50';
     }
 
     function onWindowResize() {
