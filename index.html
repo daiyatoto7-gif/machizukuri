@@ -862,8 +862,13 @@
     // --- メインループ ---
     function animate3D() {
         requestAnimationFrame(animate3D);
+        
+        // パーティクル更新
         tileMeshes.forEach(t => t.particles.update());
-        pedestrians.forEach(p => p.update()); // 歩行者更新
+        
+        // ★追加: 歩行者更新
+        pedestrians.forEach(p => p.update());
+
         if(renderer && scene && camera) {
             renderer.render(scene, camera);
         }
