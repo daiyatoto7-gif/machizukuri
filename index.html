@@ -14,7 +14,7 @@
             font-family: monospace; font-size: 10px;
             z-index: 9999; pointer-events: none;
             padding: 5px; box-sizing: border-box;
-            display: none; /* 通常は非表示、エラー時や確認時にJSで表示可能 */
+            display: none; /* 通常は非表示 */
         }
         .error-msg { color: #ff5555; }
     </style>
@@ -100,9 +100,8 @@
         #game-container {
             position: absolute;
             top: 0; left: 0;
-            width: 100vw; height: 100vh; /* 確実に画面全体を覆うように変更 */
+            width: 100vw; height: 100vh;
             z-index: 1;
-            /* WebGLがロードされるまではこのグラデーションが見える */
             background: radial-gradient(circle at center, #dcecf5 0%, #b0c4de 100%);
         }
 
@@ -300,7 +299,7 @@
         line.textContent = `> ${msg}`;
         if (isError) {
             line.className = 'error-msg';
-            el.style.display = 'block'; // エラー時は強制表示
+            el.style.display = 'block'; 
             console.error(msg);
         } else {
             console.log(msg);
@@ -322,7 +321,7 @@
         // 初期解放タイル: 中央横長6マス (6,7,8, 11,12,13)
         initialUnlocked: [6, 7, 8, 11, 12, 13],
         storageHours: 8,
-        collectCooldown: 30000 // 30秒 (ミリ秒)
+        collectCooldown: 30000 // 30秒
     };
 
     const BUILDINGS = {
@@ -335,7 +334,6 @@
         blacksmith: { name: "鍛冶屋", icon: "⚔️", prod: { money: 5, iron: 2 }, cost: { money: 800, food: 300, wood: 300, stone: 200, iron: 100 }, baseTime: 7000 }
     };
     
-    // prodの補完
     for(let k in BUILDINGS) {
         const b = BUILDINGS[k];
         for(let r of ['money','food','wood','stone','iron']) {
@@ -354,12 +352,11 @@
     let selectedTileIndex = null;
 
     // --- 3D用変数 ---
-    let scene, camera, renderer;
+    let scene, camera, renderer, textureLoader;
     let raycaster, mouse;
-    let tileMeshes = []; // { mesh, buildingMesh, overlayEl, particleSystem }
-    let textureCache = {}; // 絵文字テクスチャキャッシュ
+    let tileMeshes = []; 
+    let textureCache = {}; // テクスチャキャッシュ { key: Texture, loading: boolean }
     
-    // タップ判定用
     let pointerDownPos = new THREE.Vector2();
     let isDragging = false;
 
@@ -367,16 +364,13 @@
     function init() {
         log("Game initializing...");
 
-        // Three.js 読み込みチェック
         if (typeof THREE === 'undefined') {
-            document.body.innerHTML = '<div style="padding:20px;text-align:center;color:red;"><h3>エラー: 3Dライブラリ(Three.js)が読み込めません。</h3><p>インターネット接続やセキュリティ設定を確認してください。</p></div>';
-            log("Error: THREE is undefined", true);
+            document.body.innerHTML = '<div style="padding:20px;text-align:center;color:red;"><h3>エラー: 3Dライブラリが読み込めません。</h3><p>再読み込みしてください。</p></div>';
             return;
         }
 
         loadGame();
         
-        // データ初期化チェック
         if (gameState.tiles.length !== CONFIG.gridSize) {
             gameState.tiles = Array(CONFIG.gridSize).fill(null).map((_, i) => ({
                 type: null, level: 0, finishTime: null, 
@@ -384,32 +378,26 @@
                 stored: {},
                 lastCollectTime: 0
             }));
-            log("New game data created.");
         } else {
-             // データマイグレーション
              gameState.tiles.forEach(t => { 
                  if(!t.stored) t.stored = {}; 
                  if(t.lastCollectTime === undefined) t.lastCollectTime = 0;
              });
-             log("Game data loaded.");
         }
 
         try {
             init3D();
         } catch (e) {
             log(`3D Init Error: ${e.message}`, true);
-            alert("3D表示の初期化に失敗しました。画面左上のログを確認してください。");
+            alert("3D表示の初期化に失敗しました。");
             return;
         }
 
         updateHeader();
         
-        // ループ開始
         requestAnimationFrame(animate3D);
-        setInterval(gameLogicLoop, 1000); // ロジックは1秒ごと
+        setInterval(gameLogicLoop, 1000); 
         setInterval(saveGame, CONFIG.autoSaveInterval);
-        
-        // パネルUI更新用
         setInterval(updatePanelUI, 500);
 
         log("Game loop started.");
@@ -420,7 +408,6 @@
         const container = document.getElementById('game-container');
         if(!container) throw new Error("Game container not found");
         
-        // コンテナのサイズを取得（0の場合はwindowサイズをフォールバックとして使用）
         let width = container.clientWidth;
         let height = container.clientHeight;
 
@@ -429,43 +416,33 @@
             height = window.innerHeight;
         }
 
-        // それでも0の場合は、レイアウトが完了していない可能性があるためリトライ
         if (width === 0 || height === 0) {
-            log(`Waiting for container layout... (w:${width}, h:${height})`);
             setTimeout(init3D, 100);
             return;
         }
 
-        // シーン
         scene = new THREE.Scene();
-        // 背景色を設定せず、CSSのグラデーションが見えるようにする
-        // scene.background = new THREE.Color(0xb0c4de); 
-        // scene.fog = new THREE.Fog(0xb0c4de, 15, 30);
-
-        // カメラ
+        
         const aspect = width / height;
         const d = 10;
         
         camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 1, 1000);
-        camera.position.set(20, 20, 20); // 斜め上から
+        camera.position.set(20, 20, 20); 
         camera.lookAt(scene.position);
 
-        // レンダラー (alpha: true で背景透明に)
         renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         
-        // ★重要: デバイスピクセル比率を高く設定 (最低2.0倍でスーパーサンプリング)
         const pixelRatio = Math.max(window.devicePixelRatio, 2.0);
         renderer.setPixelRatio(pixelRatio);
         
         renderer.setSize(width, height);
         renderer.shadowMap.enabled = true;
-        // 背景を透明にする
         renderer.setClearColor( 0x000000, 0 ); 
         container.appendChild(renderer.domElement);
+        
+        // テクスチャローダー初期化
+        textureLoader = new THREE.TextureLoader();
 
-        log(`Renderer created: ${width}x${height} (pixelRatio: ${pixelRatio})`);
-
-        // ライト
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
         scene.add(ambientLight);
 
@@ -476,22 +453,17 @@
         dirLight.shadow.mapSize.height = 1024;
         scene.add(dirLight);
 
-        // マウスインタラクション
         raycaster = new THREE.Raycaster();
         mouse = new THREE.Vector2();
 
-        // タイル生成
         createTiles();
 
-        // イベント
         window.addEventListener('resize', onWindowResize, false);
         
-        // タップ判定改善: pointerdown -> pointerupで判定
         renderer.domElement.addEventListener('pointerdown', onPointerDown, false);
         renderer.domElement.addEventListener('pointerup', onPointerUp, false);
         renderer.domElement.addEventListener('pointermove', onPointerMove, false);
         
-        // 初期リサイズ実行
         setTimeout(onWindowResize, 100);
     }
 
@@ -500,8 +472,7 @@
         const lockedMat = new THREE.MeshStandardMaterial({ color: 0x95a5a6 });
         const unlockedMat = new THREE.MeshStandardMaterial({ color: 0xecf0f1 });
         
-        // グリッド配置 (5x5) 中心を0,0に
-        const offset = 2; // 間隔
+        const offset = 2; 
         const start = -offset * 2;
 
         for (let i = 0; i < 25; i++) {
@@ -510,30 +481,26 @@
             const x = start + col * offset;
             const z = start + row * offset;
 
-            // 地面タイル
             const mesh = new THREE.Mesh(geometry, unlockedMat.clone());
             mesh.position.set(x, 0, z);
             mesh.receiveShadow = true;
             mesh.userData = { index: i, type: 'tile' };
             scene.add(mesh);
 
-            // 施設用メッシュ (初期は非表示)
             const bGeo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
-            const bMat = new THREE.MeshStandardMaterial({ color: 0xffffff }); // テクスチャ貼る
+            // 透過対応: transparent: true
+            const bMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true }); 
             const bMesh = new THREE.Mesh(bGeo, bMat);
-            // 重なり(Zファイティング)防止のため少し浮かせる
             bMesh.position.set(0, 0.86, 0); 
             bMesh.castShadow = true;
             bMesh.visible = false;
             bMesh.userData = { index: i, type: 'building' };
             mesh.add(bMesh);
 
-            // HTMLオーバーレイ用Div生成
             const overlay = document.createElement('div');
             overlay.className = 'overlay-item';
             document.getElementById('ui-overlay-layer').appendChild(overlay);
 
-            // パーティクルシステム初期化
             const particles = new ParticleSystem(mesh.position, scene);
 
             tileMeshes.push({ 
@@ -544,11 +511,9 @@
             });
         }
         
-        // 初回同期
         sync3DState();
     }
 
-    // --- パーティクルシステム (建設エフェクト) ---
     class ParticleSystem {
         constructor(position, scene) {
             this.origin = position.clone().add(new THREE.Vector3(0, 1, 0));
@@ -556,7 +521,6 @@
             this.scene = scene;
             this.active = false;
             
-            // ジオメトリ再利用
             this.geo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
             this.mat = new THREE.MeshBasicMaterial({ color: 0xdddddd, transparent: true });
         }
@@ -564,10 +528,8 @@
         update() {
             if (!this.active && this.particles.length === 0) return;
 
-            // 新規発生
             if (this.active && Math.random() < 0.2) {
                 const mesh = new THREE.Mesh(this.geo, this.mat.clone());
-                // ランダム位置
                 const offset = new THREE.Vector3((Math.random()-0.5)*1.5, 0, (Math.random()-0.5)*1.5);
                 mesh.position.copy(this.origin).add(offset);
                 this.scene.add(mesh);
@@ -578,7 +540,6 @@
                 });
             }
 
-            // 更新
             for (let i = this.particles.length - 1; i >= 0; i--) {
                 const p = this.particles[i];
                 p.mesh.position.add(p.vel);
@@ -595,39 +556,89 @@
         }
     }
 
-    // --- 絵文字テクスチャ生成 ---
+    // --- テクスチャ管理 (画像優先・フォールバック対応) ---
+    function applyBuildingTexture(type, level, mesh) {
+        // 画像がある可能性のある範囲: 民家(house)のLv1-10
+        const hasImage = (type === 'house' && level >= 1 && level <= 10);
+        const key = `${type}_lv${level}`;
+        
+        // 1. キャッシュにあれば即適用
+        if (textureCache[key] && textureCache[key] instanceof THREE.Texture) {
+            if (mesh.material.map !== textureCache[key]) {
+                mesh.material.map = textureCache[key];
+                mesh.material.needsUpdate = true;
+            }
+            return;
+        }
+
+        // 2. まずは絵文字テクスチャを生成してセット（これがデフォルト）
+        const emojiTex = getEmojiTexture(BUILDINGS[type].icon);
+        mesh.material.map = emojiTex;
+        mesh.material.needsUpdate = true;
+
+        // 画像がない範囲なら絵文字で確定、キャッシュへ
+        if (!hasImage) {
+            textureCache[key] = emojiTex;
+            return;
+        }
+
+        // 3. 画像ロード試行 (まだロード中でなければ)
+        if (!textureCache[key]) {
+            // ロード中フラグ
+            textureCache[key] = 'loading';
+            
+            // ★変更: 同一階層のファイルを探す
+            const path = `${type}_lv${level}.png`;
+            
+            textureLoader.load(
+                path,
+                (tex) => {
+                    // 成功
+                    tex.encoding = THREE.sRGBEncoding;
+                    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+                    tex.minFilter = THREE.LinearMipmapLinearFilter;
+                    tex.magFilter = THREE.LinearFilter;
+                    
+                    textureCache[key] = tex;
+                    
+                    // ロード完了したので、もしこのメッシュがまだこのテクスチャを必要としていれば適用
+                    mesh.material.map = tex;
+                    mesh.material.needsUpdate = true;
+                },
+                undefined,
+                (err) => {
+                    // 失敗 (ファイルなしなど): 絵文字で確定
+                    textureCache[key] = emojiTex;
+                }
+            );
+        }
+    }
+
     function getEmojiTexture(emoji, bgColor = '#ffffff') {
-        const key = emoji + bgColor;
+        // キーはキャッシュキーとは別（絵文字単位）
+        const key = `emoji_${emoji}`;
         if (textureCache[key]) return textureCache[key];
 
-        // 解像度をさらに上げる (2048px)
         const size = 2048; 
         const canvas = document.createElement('canvas');
         canvas.width = size;
         canvas.height = size;
         const ctx = canvas.getContext('2d');
 
-        // 背景
         ctx.fillStyle = bgColor;
         ctx.fillRect(0, 0, size, size);
-        
-        // 枠線
         ctx.strokeStyle = '#ccc';
-        ctx.lineWidth = 48; // 線も太く
+        ctx.lineWidth = 48; 
         ctx.strokeRect(0, 0, size, size);
 
-        // 絵文字
-        ctx.font = '1200px serif'; // フォントサイズ特大
+        ctx.font = '1200px serif'; 
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillStyle = 'black'; // 明示的に色指定
-        ctx.fillText(emoji, size/2, size/2 + 60); // 中心調整
+        ctx.fillStyle = 'black'; 
+        ctx.fillText(emoji, size/2, size/2 + 60); 
 
         const tex = new THREE.CanvasTexture(canvas);
-        // ★重要: 異方性フィルタリングを有効化 (斜めから見てもくっきりさせる)
         if (renderer) tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-        
-        // テクスチャフィルタの設定を調整 (ミップマップのリニア補間)
         tex.minFilter = THREE.LinearMipmapLinearFilter;
         tex.magFilter = THREE.LinearFilter;
 
@@ -638,23 +649,15 @@
     // --- メインループ ---
     function animate3D() {
         requestAnimationFrame(animate3D);
-
-        // パーティクル更新
         tileMeshes.forEach(t => t.particles.update());
-
-        // レンダリング
         if(renderer && scene && camera) {
             renderer.render(scene, camera);
         }
-        
-        // UI追従更新
         updateOverlayPositions();
     }
 
     function updateOverlayPositions() {
         if (!camera) return;
-
-        // 3D座標 -> スクリーン座標
         const width = window.innerWidth;
         const height = window.innerHeight;
         const widthHalf = width / 2;
@@ -663,7 +666,6 @@
         tileMeshes.forEach((t, i) => {
             const tileData = gameState.tiles[i];
             const pos = t.mesh.position.clone();
-            // 施設がある場合は少し上に
             if (tileData.unlocked) pos.y += 1.5; 
             else pos.y += 0.5;
 
@@ -672,7 +674,6 @@
             const x = (pos.x * widthHalf) + widthHalf;
             const y = -(pos.y * heightHalf) + heightHalf;
 
-            // 画面外判定
             if (x < -50 || x > width + 50 || y < -50 || y > height + 50) {
                 t.overlayEl.style.display = 'none';
             } else {
@@ -683,7 +684,7 @@
         });
     }
 
-    // --- 状態同期 (ロジック -> 3D/UI) ---
+    // --- 状態同期 ---
     function sync3DState() {
         const reqRank = getRequiredRankForExpansion();
         const now = Date.now();
@@ -694,26 +695,24 @@
             const bMesh = tObj.buildingMesh;
             const overlay = tObj.overlayEl;
 
-            // 1. ロック/アンロック状態
+            // ロック/アンロック
             if (!tile.unlocked) {
-                mesh.material.color.setHex(0x95a5a6); // グレー
+                mesh.material.color.setHex(0x95a5a6); 
                 bMesh.visible = false;
                 tObj.particles.active = false;
                 
-                // 拡張可能ならアイコン表示
                 const canUnlock = gameState.rank >= reqRank;
                 if (canUnlock) {
-                     mesh.material.color.setHex(0xdcdde1); // 少し明るく
+                     mesh.material.color.setHex(0xdcdde1); 
                      overlay.innerHTML = `<div class="lock-icon">🔒</div>`;
                 } else {
                     overlay.innerHTML = "";
                 }
                 return;
             } else {
-                mesh.material.color.setHex(0xecf0f1); // 白
+                mesh.material.color.setHex(0xecf0f1); 
             }
             
-            // 選択中のハイライト
             if (selectedTileIndex === i) {
                 mesh.material.emissive.setHex(0x3498db);
                 mesh.material.emissiveIntensity = 0.3;
@@ -721,18 +720,16 @@
                 mesh.material.emissive.setHex(0x000000);
             }
 
-            // 2. 施設表示
+            // 施設表示
             if (tile.type) {
                 bMesh.visible = true;
-                const bInfo = BUILDINGS[tile.type];
                 
-                // テクスチャ更新 (レベルに応じて背景色変えるなどの演出も可能だが今回はシンプルに)
-                bMesh.material.map = getEmojiTexture(bInfo.icon);
+                // ★テクスチャ適用関数を使用
+                applyBuildingTexture(tile.type, tile.level, bMesh);
                 
                 // 建設中かどうか
                 if (tile.finishTime) {
-                    tObj.particles.active = true; // エフェクトON
-                    // オーバーレイ: タイマー
+                    tObj.particles.active = true;
                     const remaining = Math.max(0, (tile.finishTime - Date.now()));
                     const total = getBuildTime(tile.type, tile.level);
                     const percent = Math.min(100, Math.max(0, 100 - (remaining / total * 100)));
@@ -742,9 +739,9 @@
                         <div class="progress-bar-container"><div class="progress-fill" style="width:${percent}%"></div></div>
                     `;
                 } else {
-                    tObj.particles.active = false; // エフェクトOFF
-                    // オーバーレイ: 資源回収アイコン
-                    // ★変更: 30秒ルール適用 (経過していない場合は表示しない)
+                    tObj.particles.active = false;
+                    
+                    // 回収チェック (30秒ルール)
                     let content = "";
                     let hasResource = false;
                     let maxRes = ""; let maxVal = 0;
@@ -760,8 +757,6 @@
                     }
                     if (hasResource) {
                         const icon = maxRes=='money'?'💰':maxRes=='food'?'🌾':maxRes=='wood'?'🌲':maxRes=='stone'?'🪨':'🔩';
-                        // クリックイベントは親のoverlay-itemが受けるのでバブル自体は飾り
-                        // ただし親がpointer-events:autoなので、バブルをクリック＝親をクリック
                         content = `<div class="harvest-bubble" onclick="collectResourceUI(${i}, event)">${icon}</div>`;
                     }
                     overlay.innerHTML = content;
@@ -774,15 +769,13 @@
         });
     }
     
-    // --- ゲームロジック (1秒ごとに実行) ---
+    // --- ゲームロジック ---
     function gameLogicLoop() {
         const now = Date.now();
         let dirty = false;
 
-        // 建設完了 & 生産
         gameState.tiles.forEach(tile => {
             if (tile.unlocked) {
-                // 建設完了
                 if (tile.finishTime && now >= tile.finishTime) {
                     tile.level++;
                     tile.finishTime = null;
@@ -792,7 +785,6 @@
                     if(selectedTileIndex !== null) updatePanelUI();
                 }
                 
-                // 生産
                 if (tile.type && tile.level > 0 && !tile.finishTime) {
                     const b = BUILDINGS[tile.type];
                     const caps = getStorageCapacity(tile.type, tile.level);
@@ -802,9 +794,6 @@
                             if (!tile.stored[r]) tile.stored[r] = 0;
                             if (tile.stored[r] < caps[r]) {
                                 tile.stored[r] = Math.min(caps[r], tile.stored[r] + amount);
-                                // 生産があったらDirtyにしてバブル表示更新
-                                // 30秒ルールがあるので、生産されても表示は変わらない可能性はあるが、
-                                // 時間経過で表示可能になる場合があるので定期更新する
                                 if(Math.floor(tile.stored[r]) >= 1) dirty = true;
                             }
                         }
@@ -813,44 +802,36 @@
             }
         });
 
-        // 30秒経過チェックのために常に同期したいが重いので、適度に
         if(dirty || (now % 1000 < 100)) { 
             sync3DState();
         }
         updateHeader();
     }
 
-    // --- インタラクション (タップ/クリック判定改善) ---
-    
+    // --- インタラクション ---
     function onPointerDown(event) {
-        // ドラッグ開始位置を記録
         pointerDownPos.set(event.clientX, event.clientY);
         isDragging = false;
     }
 
     function onPointerMove(event) {
-        // 少しでも動いたらドラッグとみなす
         if (Math.abs(event.clientX - pointerDownPos.x) > 5 || Math.abs(event.clientY - pointerDownPos.y) > 5) {
             isDragging = true;
         }
     }
 
     function onPointerUp(event) {
-        // ドラッグしていたらクリックとみなさない
-        if (isDragging) return;
+        if (isDragging) return; // ドラッグなら無視
 
         event.preventDefault();
-        
-        // パネルが開いていたら閉じる（簡易化のため、背景クリックで閉じる）
         
         mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
         mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
         raycaster.setFromCamera(mouse, camera);
-        const intersects = raycaster.intersectObjects(scene.children, true); // true for recursive
+        const intersects = raycaster.intersectObjects(scene.children, true);
 
         if (intersects.length > 0) {
-            // 親をたどってuserDataを持つメッシュを探す
             let target = intersects[0].object;
             while(target && !target.userData.index && target.parent) {
                 target = target.parent;
@@ -858,30 +839,26 @@
 
             if (target && target.userData.index !== undefined) {
                 const idx = target.userData.index;
-                
-                // 1. 資源回収を試みる
                 const collected = collectResource(idx);
                 
-                // 2. 回収できなかった場合（クールダウン中含む）、または回収後 -> 選択処理
+                // 回収しなかった(できなかった)場合のみ選択
                 if (!collected) {
                      selectTile(idx);
                 }
             }
         } else {
-            // 何もないところクリックで選択解除
             closePanel();
         }
     }
     
-    // UIからの資源回収トリガー (バブルクリック時)
     window.collectResourceUI = function(index, e) {
-        e.stopPropagation(); // パネルが開くのを防ぐ
+        e.stopPropagation();
         collectResource(index);
     };
 
     function selectTile(index) {
         selectedTileIndex = index;
-        sync3DState(); // ハイライト更新
+        sync3DState(); 
         showPanel(index);
     }
     
@@ -892,7 +869,6 @@
     }
 
     // --- ユーティリティ系 ---
-    // (以前のロジックと同じ)
     function formatTimeShort(s){ if(s<60)return`${Math.floor(s)}s`;if(s<3600)return`${Math.floor(s/60)}m`;return`${Math.floor(s/3600)}h`; }
     function formatTime(s){ if(s<60)return`${Math.floor(s)}秒`;if(s<3600)return`${Math.floor(s/60)}分${Math.floor(s%60)}秒`;return`${Math.floor(s/3600)}時間`; }
     function getNextRankXP(r){ return r*500; }
@@ -909,7 +885,7 @@
         const t = gameState.tiles[index];
         if(!t || !t.stored) return false;
         
-        // ★変更: 30秒クールダウンチェック
+        // 30秒チェック
         const now = Date.now();
         if ((now - (t.lastCollectTime || 0)) < CONFIG.collectCooldown) {
             return false;
@@ -927,10 +903,10 @@
             }
         }
         if(total > 0) {
-            t.lastCollectTime = now; // 時間記録
+            t.lastCollectTime = now;
             updateHeader();
-            sync3DState(); // バブル消す
-            // フローティングテキスト
+            sync3DState(); 
+            // 演出
             const overlay = tileMeshes[index].overlayEl;
             const el = document.createElement('div');
             el.className = 'float-text';
@@ -948,19 +924,15 @@
         const p = document.getElementById('control-panel');
         const content = document.getElementById('panel-content');
         p.classList.add('active');
-        
-        // 内容生成は updatePanelUI に任せるが、初回呼び出しもここで行う
         updatePanelUI();
     }
     
-    // パネルの中身を現在の状態に合わせて更新
     function updatePanelUI() {
         if(selectedTileIndex === null) return;
         const tile = gameState.tiles[selectedTileIndex];
         const content = document.getElementById('panel-content');
         if(!content) return;
 
-        // ロック中
         if (!tile.unlocked) {
             const req = getRequiredRankForExpansion();
             const cost = getExpandCost(gameState.rank);
@@ -979,7 +951,6 @@
             return;
         }
         
-        // 新規建設
         if (!tile.type) {
             let html = "";
             for(let k in BUILDINGS) {
@@ -1001,7 +972,6 @@
             return;
         }
         
-        // 建設中/稼働中
         const b = BUILDINGS[tile.type];
         if (tile.finishTime) {
             const rem = Math.max(0, (tile.finishTime - Date.now()));
@@ -1018,7 +988,6 @@
             const caps = getStorageCapacity(tile.type, tile.level);
             let cs = []; for(let r in c) if(c[r]>0) cs.push((r=='money'?'💰':r=='food'?'🌾':r=='wood'?'🌲':r=='stone'?'🪨':'🔩')+c[r]);
             
-            // 生産・貯蔵情報
             let prodInfo = ""; let storeInfo = "";
             for(let r in b.prod) if(b.prod[r]>0) {
                 const val = b.prod[r]*tile.level*Math.pow(1.05, tile.level-1);
@@ -1080,7 +1049,6 @@
         document.getElementById('display-xp-bar').style.width = Math.min(100, (gameState.xp/getNextRankXP(gameState.rank))*100)+'%';
     }
 
-    // --- その他 ---
     function onWindowResize() {
         const c = document.getElementById('game-container');
         if (!c) return;
@@ -1096,8 +1064,6 @@
             camera.bottom = -d;
             camera.updateProjectionMatrix();
             renderer.setSize(width, height);
-            
-            log(`Resize: ${width}x${height}`);
         }
     }
 
@@ -1105,9 +1071,7 @@
         try {
             gameState.lastSaveTime = Date.now();
             localStorage.setItem('kingdomBuilder3DSave', JSON.stringify(gameState));
-        } catch (e) {
-            console.warn("Save failed:", e);
-        }
+        } catch (e) {}
     }
 
     function loadGame() {
@@ -1116,7 +1080,6 @@
             if(s) {
                 const d = JSON.parse(s);
                 gameState = { ...gameState, ...d };
-                // オフライン経過
                 const now = Date.now();
                 const sec = (now - gameState.lastSaveTime)/1000;
                 if(sec > 10) {
@@ -1138,14 +1101,11 @@
                 }
                 gameState.lastSaveTime = now;
             }
-        } catch (e) {
-            console.warn("Load failed:", e);
-        }
+        } catch (e) {}
     }
     
     window.closeModal = function(id) { document.getElementById(id).style.display='none'; }
 
-    // Start
     window.onload = function() {
         log("Window onload");
         setTimeout(init, 100);
