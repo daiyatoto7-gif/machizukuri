@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Simple City Builder</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        .resource-panel { margin-bottom: 20px; padding: 10px; background: #f0f0f0; }
+        .facility { border: 1px solid #ccc; padding: 15px; margin-bottom: 10px; border-radius: 5px; }
+        .facility h3 { margin: 0 0 10px 0; }
+        button { cursor: pointer; padding: 5px 10px; }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+        .timer { color: red; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <h1>町づくりゲーム</h1>
+
+    <div class="resource-panel">
+        所持金: <span id="res-money">0</span> G | 
+        木材: <span id="res-wood">0</span> | 
+        現在の生産力: <span id="total-prod">0</span> /秒
+    </div>
+
+    <div id="facilities-container">
+        </div>
+
+<script>
+    // --- 1. ゲームの設定とデータ ---
+    const GAME_CONFIG = {
+        fps: 30, // 1秒間の更新頻度
+    };
+
+    // プレイヤーの状態
+    let state = {
+        resources: { money: 100, wood: 0 },
+        facilities: [
+            {
+                id: "house",
+                name: "民家",
+                level: 0,
+                baseCost: 10,   // 初期費用
+                baseTime: 3000, // 初期建設時間(ミリ秒) = 3秒
+                baseProd: 1,    // レベル1あたりの生産量
+                finishTime: null // 完成予定時刻
+            },
+            {
+                id: "forest",
+                name: "伐採所",
+                level: 0,
+                baseCost: 50,
+                baseTime: 5000, // 5秒
+                baseProd: 5,
+                finishTime: null
+            }
+        ]
+    };
+
+    // --- 2. 計算ロジック ---
+    
+    // コスト計算 (レベルに応じて増加)
+    function getCost(facility) {
+        return Math.floor(facility.baseCost * Math.pow(1.5, facility.level));
+    }
+
+    // 建設時間計算 (レベルに応じて増加)
+    function getBuildTime(facility) {
+        return Math.floor(facility.baseTime * Math.pow(1.2, facility.level));
+    }
+
+    // --- 3. ゲームループ (メイン機能) ---
+    function gameLoop() {
+        const now = Date.now();
+
+        // A. 施設の建設完了チェック
+        state.facilities.forEach(fac => {
+            if (fac.finishTime && now >= fac.finishTime) {
+                // 建設完了！
+                fac.level++;
+                fac.finishTime = null;
+                console.log(`${fac.name} のレベルアップ完了！`);
+            }
+        });
+
+        // B. 資源の自動回収 (レベル > 0 の施設から)
+        state.facilities.forEach(fac => {
+            if (fac.level > 0 && !fac.finishTime) { // 建設中は生産しない場合
+                // 1秒あたりの生産量をFPSで割って加算
+                const productionPerTick = (fac.baseProd * fac.level) / GAME_CONFIG.fps;
+                state.resources.money += productionPerTick; 
+                // ※ここでは簡単のため全て「お金」を生む設定にしています
+            }
+        });
+
+        updateUI();
+    }
+
+    // --- 4. 操作 ---
+    function upgradeFacility(index) {
+        const fac = state.facilities[index];
+        const cost = getCost(fac);
+
+        // お金が足りているか？ 建設中ではないか？
+        if (state.resources.money >= cost && !fac.finishTime) {
+            state.resources.money -= cost;
+            
+            const timeNeeded = getBuildTime(fac);
+            fac.finishTime = Date.now() + timeNeeded; // 完了時刻をセット
+        } else {
+            alert("お金が足りないか、建設中です！");
+        }
+    }
+
+    // --- 5. 画面描画 (UI) ---
+    function updateUI() {
+        // 資源の表示更新
+        document.getElementById('res-money').innerText = Math.floor(state.resources.money);
+        document.getElementById('res-wood').innerText = Math.floor(state.resources.wood);
+
+        const container = document.getElementById('facilities-container');
+        container.innerHTML = ''; // 一旦クリア
+
+        state.facilities.forEach((fac, index) => {
+            const cost = getCost(fac);
+            const buildTimeSec = (getBuildTime(fac) / 1000).toFixed(1);
+            
+            let statusHtml = '';
+            let isBuilding = false;
+
+            if (fac.finishTime) {
+                isBuilding = true;
+                const remaining = Math.max(0, (fac.finishTime - Date.now()) / 1000).toFixed(1);
+                statusHtml = `<div class="timer">建設中... 残り ${remaining}秒</div>`;
+            } else {
+                statusHtml = `<button onclick="upgradeFacility(${index})">レベルアップ (費用: ${cost}G, 時間: ${buildTimeSec}秒)</button>`;
+            }
+
+            const html = `
+                <div class="facility">
+                    <h3>${fac.name} (Lv.${fac.level})</h3>
+                    <p>生産力: ${fac.baseProd * fac.level} /秒</p>
+                    ${statusHtml}
+                </div>
+            `;
+            container.innerHTML += html;
+        });
+    }
+
+    // ゲーム開始
+    setInterval(gameLoop, 1000 / GAME_CONFIG.fps);
+
+</script>
+</body>
+</html>
