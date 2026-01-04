@@ -14,12 +14,12 @@
             font-family: monospace; font-size: 10px;
             z-index: 9999; pointer-events: none;
             padding: 5px; box-sizing: border-box;
-            display: none; /* 通常は非表示 */
+            display: none;
         }
         .error-msg { color: #ff5555; }
     </style>
 
-    <!-- Three.js CDN (unpkgに変更) -->
+    <!-- Three.js CDN -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
     
     <style>
@@ -38,13 +38,12 @@
             background-color: var(--bg-color);
             color: var(--text-color);
             margin: 0;
-            overflow: hidden; /* スクロール禁止 */
+            overflow: hidden;
             user-select: none;
             height: 100vh;
             width: 100vw;
         }
 
-        /* ヘッダー */
         header {
             width: 100%;
             background: rgba(255, 255, 255, 0.95);
@@ -98,7 +97,6 @@
             border-radius: 10px;
         }
 
-        /* 3Dキャンバスコンテナ */
         #game-container {
             position: absolute;
             top: 0; left: 0;
@@ -107,7 +105,6 @@
             background: radial-gradient(circle at center, #dcecf5 0%, #b0c4de 100%);
         }
 
-        /* UIオーバーレイレイヤー */
         #ui-overlay-layer {
             position: absolute;
             top: 0; left: 0;
@@ -117,7 +114,6 @@
             overflow: hidden;
         }
 
-        /* 追従UIパーツ */
         .overlay-item {
             position: absolute;
             transform: translate(-50%, -50%);
@@ -127,7 +123,6 @@
             align-items: center;
         }
 
-        /* 建設タイマー */
         .tile-timer {
             font-size: 10px;
             font-weight: bold;
@@ -144,7 +139,6 @@
         }
         .progress-fill { height: 100%; background: #2ecc71; width: 0%; transition: width 0.2s linear; }
 
-        /* 資源回収バブル */
         .harvest-bubble {
             background: white;
             border: 2px solid #f39c12;
@@ -161,14 +155,12 @@
         }
         @keyframes bounce { from { transform: translateY(0); } to { transform: translateY(-5px); } }
 
-        /* ロックアイコン */
         .lock-icon {
             font-size: 24px;
             opacity: 0.6;
             text-shadow: 0 2px 4px rgba(0,0,0,0.3);
         }
 
-        /* フローティングテキスト */
         .float-text {
             position: absolute;
             color: #27ae60;
@@ -184,7 +176,6 @@
             100% { transform: translate(-50%, -150%); opacity: 0; } 
         }
 
-        /* 操作パネル */
         #control-panel {
             position: absolute;
             bottom: 20px; left: 50%;
@@ -227,7 +218,6 @@
         button.store-btn { background-color: var(--text-color); margin-top: 10px; }
         button:disabled { background-color: #bdc3c7; cursor: not-allowed; }
 
-        /* 保管庫リスト */
         .inventory-section {
             margin-top: 15px;
             border-top: 2px dashed #eee;
@@ -237,7 +227,6 @@
             font-size: 0.9em; font-weight: bold; color: #7f8c8d; margin-bottom: 5px;
         }
 
-        /* モーダル */
         .modal {
             display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 100;
@@ -253,7 +242,6 @@
 </head>
 <body>
 
-<!-- デバッグログ表示用（通常非表示、エラー時表示） -->
 <div id="debug-log"></div>
 
 <header>
@@ -304,7 +292,6 @@
 </div>
 
 <script>
-    // --- デバッグ機能 ---
     function log(msg, isError = false) {
         const el = document.getElementById('debug-log');
         if (!el) return;
@@ -326,15 +313,13 @@
         return false;
     };
 
-    // --- データ・設定 ---
     const CONFIG = {
-        gridSize: 25, // 5x5
-        fps: 30, // 描画更新用
+        gridSize: 25, 
+        fps: 30, 
         autoSaveInterval: 5000,
-        // 初期解放タイル: 中央横長6マス (6,7,8, 11,12,13)
         initialUnlocked: [6, 7, 8, 11, 12, 13],
         storageHours: 8,
-        collectCooldown: 30000 // 30秒
+        collectCooldown: 30000 
     };
 
     const BUILDINGS = {
@@ -359,22 +344,20 @@
         rank: 1, xp: 0,
         resources: { money: 200, food: 100, wood: 50, stone: 0, iron: 0 },
         tiles: [],
-        inventory: [], // 保管庫: { type, level }
+        inventory: [],
         lastSaveTime: Date.now()
     };
 
     let selectedTileIndex = null;
 
-    // --- 3D用変数 ---
     let scene, camera, renderer;
     let raycaster, mouse;
     let tileMeshes = []; 
-    let pedestrians = []; // 歩行者リスト
+    let pedestrians = []; 
     
     let pointerDownPos = new THREE.Vector2();
     let isDragging = false;
 
-    // --- 初期化 ---
     function init() {
         log("Game initializing...");
 
@@ -418,7 +401,6 @@
         log("Game loop started.");
     }
 
-    // --- Three.js セットアップ ---
     function init3D() {
         const container = document.getElementById('game-container');
         if(!container) throw new Error("Game container not found");
@@ -455,9 +437,6 @@
         renderer.setClearColor( 0x000000, 0 ); 
         container.appendChild(renderer.domElement);
         
-        // テクスチャローダー初期化 (不要になったがエラー防止のため残すか、削除してもよい)
-        textureLoader = new THREE.TextureLoader();
-
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
         scene.add(ambientLight);
 
@@ -471,13 +450,7 @@
         raycaster = new THREE.Raycaster();
         mouse = new THREE.Vector2();
 
-        // 地面(道)を作成 -> 削除 (createTilesで個別に作るため)
-        // createGround(); 
-        
-        // タイル作成
         createTiles();
-        
-        // 歩行者作成
         initPedestrians();
 
         window.addEventListener('resize', onWindowResize, false);
@@ -489,18 +462,12 @@
         setTimeout(onWindowResize, 100);
     }
 
-    // createGround は廃止
-    function createGround() {}
-
     function createTiles() {
-        // タイルサイズを1.6にして隙間(道)を0.4作る (Offset 2.0)
         const geometry = new THREE.BoxGeometry(1.6, 0.5, 1.6);
         const lockedMat = new THREE.MeshStandardMaterial({ color: 0x95a5a6 });
         const unlockedMat = new THREE.MeshStandardMaterial({ color: 0xecf0f1 });
         
-        // 道（地面）用のジオメトリとマテリアル
         const groundGeo = new THREE.PlaneGeometry(2.0, 2.0);
-        // マテリアルはクローンして使うのでここではベースだけ
         const groundMatBase = new THREE.MeshStandardMaterial({ color: 0x555555 });
 
         const offset = 2; 
@@ -512,21 +479,18 @@
             const x = start + col * offset;
             const z = start + row * offset;
 
-            // --- 地面 (道) ---
             const ground = new THREE.Mesh(groundGeo, groundMatBase.clone());
             ground.rotation.x = -Math.PI / 2;
-            ground.position.set(x, -0.01, z); // タイルのわずかに下
+            ground.position.set(x, -0.01, z);
             ground.receiveShadow = true;
             scene.add(ground);
 
-            // --- タイル ---
             const mesh = new THREE.Mesh(geometry, unlockedMat.clone());
             mesh.position.set(x, 0, z);
             mesh.receiveShadow = true;
             mesh.userData = { index: i, type: 'tile' };
             scene.add(mesh);
 
-            // 建物用グループ
             const bGroup = new THREE.Group();
             bGroup.position.set(0, 0.25, 0);
             mesh.add(bGroup);
@@ -539,7 +503,7 @@
 
             tileMeshes.push({ 
                 mesh: mesh, 
-                groundMesh: ground, // 参照を追加
+                groundMesh: ground,
                 buildingGroup: bGroup,
                 overlayEl: overlay,
                 particles: particles,
@@ -550,13 +514,11 @@
         sync3DState();
     }
 
-    // --- 歩行者クラス ---
     class Person {
         constructor(scene) {
             this.scene = scene;
             this.mesh = new THREE.Group();
             
-            // 体
             const bodyColor = Math.random() * 0xffffff;
             const bodyGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.25, 8);
             const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor });
@@ -564,9 +526,8 @@
             body.position.y = 0.125;
             this.mesh.add(body);
             
-            // 頭
             const headGeo = new THREE.SphereGeometry(0.1, 8, 8);
-            const headMat = new THREE.MeshStandardMaterial({ color: 0xffccaa }); // 肌色
+            const headMat = new THREE.MeshStandardMaterial({ color: 0xffccaa });
             const head = new THREE.Mesh(headGeo, headMat);
             head.position.y = 0.35;
             this.mesh.add(head);
@@ -581,32 +542,10 @@
         }
         
         reset() {
-            // ランダムに道を選ぶ
             const isVertical = Math.random() < 0.5;
-            // 隙間の座標: -5, -3, -1, 1, 3, 5
             const lanes = [-5, -3, -1, 1, 3, 5];
             
-            // 有効な（歩ける）道をフィルタリング
-            const validLanes = lanes.filter(laneVal => {
-                // その道の両側（または片側）が開拓済みかチェック
-                // グリッド座標への変換: center=-4, step=2 => index = (val - (-4)) / 2  ... ずれてる
-                // 隙間座標 val に対して、隣接するタイルの中心座標は val - 1 と val + 1
-                const pos1 = laneVal - 1;
-                const pos2 = laneVal + 1;
-                
-                // 座標からインデックスを取得するヘルパー
-                const getIndex = (p, isVert) => {
-                    // pは -4, -2, 0, 2, 4 のいずれか
-                    const idx = Math.round((p + 4) / 2);
-                    if (idx < 0 || idx > 4) return -1;
-                    return idx;
-                };
-
-                // その道に沿って歩くので、道全体が安全かチェックするのは重い
-                // 簡易的に「画面中央付近（初期エリア）」または「隣接タイルが開拓済み」ならOKとする
-                // ここではシンプルに、スポーン地点の隣接タイルを見る
-                return true; 
-            });
+            const validLanes = lanes.filter(laneVal => true);
 
             if(validLanes.length === 0) {
                 this.active = false;
@@ -618,7 +557,6 @@
             
             this.speed = 0.02 + Math.random() * 0.02;
             
-            // スポーン位置を決める
             let sx, sz, dx, dz;
             if (isVertical) {
                 sx = lane;
@@ -633,7 +571,6 @@
             this.mesh.position.set(sx, 0, sz);
             this.direction = new THREE.Vector3(dx, 0, dz);
             
-            // ★重要: 今いる場所が「緑の道」なら出現させない
             if (this.isOnGreenRoad(sx, sz, isVertical)) {
                 this.active = false;
                 this.mesh.visible = false;
@@ -643,21 +580,11 @@
             }
         }
 
-        // 緑の道（両側未開拓）判定
         isOnGreenRoad(x, z, isVertical) {
-            // 現在位置の隣接タイルを探す
-            // 座標系: -4, -2, 0, 2, 4 がタイル中心
-            // 道は -5, -3, -1, 1, 3, 5
-            
-            // 垂直移動中(x固定)なら、左右のタイル(x-1, x+1)を見る
-            // 水平移動中(z固定)なら、上下のタイル(z-1, z+1)を見る
-            
             const checkTile = (tx, tz) => {
-                // 座標 -> index
                 const col = Math.round((tx + 4) / 2);
                 const row = Math.round((tz + 4) / 2);
-                if (col < 0 || col > 4 || row < 0 || row > 4) return false; // 画面外は「開拓済み扱い」にして出現許可するか、「未開拓扱い」にするか
-                // 画面外＝未開拓扱いとして歩かせない
+                if (col < 0 || col > 4 || row < 0 || row > 4) return false;
                 const idx = row * 5 + col;
                 return gameState.tiles[idx] && gameState.tiles[idx].unlocked;
             };
@@ -665,41 +592,28 @@
             let t1_unlocked = false;
             let t2_unlocked = false;
 
-            // 現在位置に近いタイル座標を計算（移動中なので丸める）
-            // 進行方向の軸は変化するが、横の軸は固定
             if (isVertical) {
-                // xは固定(道)。左右を見る
-                t1_unlocked = checkTile(x - 1, Math.round(z)); // zは現在地に近いタイル行
+                t1_unlocked = checkTile(x - 1, Math.round(z));
                 t2_unlocked = checkTile(x + 1, Math.round(z));
-                // ただし、道全体を通して判定するのは大変なので、スポーン時と移動中にチェック
-                // ここではスポーン時の判定に使用
             } else {
                 t1_unlocked = checkTile(Math.round(x), z - 1);
                 t2_unlocked = checkTile(Math.round(x), z + 1);
             }
 
-            // 両方とも未開拓(false)なら緑の道 -> true (Is on green road)
-            // 片方でも開拓済み(true)なら舗装路 -> false
             return (!t1_unlocked && !t2_unlocked);
         }
         
         update() {
             if (!this.active) {
-                // たまに復活試行
                 if (Math.random() < 0.01) this.reset();
                 return;
             }
 
             this.mesh.position.addScaledVector(this.direction, this.speed);
             
-            // 範囲外に出たらリセット
             if (Math.abs(this.mesh.position.x) > 7 || Math.abs(this.mesh.position.z) > 7) {
                 this.reset();
             }
-            
-            // 移動中も緑の道に入ったら消える判定（簡易的に）
-            // 毎回やると重いので、位置が整数のときだけチェックなどが良いが、
-            // ここではシンプルに常時表示
             
             this.mesh.position.y = Math.abs(Math.sin(Date.now() * 0.01)) * 0.05;
         }
@@ -753,10 +667,9 @@
         }
     }
 
-    // --- プロシージャルな建物生成 ---
     function createBuildingMesh(type, level) {
         const group = new THREE.Group();
-        const scale = 1 + (level * 0.05); // レベルで少し大きく
+        const scale = 1 + (level * 0.05);
         group.scale.set(scale, scale, scale);
 
         const matRoof = new THREE.MeshStandardMaterial({ color: 0xe74c3c }); 
@@ -765,10 +678,10 @@
         const matStone = new THREE.MeshStandardMaterial({ color: 0x7f8c8d }); 
         const matDark = new THREE.MeshStandardMaterial({ color: 0x34495e }); 
         const matTent = new THREE.MeshStandardMaterial({ color: 0x3498db }); 
-        const matGrass = new THREE.MeshStandardMaterial({ color: 0x27ae60 }); // 濃い緑
+        const matGrass = new THREE.MeshStandardMaterial({ color: 0x27ae60 });
 
         switch(type) {
-            case 'wild': // 未開拓地の草
+            case 'wild':
                 for(let i=0; i<5; i++) {
                     const grass = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.3, 4), matGrass);
                     grass.position.set((Math.random()-0.5)*1.2, 0.15, (Math.random()-0.5)*1.2);
@@ -853,11 +766,10 @@
         return group;
     }
 
-    // --- メインループ ---
     function animate3D() {
         requestAnimationFrame(animate3D);
         tileMeshes.forEach(t => t.particles.update());
-        pedestrians.forEach(p => p.update()); // 歩行者更新
+        pedestrians.forEach(p => p.update()); 
         if(renderer && scene && camera) {
             renderer.render(scene, camera);
         }
@@ -892,10 +804,8 @@
         });
     }
 
-    // --- 状態同期 ---
     function sync3DState() {
         const reqRank = getRequiredRankForExpansion();
-        const now = Date.now();
         
         gameState.tiles.forEach((tile, i) => {
             const tObj = tileMeshes[i];
@@ -903,17 +813,12 @@
             const overlay = tObj.overlayEl;
             const ground = tObj.groundMesh;
 
-            // 地面の色設定 (両側未開拓判定は複雑なので、簡易的に「自分が未開拓なら地面は緑」とする)
-            // これにより、未開拓タイル同士の間の道は「緑と緑」で緑に見え、
-            // 開拓済みとの境界は「緑とグレー」になる
             if (!tile.unlocked) {
-                ground.material.color.setHex(0x27ae60); // 緑 (未舗装)
-                
-                mesh.material.color.setHex(0x2ecc71); // タイル自体も緑っぽく
-                tObj.buildingGroup.visible = true; // 草を表示するためTrue
+                ground.material.color.setHex(0x27ae60);
+                mesh.material.color.setHex(0x2ecc71);
+                tObj.buildingGroup.visible = true; 
                 tObj.particles.active = false;
                 
-                // 未開拓用の草モデルを表示
                 const stateKey = `wild`;
                 if (tObj.currentType !== stateKey) {
                     while(tObj.buildingGroup.children.length > 0){ 
@@ -924,20 +829,16 @@
                     tObj.currentType = stateKey;
                 }
 
-                // ロックアイコンはオーバーレイで出すか、3Dで出すか。今回はオーバーレイなしで草のみにするか？
-                // ユーザー要望「未開拓の土地は草が茂っているように」
-                // ロックアイコンも一応残しておくが、条件満たしたら出るようにする
                 const canUnlock = gameState.rank >= reqRank;
                 if (canUnlock) {
-                     // mesh.material.color.setHex(0xdcdde1); // 拡張可能時は少し明るく
                      overlay.innerHTML = `<div class="lock-icon">🔒</div>`;
                 } else {
                     overlay.innerHTML = "";
                 }
                 return;
             } else {
-                ground.material.color.setHex(0x555555); // グレー (舗装)
-                mesh.material.color.setHex(0xecf0f1); // 白 (敷地)
+                ground.material.color.setHex(0x555555);
+                mesh.material.color.setHex(0xecf0f1);
             }
             
             if (selectedTileIndex === i) {
@@ -950,19 +851,39 @@
             if (tile.type) {
                 tObj.buildingGroup.visible = true;
                 
-                // プロシージャルモデル更新 (常にcreateBuildingMeshを使う)
                 const stateKey = `${tile.type}_${tile.level}`;
                 if (tObj.currentType !== stateKey) {
                     while(tObj.buildingGroup.children.length > 0){ 
                         tObj.buildingGroup.remove(tObj.buildingGroup.children[0]); 
                     }
-                    // ★修正: 民家も画像を使わずプロシージャル生成
                     const newModel = createBuildingMesh(tile.type, tile.level);
                     tObj.buildingGroup.add(newModel);
                     tObj.currentType = stateKey;
                 }
                 
-                // ... (以下、建設中エフェクトや資源回収ロジックは既存のまま) ...
+                if (tile.finishTime) {
+                    tObj.particles.active = true;
+                    const remaining = Math.max(0, (tile.finishTime - Date.now()));
+                    const total = getBuildTime(tile.type, tile.level); 
+                    const percent = Math.min(100, Math.max(0, 100 - (remaining / total * 100)));
+                    
+                    overlay.innerHTML = `
+                        <div class="tile-timer">${formatTimeShort(remaining/1000)}</div>
+                        <div class="progress-bar-container"><div class="progress-fill" style="width:${percent}%"></div></div>
+                    `;
+                } else {
+                    tObj.particles.active = false;
+                    
+                    let content = "";
+                    let hasResource = false;
+                    let maxRes = ""; let maxVal = 0;
+                    const canCollect = (Date.now() - (tile.lastCollectTime || 0)) >= CONFIG.collectCooldown;
+
+                    if(tile.stored && canCollect) {
+                        for(let r in tile.stored) {
+                            if(tile.stored[r] >= 1) {
+                                hasResource = true;
+                                if(tile.stored[r] > maxVal) { maxVal = tile.stored[r]; maxRes = r; }
                             }
                         }
                     }
@@ -981,7 +902,6 @@
         });
     }
     
-    // --- ゲームロジック ---
     function gameLogicLoop() {
         const now = Date.now();
         let dirty = false;
@@ -1020,7 +940,6 @@
         updateHeader();
     }
 
-    // --- インタラクション ---
     function onPointerDown(event) {
         pointerDownPos.set(event.clientX, event.clientY);
         isDragging = false;
@@ -1078,11 +997,9 @@
         sync3DState();
     }
 
-    // --- ユーティリティ系 ---
     function formatTimeShort(s){ if(s<60)return`${Math.floor(s)}s`;if(s<3600)return`${Math.floor(s/60)}m`;return`${Math.floor(s/3600)}h`; }
     function formatTime(s){ if(s<60)return`${Math.floor(s)}秒`;if(s<3600)return`${Math.floor(s/60)}分${Math.floor(s%60)}秒`;return`${Math.floor(s/3600)}時間`; }
     
-    // ★XP4倍ロジック追加
     function getNextRankXP(r){ 
         const base = r * 500;
         if(r >= 10) return base * 4;
@@ -1091,12 +1008,10 @@
     
     function getBuildTime(t,l){ const tl=l+1; if(tl===1)return BUILDINGS[t].baseTime; return Math.floor(BUILDINGS[t].baseTime*Math.pow(tl, 2.8)); }
     
-    // ★コスト1.5倍ロジック追加
     function getCost(t,l){ const m=Math.pow(1.6,l) * 1.5; const r={}; for(let k in BUILDINGS[t].cost) r[k]=Math.floor(BUILDINGS[t].cost[k]*m); return r; }
     
     function getStorageCapacity(t,l){ const b=BUILDINGS[t], s=CONFIG.storageHours*3600, c={}; for(let r in b.prod) if(b.prod[r]>0) c[r]=b.prod[r]*l*Math.pow(1.05,l-1)*s; return c; }
     
-    // ★土地拡張コスト20倍ロジック追加
     function getExpandCost(r){ 
         let b=500*Math.pow(1.5,gameState.tiles.filter(t=>t.unlocked).length-4); 
         const reqRank = getRequiredRankForExpansion();
@@ -1145,7 +1060,6 @@
         return false;
     }
 
-    // --- パネルUI ---
     function showPanel(index) {
         const tile = gameState.tiles[index];
         const p = document.getElementById('control-panel');
