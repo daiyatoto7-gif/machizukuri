@@ -4,8 +4,24 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Kingdom Builder 3D</title>
-    <!-- Three.js CDN -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <!-- デバッグ用スタイル -->
+    <style>
+        #debug-log {
+            position: fixed; top: 0; left: 0; width: 100%; height: auto;
+            max-height: 100px; overflow-y: scroll;
+            background: rgba(0,0,0,0.7); color: lime;
+            font-family: monospace; font-size: 10px;
+            z-index: 9999; pointer-events: none;
+            padding: 5px; box-sizing: border-box;
+            display: none; /* 通常は非表示、エラー時や確認時にJSで表示可能 */
+        }
+        .error-msg { color: #ff5555; }
+    </style>
+
+    <!-- Three.js CDN (unpkgに変更) -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    
     <style>
         :root {
             --bg-color: #f0f2f5;
@@ -38,9 +54,9 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            pointer-events: none; /* 下の3D操作を阻害しないように */
+            pointer-events: none;
         }
-        header > * { pointer-events: auto; } /* 中身は操作可能に */
+        header > * { pointer-events: auto; }
 
         .status-bar {
             display: flex;
@@ -84,18 +100,19 @@
         #game-container {
             position: absolute;
             top: 0; left: 0;
-            width: 100%; height: 100%;
+            width: 100vw; height: 100vh; /* 確実に画面全体を覆うように変更 */
             z-index: 1;
+            /* WebGLがロードされるまではこのグラデーションが見える */
             background: radial-gradient(circle at center, #dcecf5 0%, #b0c4de 100%);
         }
 
-        /* UIオーバーレイレイヤー (3Dオブジェクトに追従するHTML要素用) */
+        /* UIオーバーレイレイヤー */
         #ui-overlay-layer {
             position: absolute;
             top: 0; left: 0;
             width: 100%; height: 100%;
             z-index: 10;
-            pointer-events: none; /* クリックは3Dへ通す */
+            pointer-events: none;
             overflow: hidden;
         }
 
@@ -103,7 +120,7 @@
         .overlay-item {
             position: absolute;
             transform: translate(-50%, -50%);
-            pointer-events: auto; /* ここだけクリック可能に */
+            pointer-events: auto;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -178,7 +195,7 @@
             border-radius: 12px;
             box-shadow: 0 5px 20px rgba(0,0,0,0.2);
             z-index: 30;
-            display: none; /* 初期非表示 */
+            display: none;
             flex-direction: column;
         }
         #control-panel.active { display: flex; }
@@ -223,6 +240,9 @@
     </style>
 </head>
 <body>
+
+<!-- デバッグログ表示用（通常非表示、エラー時表示） -->
+<div id="debug-log"></div>
 
 <header>
     <div class="status-bar">
@@ -272,6 +292,28 @@
 </div>
 
 <script>
+    // --- デバッグ機能 ---
+    function log(msg, isError = false) {
+        const el = document.getElementById('debug-log');
+        if (!el) return;
+        const line = document.createElement('div');
+        line.textContent = `> ${msg}`;
+        if (isError) {
+            line.className = 'error-msg';
+            el.style.display = 'block'; // エラー時は強制表示
+            console.error(msg);
+        } else {
+            console.log(msg);
+        }
+        el.appendChild(line);
+        el.scrollTop = el.scrollHeight;
+    }
+
+    window.onerror = function(message, source, lineno, colno, error) {
+        log(`Global Error: ${message} at line ${lineno}`, true);
+        return false;
+    };
+
     // --- データ・設定 ---
     const CONFIG = {
         gridSize: 25, // 5x5
@@ -317,9 +359,12 @@
 
     // --- 初期化 ---
     function init() {
+        log("Game initializing...");
+
         // Three.js 読み込みチェック
         if (typeof THREE === 'undefined') {
-            document.body.innerHTML = '<div style="padding:20px;text-align:center;"><h3>エラー: 3Dライブラリが読み込めません。</h3><p>インターネット接続を確認し、ページを再読み込みしてください。</p></div>';
+            document.body.innerHTML = '<div style="padding:20px;text-align:center;color:red;"><h3>エラー: 3Dライブラリ(Three.js)が読み込めません。</h3><p>インターネット接続やセキュリティ設定を確認してください。</p></div>';
+            log("Error: THREE is undefined", true);
             return;
         }
 
@@ -332,15 +377,17 @@
                 unlocked: CONFIG.initialUnlocked.includes(i),
                 stored: {}
             }));
+            log("New game data created.");
         } else {
              gameState.tiles.forEach(t => { if(!t.stored) t.stored = {}; });
+             log("Game data loaded.");
         }
 
         try {
             init3D();
         } catch (e) {
-            console.error("3D Init Error", e);
-            alert("3D表示の初期化に失敗しました。");
+            log(`3D Init Error: ${e.message}`, true);
+            alert("3D表示の初期化に失敗しました。画面左上のログを確認してください。");
             return;
         }
 
@@ -353,21 +400,38 @@
         
         // パネルUI更新用
         setInterval(updatePanelUI, 500);
+
+        log("Game loop started.");
     }
 
     // --- Three.js セットアップ ---
     function init3D() {
         const container = document.getElementById('game-container');
+        if(!container) throw new Error("Game container not found");
         
+        // コンテナのサイズを取得（0の場合はwindowサイズをフォールバックとして使用）
+        let width = container.clientWidth;
+        let height = container.clientHeight;
+
+        if (width === 0 || height === 0) {
+            width = window.innerWidth;
+            height = window.innerHeight;
+        }
+
+        // それでも0の場合は、レイアウトが完了していない可能性があるためリトライ
+        if (width === 0 || height === 0) {
+            log(`Waiting for container layout... (w:${width}, h:${height})`);
+            setTimeout(init3D, 100);
+            return;
+        }
+
         // シーン
         scene = new THREE.Scene();
-        scene.background = new THREE.Color(0xb0c4de); // 空色っぽい背景
-        scene.fog = new THREE.Fog(0xb0c4de, 15, 30);
+        // 背景色を設定せず、CSSのグラデーションが見えるようにする
+        // scene.background = new THREE.Color(0xb0c4de); 
+        // scene.fog = new THREE.Fog(0xb0c4de, 15, 30);
 
-        // カメラ (平行投影でクォータービュー)
-        // widthが0の可能性があるためガード
-        const width = container.clientWidth || window.innerWidth;
-        const height = container.clientHeight || window.innerHeight;
+        // カメラ
         const aspect = width / height;
         const d = 10;
         
@@ -375,11 +439,15 @@
         camera.position.set(20, 20, 20); // 斜め上から
         camera.lookAt(scene.position);
 
-        // レンダラー
-        renderer = new THREE.WebGLRenderer({ antialias: true });
+        // レンダラー (alpha: true で背景透明に)
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setSize(width, height);
         renderer.shadowMap.enabled = true;
+        // 背景を透明にする
+        renderer.setClearColor( 0x000000, 0 ); 
         container.appendChild(renderer.domElement);
+
+        log(`Renderer created: ${width}x${height}`);
 
         // ライト
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -403,7 +471,7 @@
         window.addEventListener('resize', onWindowResize, false);
         renderer.domElement.addEventListener('pointerdown', onPointerDown, false);
         
-        // 初期リサイズ実行(レイアウト確定待ち)
+        // 初期リサイズ実行
         setTimeout(onWindowResize, 100);
     }
 
@@ -545,13 +613,17 @@
         tileMeshes.forEach(t => t.particles.update());
 
         // レンダリング
-        renderer.render(scene, camera);
+        if(renderer && scene && camera) {
+            renderer.render(scene, camera);
+        }
         
         // UI追従更新
         updateOverlayPositions();
     }
 
     function updateOverlayPositions() {
+        if (!camera) return;
+
         // 3D座標 -> スクリーン座標
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -962,6 +1034,8 @@
             camera.bottom = -d;
             camera.updateProjectionMatrix();
             renderer.setSize(width, height);
+            
+            log(`Resize: ${width}x${height}`);
         }
     }
 
@@ -1010,7 +1084,10 @@
     window.closeModal = function(id) { document.getElementById(id).style.display='none'; }
 
     // Start
-    window.onload = init;
+    window.onload = function() {
+        log("Window onload");
+        setTimeout(init, 100);
+    };
 
 </script>
 </body>
