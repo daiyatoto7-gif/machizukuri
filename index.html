@@ -2,153 +2,477 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>Simple City Builder</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>City Builder Grid</title>
     <style>
-        body { font-family: sans-serif; padding: 20px; }
-        .resource-panel { margin-bottom: 20px; padding: 10px; background: #f0f0f0; }
-        .facility { border: 1px solid #ccc; padding: 15px; margin-bottom: 10px; border-radius: 5px; }
-        .facility h3 { margin: 0 0 10px 0; }
-        button { cursor: pointer; padding: 5px 10px; }
-        button:disabled { opacity: 0.6; cursor: not-allowed; }
-        .timer { color: red; font-weight: bold; }
+        :root {
+            --bg-color: #f4f7f6;
+            --panel-bg: #ffffff;
+            --accent-color: #3498db;
+            --text-color: #2c3e50;
+            --border-color: #dfe6e9;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+        }
+
+        /* ヘッダーと資源表示 */
+        header {
+            width: 100%;
+            background: var(--panel-bg);
+            padding: 10px 0;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            position: fixed;
+            top: 0;
+            z-index: 10;
+            display: flex;
+            justify-content: center;
+        }
+
+        .resource-bar {
+            display: flex;
+            gap: 20px;
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+
+        .res-item span { color: var(--accent-color); }
+
+        /* メインエリア */
+        main {
+            margin-top: 80px;
+            display: flex;
+            gap: 20px;
+            padding: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        /* マップ (グリッド) */
+        #map-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 80px); /* 5x5 */
+            grid-template-rows: repeat(5, 80px);
+            gap: 5px;
+            background: #bdc3c7;
+            padding: 5px;
+            border-radius: 8px;
+        }
+
+        .tile {
+            width: 80px;
+            height: 80px;
+            background-color: #ecf0f1;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8em;
+            text-align: center;
+            transition: background 0.2s;
+            user-select: none;
+        }
+
+        .tile:hover { background-color: #d1ecf1; }
+        .tile.active { border: 2px solid var(--accent-color); background-color: #dbeeff; }
+        
+        .tile-icon { font-size: 24px; margin-bottom: 4px; }
+        .tile-level { font-size: 10px; color: #7f8c8d; }
+        .progress-bar { width: 80%; height: 4px; background: #ddd; margin-top: 2px; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: #2ecc71; width: 0%; transition: width 0.2s linear; }
+
+        /* 操作パネル */
+        #control-panel {
+            width: 300px;
+            background: var(--panel-bg);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+
+        h2 { margin-top: 0; font-size: 1.2em; border-bottom: 2px solid var(--bg-color); padding-bottom: 10px; }
+        
+        .btn-group { display: flex; flex-direction: column; gap: 10px; }
+
+        button {
+            padding: 10px;
+            border: none;
+            border-radius: 5px;
+            background-color: var(--accent-color);
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        button:disabled { background-color: #95a5a6; cursor: not-allowed; }
+        button:hover:not(:disabled) { opacity: 0.9; }
+        
+        .cost-info { font-size: 0.9em; color: #555; margin-bottom: 5px; }
+
+        /* モーダル (オフライン収益通知) */
+        #modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5);
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+        }
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            text-align: center;
+            max-width: 400px;
+        }
+
     </style>
 </head>
 <body>
 
-    <h1>町づくりゲーム</h1>
+<header>
+    <div class="resource-bar">
+        <div class="res-item">💰資金: <span id="display-money">0</span></div>
+        <div class="res-item">🌲木材: <span id="display-wood">0</span></div>
+        <div class="res-item">🪨石材: <span id="display-stone">0</span></div>
+    </div>
+</header>
 
-    <div class="resource-panel">
-        所持金: <span id="res-money">0</span> G | 
-        木材: <span id="res-wood">0</span> | 
-        現在の生産力: <span id="total-prod">0</span> /秒
+<main>
+    <div>
+        <h3 style="text-align:center;">街のマップ</h3>
+        <div id="map-grid">
+            </div>
     </div>
 
-    <div id="facilities-container">
+    <div id="control-panel">
+        <h2 id="panel-title">タイルを選択してください</h2>
+        <div id="panel-content">
+            <p>マップ上のタイルをクリックすると、建設やレベルアップができます。</p>
         </div>
+    </div>
+</main>
+
+<div id="modal">
+    <div class="modal-content">
+        <h3>おかえりなさい！</h3>
+        <p>不在の間に以下の資源を獲得しました。</p>
+        <p id="offline-report"></p>
+        <button onclick="document.getElementById('modal').style.display='none'">再開する</button>
+    </div>
+</div>
 
 <script>
-    // --- 1. ゲームの設定とデータ ---
-    const GAME_CONFIG = {
-        fps: 30, // 1秒間の更新頻度
+    // --- データ定義 ---
+    const CONFIG = {
+        gridSize: 25, // 5x5
+        fps: 10,
+        autoSaveInterval: 5000 // 5秒ごとに保存
     };
 
-    // プレイヤーの状態
-    let state = {
-        resources: { money: 100, wood: 0 },
-        facilities: [
-            {
-                id: "house",
-                name: "民家",
-                level: 0,
-                baseCost: 10,   // 初期費用
-                baseTime: 3000, // 初期建設時間(ミリ秒) = 3秒
-                baseProd: 1,    // レベル1あたりの生産量
-                finishTime: null // 完成予定時刻
-            },
-            {
-                id: "forest",
-                name: "伐採所",
-                level: 0,
-                baseCost: 50,
-                baseTime: 5000, // 5秒
-                baseProd: 5,
-                finishTime: null
-            }
-        ]
+    // 施設データ定義
+    const BUILDINGS = {
+        house: { 
+            name: "民家", icon: "🏠", 
+            baseProd: { money: 1, wood: 0, stone: 0 }, 
+            baseCost: { money: 10, wood: 0, stone: 0 }, 
+            baseTime: 2000 
+        },
+        lumber: { 
+            name: "伐採所", icon: "🌲", 
+            baseProd: { money: 0, wood: 1, stone: 0 }, 
+            baseCost: { money: 50, wood: 0, stone: 0 }, 
+            baseTime: 4000 
+        },
+        quarry: { 
+            name: "採石場", icon: "⛏️", 
+            baseProd: { money: 0, wood: 0, stone: 1 }, 
+            baseCost: { money: 100, wood: 50, stone: 0 }, // 木材が必要
+            baseTime: 6000 
+        }
     };
 
-    // --- 2. 計算ロジック ---
-    
-    // コスト計算 (レベルに応じて増加)
-    function getCost(facility) {
-        return Math.floor(facility.baseCost * Math.pow(1.5, facility.level));
+    // ゲーム状態 (初期値)
+    let gameState = {
+        resources: { money: 100, wood: 0, stone: 0 },
+        tiles: Array(CONFIG.gridSize).fill(null).map(() => ({
+            type: null,
+            level: 0,
+            finishTime: null // 建設完了時刻
+        })),
+        lastSaveTime: Date.now()
+    };
+
+    let selectedTileIndex = null;
+
+    // --- ゲームシステム ---
+
+    function initGame() {
+        loadGame();
+        renderMap();
+        setInterval(gameLoop, 1000 / CONFIG.fps);
+        setInterval(saveGame, CONFIG.autoSaveInterval);
+        
+        // 初回描画
+        updateUI();
     }
 
-    // 建設時間計算 (レベルに応じて増加)
-    function getBuildTime(facility) {
-        return Math.floor(facility.baseTime * Math.pow(1.2, facility.level));
-    }
-
-    // --- 3. ゲームループ (メイン機能) ---
+    // ゲームループ
     function gameLoop() {
         const now = Date.now();
-
-        // A. 施設の建設完了チェック
-        state.facilities.forEach(fac => {
-            if (fac.finishTime && now >= fac.finishTime) {
-                // 建設完了！
-                fac.level++;
-                fac.finishTime = null;
-                console.log(`${fac.name} のレベルアップ完了！`);
+        
+        // 1. 建設完了チェック
+        gameState.tiles.forEach(tile => {
+            if (tile.finishTime && now >= tile.finishTime) {
+                tile.level++;
+                tile.finishTime = null;
+                if(selectedTileIndex !== null) showPanel(selectedTileIndex); // パネル更新
+                renderMap(); // マップ更新
             }
         });
 
-        // B. 資源の自動回収 (レベル > 0 の施設から)
-        state.facilities.forEach(fac => {
-            if (fac.level > 0 && !fac.finishTime) { // 建設中は生産しない場合
-                // 1秒あたりの生産量をFPSで割って加算
-                const productionPerTick = (fac.baseProd * fac.level) / GAME_CONFIG.fps;
-                state.resources.money += productionPerTick; 
-                // ※ここでは簡単のため全て「お金」を生む設定にしています
+        // 2. 資源生産
+        gameState.tiles.forEach(tile => {
+            if (tile.type && tile.level > 0 && !tile.finishTime) {
+                const b = BUILDINGS[tile.type];
+                // FPS分割して加算
+                gameState.resources.money += (b.baseProd.money * tile.level) / CONFIG.fps;
+                gameState.resources.wood += (b.baseProd.wood * tile.level) / CONFIG.fps;
+                gameState.resources.stone += (b.baseProd.stone * tile.level) / CONFIG.fps;
             }
         });
 
         updateUI();
     }
 
-    // --- 4. 操作 ---
-    function upgradeFacility(index) {
-        const fac = state.facilities[index];
-        const cost = getCost(fac);
-
-        // お金が足りているか？ 建設中ではないか？
-        if (state.resources.money >= cost && !fac.finishTime) {
-            state.resources.money -= cost;
-            
-            const timeNeeded = getBuildTime(fac);
-            fac.finishTime = Date.now() + timeNeeded; // 完了時刻をセット
-        } else {
-            alert("お金が足りないか、建設中です！");
-        }
-    }
-
-    // --- 5. 画面描画 (UI) ---
+    // UI更新 (資源バーとプログレスバー)
     function updateUI() {
-        // 資源の表示更新
-        document.getElementById('res-money').innerText = Math.floor(state.resources.money);
-        document.getElementById('res-wood').innerText = Math.floor(state.resources.wood);
+        document.getElementById('display-money').innerText = Math.floor(gameState.resources.money);
+        document.getElementById('display-wood').innerText = Math.floor(gameState.resources.wood);
+        document.getElementById('display-stone').innerText = Math.floor(gameState.resources.stone);
 
-        const container = document.getElementById('facilities-container');
-        container.innerHTML = ''; // 一旦クリア
-
-        state.facilities.forEach((fac, index) => {
-            const cost = getCost(fac);
-            const buildTimeSec = (getBuildTime(fac) / 1000).toFixed(1);
-            
-            let statusHtml = '';
-            let isBuilding = false;
-
-            if (fac.finishTime) {
-                isBuilding = true;
-                const remaining = Math.max(0, (fac.finishTime - Date.now()) / 1000).toFixed(1);
-                statusHtml = `<div class="timer">建設中... 残り ${remaining}秒</div>`;
-            } else {
-                statusHtml = `<button onclick="upgradeFacility(${index})">レベルアップ (費用: ${cost}G, 時間: ${buildTimeSec}秒)</button>`;
+        // 建設中タイルのバー更新
+        gameState.tiles.forEach((tile, idx) => {
+            if (tile.finishTime) {
+                const totalTime = getBuildTime(tile.type, tile.level);
+                const remaining = tile.finishTime - Date.now();
+                const percent = Math.max(0, 100 - (remaining / totalTime * 100));
+                
+                const bar = document.getElementById(`progress-${idx}`);
+                if (bar) bar.style.width = `${percent}%`;
             }
-
-            const html = `
-                <div class="facility">
-                    <h3>${fac.name} (Lv.${fac.level})</h3>
-                    <p>生産力: ${fac.baseProd * fac.level} /秒</p>
-                    ${statusHtml}
-                </div>
-            `;
-            container.innerHTML += html;
         });
     }
 
-    // ゲーム開始
-    setInterval(gameLoop, 1000 / GAME_CONFIG.fps);
+    // マップ描画
+    function renderMap() {
+        const grid = document.getElementById('map-grid');
+        grid.innerHTML = "";
+
+        gameState.tiles.forEach((tile, index) => {
+            const div = document.createElement('div');
+            div.className = `tile ${selectedTileIndex === index ? 'active' : ''}`;
+            div.onclick = () => selectTile(index);
+
+            if (tile.type) {
+                const info = BUILDINGS[tile.type];
+                let content = `<div class="tile-icon">${info.icon}</div>`;
+                content += `<div class="tile-level">Lv.${tile.level}</div>`;
+                
+                if (tile.finishTime) {
+                    content += `<div class="progress-bar"><div class="progress-fill" id="progress-${index}"></div></div>`;
+                }
+                div.innerHTML = content;
+            } else {
+                div.innerHTML = `<span style="color:#bdc3c7;">空き</span>`;
+            }
+            grid.appendChild(div);
+        });
+    }
+
+    // タイル選択時の処理
+    function selectTile(index) {
+        selectedTileIndex = index;
+        renderMap(); // 選択枠を表示するため再描画
+        showPanel(index);
+    }
+
+    // 操作パネル表示
+    function showPanel(index) {
+        const tile = gameState.tiles[index];
+        const title = document.getElementById('panel-title');
+        const content = document.getElementById('panel-content');
+
+        if (tile.type === null) {
+            // 新規建設メニュー
+            title.innerText = "新規建設";
+            let html = `<div class="btn-group">`;
+            
+            for (let key in BUILDINGS) {
+                const b = BUILDINGS[key];
+                const cost = getCost(key, 0);
+                const time = (getBuildTime(key, 0)/1000).toFixed(1);
+                const canAfford = checkAfford(cost);
+                
+                html += `
+                    <div style="border:1px solid #eee; padding:5px; border-radius:5px;">
+                        <strong>${b.icon} ${b.name}</strong><br>
+                        <span class="cost-info">費用: 💰${cost.money} 🌲${cost.wood} 🪨${cost.stone}</span><br>
+                        <span class="cost-info">時間: ${time}秒</span><br>
+                        <button onclick="build('${key}')" ${canAfford ? '' : 'disabled'}>建設する</button>
+                    </div>
+                `;
+            }
+            html += `</div>`;
+            content.innerHTML = html;
+        } else {
+            // レベルアップメニュー
+            const b = BUILDINGS[tile.type];
+            title.innerText = `${b.name} (Lv.${tile.level})`;
+            
+            if (tile.finishTime) {
+                content.innerHTML = `<p>建設/拡張工事中です...</p>`;
+            } else {
+                const nextLv = tile.level; // 現在Lv0(建設前)なら次はLv1コスト
+                const cost = getCost(tile.type, nextLv);
+                const time = (getBuildTime(tile.type, nextLv)/1000).toFixed(1);
+                const canAfford = checkAfford(cost);
+
+                content.innerHTML = `
+                    <p>生産力アップ: +${b.baseProd.money}💰 +${b.baseProd.wood}🌲 +${b.baseProd.stone}🪨</p>
+                    <div class="cost-info">
+                        必要コスト: 💰${cost.money} 🌲${cost.wood} 🪨${cost.stone}<br>
+                        所要時間: ${time}秒
+                    </div>
+                    <button onclick="upgrade()" ${canAfford ? '' : 'disabled'}>レベルアップ</button>
+                `;
+            }
+        }
+    }
+
+    // --- アクション ---
+
+    // 建設開始
+    function build(type) {
+        if (selectedTileIndex === null) return;
+        const tile = gameState.tiles[selectedTileIndex];
+        const cost = getCost(type, 0);
+
+        if (checkAfford(cost)) {
+            payCost(cost);
+            tile.type = type;
+            tile.level = 0; // 建設中はLv0扱い
+            tile.finishTime = Date.now() + getBuildTime(type, 0);
+            
+            saveGame();
+            renderMap();
+            showPanel(selectedTileIndex);
+        }
+    }
+
+    // レベルアップ開始
+    function upgrade() {
+        if (selectedTileIndex === null) return;
+        const tile = gameState.tiles[selectedTileIndex];
+        const cost = getCost(tile.type, tile.level);
+
+        if (checkAfford(cost)) {
+            payCost(cost);
+            tile.finishTime = Date.now() + getBuildTime(tile.type, tile.level);
+            
+            saveGame();
+            renderMap();
+            showPanel(selectedTileIndex);
+        }
+    }
+
+    // --- 計算ロジック ---
+
+    function getCost(type, currentLevel) {
+        const b = BUILDINGS[type];
+        const multiplier = Math.pow(1.5, currentLevel);
+        return {
+            money: Math.floor(b.baseCost.money * multiplier),
+            wood: Math.floor(b.baseCost.wood * multiplier),
+            stone: Math.floor(b.baseCost.stone * multiplier)
+        };
+    }
+
+    function getBuildTime(type, currentLevel) {
+        const b = BUILDINGS[type];
+        return Math.floor(b.baseTime * Math.pow(1.2, currentLevel));
+    }
+
+    function checkAfford(cost) {
+        return gameState.resources.money >= cost.money &&
+               gameState.resources.wood >= cost.wood &&
+               gameState.resources.stone >= cost.stone;
+    }
+
+    function payCost(cost) {
+        gameState.resources.money -= cost.money;
+        gameState.resources.wood -= cost.wood;
+        gameState.resources.stone -= cost.stone;
+        updateUI();
+    }
+
+    // --- セーブ & ロード & オフライン計算 ---
+
+    function saveGame() {
+        gameState.lastSaveTime = Date.now();
+        localStorage.setItem('cityBuilderSave', JSON.stringify(gameState));
+    }
+
+    function loadGame() {
+        const saved = localStorage.getItem('cityBuilderSave');
+        if (saved) {
+            const loadedState = JSON.parse(saved);
+            
+            // オフライン経過時間の計算
+            const now = Date.now();
+            const elapsedSeconds = (now - loadedState.lastSaveTime) / 1000;
+            
+            let earned = { money: 0, wood: 0, stone: 0 };
+
+            loadedState.tiles.forEach(tile => {
+                if (tile.type && tile.level > 0 && !tile.finishTime) {
+                    const b = BUILDINGS[tile.type];
+                    earned.money += b.baseProd.money * tile.level * elapsedSeconds;
+                    earned.wood += b.baseProd.wood * tile.level * elapsedSeconds;
+                    earned.stone += b.baseProd.stone * tile.level * elapsedSeconds;
+                }
+            });
+
+            // 資源加算
+            loadedState.resources.money += earned.money;
+            loadedState.resources.wood += earned.wood;
+            loadedState.resources.stone += earned.stone;
+            loadedState.lastSaveTime = now;
+
+            // 状態反映
+            gameState = loadedState;
+
+            // オフライン収益レポート表示
+            if (elapsedSeconds > 10) { // 10秒以上経過していたら表示
+                document.getElementById('offline-report').innerHTML = 
+                    `💰 +${Math.floor(earned.money)}<br>🌲 +${Math.floor(earned.wood)}<br>🪨 +${Math.floor(earned.stone)}`;
+                document.getElementById('modal').style.display = 'flex';
+            }
+        }
+    }
+
+    // 開始
+    window.onload = initGame;
 
 </script>
 </body>
