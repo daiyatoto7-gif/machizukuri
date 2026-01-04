@@ -239,18 +239,20 @@
         }
         @keyframes popIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
-        /* メニューボタン */
+        /* メニューボタン: absolute配置に変更し、初期は非表示（JSで位置設定） */
         #menu-btn {
-            position: fixed;
-            top: 10px; right: 10px;
+            position: absolute;
             background: white;
             width: 40px; height: 40px;
             border-radius: 50%;
             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-            display: flex; justify-content: center; align-items: center;
+            display: none; 
+            justify-content: center; align-items: center;
             font-size: 24px;
             cursor: pointer;
             z-index: 50;
+            pointer-events: auto;
+            transform: translate(-50%, -50%); /* 中心基準で配置 */
         }
         #menu-btn:hover { background: #f0f0f0; }
 
@@ -269,6 +271,7 @@
 
 <div id="debug-log"></div>
 
+<!-- メニューボタンは body 直下だが、JSで位置を動かす -->
 <div id="menu-btn" onclick="openMenu()">≡</div>
 
 <header>
@@ -396,6 +399,7 @@
     let raycaster, mouse;
     let tileMeshes = []; 
     let pedestrians = []; 
+    let menuAnchor; // メニューボタンの3D位置
     
     let pointerDownPos = new THREE.Vector2();
     let isDragging = false;
@@ -494,6 +498,10 @@
 
         raycaster = new THREE.Raycaster();
         mouse = new THREE.Vector2();
+        
+        // メニューボタン用のアンカー位置 (マップの右上付近)
+        // 座標系: X+は右下, Z+は左下。マップ右上は X+, Z- の方向。
+        menuAnchor = new THREE.Vector3(6.5, 0, -6.5);
 
         createTiles();
         initPedestrians();
@@ -503,12 +511,18 @@
         renderer.domElement.addEventListener('pointerdown', onPointerDown, false);
         renderer.domElement.addEventListener('pointerup', onPointerUp, false);
         renderer.domElement.addEventListener('pointermove', onPointerMove, false);
+
+        // 追加: ズーム操作用のイベントリスナー
+        renderer.domElement.addEventListener('wheel', onMouseWheel, { passive: false });
+        renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
+        renderer.domElement.addEventListener('touchmove', onTouchMove, { passive: false });
         
         setTimeout(onWindowResize, 100);
     }
 
     function createTiles() {
-        const geometry = new THREE.BoxGeometry(1.6, 0.5, 1.6);
+        // 変更: タイルサイズを1.6から1.4に縮小し、道の幅を広げる
+        const geometry = new THREE.BoxGeometry(1.4, 0.5, 1.4);
         const unlockedMat = new THREE.MeshStandardMaterial({ color: 0xecf0f1 });
         
         const groundGeo = new THREE.PlaneGeometry(2.0, 2.0);
@@ -582,18 +596,27 @@
             this.active = false;
             this.mesh.visible = false;
             
+            // 行動制御用
+            this.isStopped = false;
+            this.stopTimer = 0;
+            this.canTurn = true; // 交差点で曲がれるかフラグ
+            
             this.reset();
         }
         
         reset() {
             const isVertical = Math.random() < 0.5;
-            // 変更: 特定のレーンだけでなく、全体を歩けるようにランダム範囲を拡大
-            const lane = (Math.random() * 12) - 6; 
             
-            this.speed = 0.02 + Math.random() * 0.02;
+            const lanes = [-5, -3, -1, 1, 3, 5];
+            const baseLane = lanes[Math.floor(Math.random() * lanes.length)];
+            const lane = baseLane + (Math.random() * 0.4 - 0.2); 
+            
+            // 速度を以前の0.25倍程度に落とす
+            this.baseSpeed = (0.02 + Math.random() * 0.02) * 0.25;
+            this.speed = this.baseSpeed;
             
             let sx, sz, dx, dz;
-            const spawnDist = 9; // 出現位置を画面外に設定
+            const spawnDist = 11; // 出現位置を少し遠くに
             if (isVertical) {
                 sx = lane;
                 sz = (Math.random() < 0.5 ? -spawnDist : spawnDist);
@@ -608,14 +631,20 @@
             this.direction = new THREE.Vector3(dx, 0, dz);
             
             this.active = true;
-            this.updateVisibility();
+            this.isStopped = false;
+            this.canTurn = true;
+            this.updateVisibility(); // 初期状態の可視性を設定
         }
 
         isOnGreenRoad(x, z, isVertical) {
             const checkTile = (tx, tz) => {
                 const col = Math.round((tx + 4) / 2);
                 const row = Math.round((tz + 4) / 2);
-                if (col < 0 || col > 4 || row < 0 || row > 4) return true;
+                
+                // 修正: 画面外は「未開拓(false)」扱いに変更。
+                // これにより、画面外エリアは「両側が未開拓」判定となり、透明になります。
+                if (col < 0 || col > 4 || row < 0 || row > 4) return false;
+                
                 const idx = row * 5 + col;
                 return gameState.tiles[idx] && gameState.tiles[idx].unlocked;
             };
@@ -631,6 +660,7 @@
                 t2_unlocked = checkTile(Math.round(x), z + 1);
             }
 
+            // 両側が未開拓(false)なら、そこは「自然の中」なので透明にする
             return (!t1_unlocked && !t2_unlocked);
         }
         
@@ -640,22 +670,79 @@
                 return;
             }
 
+            // 立ち止まり処理
+            if (this.isStopped) {
+                this.stopTimer--;
+                if (this.stopTimer <= 0) {
+                    this.isStopped = false;
+                }
+                this.updateVisibility();
+                return;
+            }
+
+            // ランダム行動 (立ち止まり)
+            if (Math.random() < 0.005) {
+                this.isStopped = true;
+                this.stopTimer = 30 + Math.random() * 60;
+                return;
+            }
+
+            // --- 交差点での右左折ロジック ---
+            const rx = Math.round(this.mesh.position.x);
+            const rz = Math.round(this.mesh.position.z);
+            
+            // 現在地が奇数座標（交差点）に近いか判定
+            // 奇数判定: 絶対値を2で割った余りが1に近い
+            const isOddX = Math.abs(rx) % 2 === 1;
+            const isOddZ = Math.abs(rz) % 2 === 1;
+
+            if (isOddX && isOddZ) {
+                // 交差点の中心に近い場合
+                const dist = Math.sqrt((this.mesh.position.x - rx)**2 + (this.mesh.position.z - rz)**2);
+                if (dist < 0.1 && this.canTurn) {
+                    // 50%の確率で方向転換
+                    if(Math.random() < 0.5) {
+                        const dirs = [
+                            new THREE.Vector3(1, 0, 0),
+                            new THREE.Vector3(-1, 0, 0),
+                            new THREE.Vector3(0, 0, 1),
+                            new THREE.Vector3(0, 0, -1)
+                        ];
+                        // ランダムに方向を選択
+                        this.direction = dirs[Math.floor(Math.random() * dirs.length)];
+                        
+                        // 位置を交差点の中心に補正して、綺麗に曲がれるようにする
+                        this.mesh.position.x = rx;
+                        this.mesh.position.z = rz;
+                    }
+                    this.canTurn = false; // 同じ交差点で連続して曲がらないようにする
+                }
+            } else {
+                // 交差点を抜けたらフラグをリセット
+                // (0.5以上離れたらリセット)
+                const dist = Math.sqrt((this.mesh.position.x - rx)**2 + (this.mesh.position.z - rz)**2);
+                if (dist > 0.4) {
+                    this.canTurn = true;
+                }
+            }
+            // ---------------------------
+
             this.mesh.position.addScaledVector(this.direction, this.speed);
             
             // 画面外に出たらリセット
-            if (Math.abs(this.mesh.position.x) > 10 || Math.abs(this.mesh.position.z) > 10) {
+            if (Math.abs(this.mesh.position.x) > 12 || Math.abs(this.mesh.position.z) > 12) {
                 this.reset();
                 return;
             }
             
             this.updateVisibility();
             
-            this.mesh.position.y = Math.abs(Math.sin(Date.now() * 0.01)) * 0.05;
+            // 歩行アニメーション
+            this.mesh.position.y = Math.abs(Math.sin(Date.now() * 0.005)) * 0.05;
         }
 
         updateVisibility() {
             const isVertical = (this.direction.z !== 0);
-            // 緑の道（未開拓エリア）にいるときは透明にする
             if (this.isOnGreenRoad(this.mesh.position.x, this.mesh.position.z, isVertical)) {
                 this.mesh.visible = false;
             } else {
@@ -858,6 +945,21 @@
                 t.overlayEl.style.top = `${y}px`;
             }
         });
+        
+        // メニューボタンの位置更新 (3D追従)
+        if (menuAnchor) {
+            const pos = menuAnchor.clone();
+            pos.project(camera);
+            const x = (pos.x * widthHalf) + widthHalf;
+            const y = -(pos.y * heightHalf) + heightHalf;
+            
+            const btn = document.getElementById('menu-btn');
+            if(btn) {
+                btn.style.display = 'flex';
+                btn.style.left = `${x}px`;
+                btn.style.top = `${y}px`;
+            }
+        }
     }
 
     function sync3DState() {
@@ -1035,6 +1137,50 @@
             }
         } else {
             closePanel();
+        }
+    }
+
+    // 追加: ズーム関連の関数群
+    function setCameraZoom(val) {
+        if (!camera) return;
+        // ズーム範囲の制限 (0.5倍 〜 2.5倍)
+        const minZoom = 0.5;
+        const maxZoom = 2.5;
+        camera.zoom = Math.max(minZoom, Math.min(maxZoom, val));
+        camera.updateProjectionMatrix();
+    }
+
+    function onMouseWheel(event) {
+        event.preventDefault();
+        const zoomSpeed = 0.001;
+        // deltaYは下スクロールで正(縮小)、上スクロールで負(拡大)
+        const newZoom = camera.zoom - event.deltaY * zoomSpeed;
+        setCameraZoom(newZoom);
+    }
+
+    let touchStartDist = 0;
+    let touchStartZoom = 1;
+
+    function onTouchStart(event) {
+        if (event.touches.length === 2) {
+            const dx = event.touches[0].pageX - event.touches[1].pageX;
+            const dy = event.touches[0].pageY - event.touches[1].pageY;
+            touchStartDist = Math.sqrt(dx * dx + dy * dy);
+            touchStartZoom = camera.zoom;
+        }
+    }
+
+    function onTouchMove(event) {
+        if (event.touches.length === 2) {
+            event.preventDefault();
+            const dx = event.touches[0].pageX - event.touches[1].pageX;
+            const dy = event.touches[0].pageY - event.touches[1].pageY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            
+            if (touchStartDist > 0) {
+                const scale = dist / touchStartDist;
+                setCameraZoom(touchStartZoom * scale);
+            }
         }
     }
     
