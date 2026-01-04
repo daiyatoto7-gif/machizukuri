@@ -580,25 +580,26 @@
         const key = emoji + bgColor;
         if (textureCache[key]) return textureCache[key];
 
+        const size = 512; // 解像度を上げる (128 -> 512)
         const canvas = document.createElement('canvas');
-        canvas.width = 128;
-        canvas.height = 128;
+        canvas.width = size;
+        canvas.height = size;
         const ctx = canvas.getContext('2d');
 
         // 背景
         ctx.fillStyle = bgColor;
-        ctx.fillRect(0, 0, 128, 128);
+        ctx.fillRect(0, 0, size, size);
         
         // 枠線
         ctx.strokeStyle = '#ccc';
-        ctx.lineWidth = 4;
-        ctx.strokeRect(0, 0, 128, 128);
+        ctx.lineWidth = 16;
+        ctx.strokeRect(0, 0, size, size);
 
         // 絵文字
-        ctx.font = '80px serif';
+        ctx.font = '320px serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(emoji, 64, 64);
+        ctx.fillText(emoji, size/2, size/2);
 
         const tex = new THREE.CanvasTexture(canvas);
         textureCache[key] = tex;
