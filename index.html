@@ -239,7 +239,7 @@
         }
         @keyframes popIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
-        /* メニューボタン: absolute配置に変更し、初期は非表示（JSで位置設定） */
+        /* メニューボタン: absolute配置 */
         #menu-btn {
             position: absolute;
             background: white;
@@ -252,7 +252,7 @@
             cursor: pointer;
             z-index: 50;
             pointer-events: auto;
-            transform: translate(-50%, -50%); /* 中心基準で配置 */
+            transform: translate(-50%, -50%);
         }
         #menu-btn:hover { background: #f0f0f0; }
 
@@ -265,13 +265,22 @@
             margin: 10px 0;
             text-align: left;
         }
+        
+        #toast-notification {
+            position: fixed; top: 80px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.8); color: white; padding: 10px 20px;
+            border-radius: 20px; font-weight: bold; z-index: 100;
+            display: none; pointer-events: none;
+            animation: fadeInOut 3s forwards;
+        }
+        @keyframes fadeInOut { 0% { opacity:0; top:90px; } 10% { opacity:1; top:80px; } 90% { opacity:1; top:80px; } 100% { opacity:0; top:70px; } }
     </style>
 </head>
 <body>
 
 <div id="debug-log"></div>
+<div id="toast-notification"></div>
 
-<!-- メニューボタンは body 直下だが、JSで位置を動かす -->
 <div id="menu-btn" onclick="openMenu()">≡</div>
 
 <header>
@@ -322,13 +331,10 @@
     </div>
 </div>
 
-<!-- メニューモーダル -->
 <div id="modal-menu" class="modal">
     <div class="modal-content">
         <h3 style="margin-top:0;">メニュー</h3>
-        <div id="menu-content" style="max-height:60vh; overflow-y:auto;">
-            <!-- Javascriptでコンテンツ挿入 -->
-        </div>
+        <div id="menu-content" style="max-height:60vh; overflow-y:auto;"></div>
         <button onclick="closeModal('modal-menu')" class="action-btn" style="background-color:#95a5a6; margin-top:20px;">閉じる</button>
     </div>
 </div>
@@ -349,6 +355,14 @@
         el.appendChild(line);
         el.scrollTop = el.scrollHeight;
     }
+    
+    function showToast(msg) {
+        const t = document.getElementById('toast-notification');
+        t.innerText = msg;
+        t.style.display = 'none';
+        void t.offsetWidth; // trigger reflow
+        t.style.display = 'block';
+    }
 
     window.onerror = function(message, source, lineno, colno, error) {
         log(`Global Error: ${message} at line ${lineno}`, true);
@@ -356,7 +370,7 @@
     };
 
     const CONFIG = {
-        gridSize: 25, 
+        initialGridSize: 5, 
         fps: 30, 
         autoSaveInterval: 5000,
         initialUnlocked: [6, 7, 8, 11, 12, 13],
@@ -375,7 +389,6 @@
         blacksmith: { name: "鍛冶屋", icon: "⚔️", prod: { money: 5, iron: 2 }, cost: { money: 800, food: 300, wood: 300, stone: 200, iron: 100 }, baseTime: 7000 }
     };
     
-    // コスト補正 (1.5倍)
     for(let k in BUILDINGS) {
         const b = BUILDINGS[k];
         for(let r of ['money','food','wood','stone','iron']) {
@@ -390,6 +403,7 @@
         tiles: [],
         inventory: [],
         maxBuilders: CONFIG.initialMaxBuilders,
+        gridSize: CONFIG.initialGridSize,
         lastSaveTime: Date.now()
     };
 
@@ -399,7 +413,7 @@
     let raycaster, mouse;
     let tileMeshes = []; 
     let pedestrians = []; 
-    let menuAnchor; // メニューボタンの3D位置
+    let menuAnchor;
     
     let pointerDownPos = new THREE.Vector2();
     let isDragging = false;
@@ -414,16 +428,34 @@
 
         loadGame();
         
-        // 旧データ互換性チェック
         if (!gameState.maxBuilders) gameState.maxBuilders = CONFIG.initialMaxBuilders;
+        if (!gameState.gridSize) gameState.gridSize = CONFIG.initialGridSize;
 
-        if (gameState.tiles.length !== CONFIG.gridSize) {
-            gameState.tiles = Array(CONFIG.gridSize).fill(null).map((_, i) => ({
-                type: null, level: 0, finishTime: null, 
-                unlocked: CONFIG.initialUnlocked.includes(i),
-                stored: {},
-                lastCollectTime: 0
-            }));
+        // タイルデータの整合性チェックと初期化
+        const totalTiles = gameState.gridSize * gameState.gridSize;
+        if (gameState.tiles.length !== totalTiles) {
+            // サイズ不一致（または初期）の場合は再構築
+            // 既存データを保持しつつ拡張するロジックが必要だが、ここは初期化 or 不整合時のリセット
+            if (gameState.tiles.length === 0) {
+                // 完全新規
+                gameState.tiles = Array(totalTiles).fill(null).map((_, i) => ({
+                    type: null, level: 0, finishTime: null, 
+                    unlocked: CONFIG.initialUnlocked.includes(i), // 初期5x5用のインデックス定義だが、まあ動く
+                    stored: {},
+                    lastCollectTime: 0
+                }));
+            } else {
+                // データ数とサイズが合わない場合、足りない分を埋める
+                const currentLen = gameState.tiles.length;
+                for(let i=currentLen; i<totalTiles; i++) {
+                     gameState.tiles.push({
+                        type: null, level: 0, finishTime: null, 
+                        unlocked: false,
+                        stored: {},
+                        lastCollectTime: 0
+                    });
+                }
+            }
         } else {
              gameState.tiles.forEach(t => { 
                  if(!t.stored) t.stored = {}; 
@@ -499,9 +531,8 @@
         raycaster = new THREE.Raycaster();
         mouse = new THREE.Vector2();
         
-        // メニューボタン用のアンカー位置 (マップの右上付近)
-        // 座標系: X+は右下, Z+は左下。マップ右上は X+, Z- の方向。
-        menuAnchor = new THREE.Vector3(6.5, 0, -6.5);
+        // メニューボタン位置：マップの北側
+        updateMenuAnchor();
 
         createTiles();
         initPedestrians();
@@ -512,16 +543,32 @@
         renderer.domElement.addEventListener('pointerup', onPointerUp, false);
         renderer.domElement.addEventListener('pointermove', onPointerMove, false);
 
-        // 追加: ズーム操作用のイベントリスナー
         renderer.domElement.addEventListener('wheel', onMouseWheel, { passive: false });
         renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
         renderer.domElement.addEventListener('touchmove', onTouchMove, { passive: false });
         
         setTimeout(onWindowResize, 100);
     }
+    
+    function updateMenuAnchor() {
+        const offset = 2;
+        // マップの半分のサイズ
+        const halfSize = (gameState.gridSize * offset) / 2;
+        
+        // 変更: 北側（Z負方向）の中央（X=0）に配置
+        // マップの奥側中央にボタンが表示されます
+        menuAnchor = new THREE.Vector3(0, 0, -(halfSize + 2.0));
+    }
 
     function createTiles() {
-        // 変更: タイルサイズを1.6から1.4に縮小し、道の幅を広げる
+        // 既存メッシュの削除
+        tileMeshes.forEach(t => {
+            scene.remove(t.mesh);
+            scene.remove(t.groundMesh);
+            t.overlayEl.remove();
+        });
+        tileMeshes = [];
+
         const geometry = new THREE.BoxGeometry(1.4, 0.5, 1.4);
         const unlockedMat = new THREE.MeshStandardMaterial({ color: 0xecf0f1 });
         
@@ -529,11 +576,12 @@
         const groundMatBase = new THREE.MeshStandardMaterial({ color: 0x555555 });
 
         const offset = 2; 
-        const start = -offset * 2;
+        const size = gameState.gridSize;
+        const start = -offset * (size - 1) / 2;
 
-        for (let i = 0; i < 25; i++) {
-            const row = Math.floor(i / 5);
-            const col = i % 5;
+        for (let i = 0; i < size * size; i++) {
+            const row = Math.floor(i / size);
+            const col = i % size;
             const x = start + col * offset;
             const z = start + row * offset;
 
@@ -595,28 +643,54 @@
             
             this.active = false;
             this.mesh.visible = false;
-            
-            // 行動制御用
             this.isStopped = false;
             this.stopTimer = 0;
-            this.canTurn = true; // 交差点で曲がれるかフラグ
+            this.canTurn = true;
             
             this.reset();
         }
         
+        // ヘルパー: 指定された座標に最も近い「道の中心」を取得
+        getNearestRoadCoord(val) {
+            const size = gameState.gridSize;
+            const offset = 2; // タイル間隔
+            // タイルの開始位置 (createTilesと同じ計算)
+            const tileStart = -offset * (size - 1) / 2;
+            // 道の開始位置 (最初のタイルの +1.0 の位置)
+            const roadStart = tileStart + 1;
+            
+            // 最寄りの道インデックス
+            const index = Math.round((val - roadStart) / offset);
+            return roadStart + index * offset;
+        }
+
         reset() {
             const isVertical = Math.random() < 0.5;
+            const size = gameState.gridSize;
+            const offset = 2;
             
-            const lanes = [-5, -3, -1, 1, 3, 5];
-            const baseLane = lanes[Math.floor(Math.random() * lanes.length)];
-            const lane = baseLane + (Math.random() * 0.4 - 0.2); 
+            // 道の座標リストを計算
+            // グリッドサイズNの場合、内部の道はN-1本ある
+            // roadStart = (-offset*(size-1)/2) + 1
+            const tileStart = -offset * (size - 1) / 2;
+            const roadStart = tileStart + 1;
             
-            // 速度を以前の0.25倍程度に落とす
+            const roadCount = Math.max(1, size - 1); // 最低1本は確保（1x1の場合の例外処理用）
+            const roadIndex = Math.floor(Math.random() * roadCount);
+            
+            // 道の中心座標
+            const laneCenter = roadStart + roadIndex * offset;
+            
+            // 道幅内でのランダムなズレ (道幅0.6なので ±0.2くらいが安全)
+            const jitter = (Math.random() - 0.5) * 0.4;
+            const lane = laneCenter + jitter;
+            
             this.baseSpeed = (0.02 + Math.random() * 0.02) * 0.25;
             this.speed = this.baseSpeed;
             
             let sx, sz, dx, dz;
-            const spawnDist = 11; // 出現位置を少し遠くに
+            const spawnDist = size + 5; // 画面外の距離
+            
             if (isVertical) {
                 sx = lane;
                 sz = (Math.random() < 0.5 ? -spawnDist : spawnDist);
@@ -633,19 +707,21 @@
             this.active = true;
             this.isStopped = false;
             this.canTurn = true;
-            this.updateVisibility(); // 初期状態の可視性を設定
+            this.updateVisibility();
         }
 
         isOnGreenRoad(x, z, isVertical) {
-            const checkTile = (tx, tz) => {
-                const col = Math.round((tx + 4) / 2);
-                const row = Math.round((tz + 4) / 2);
+            const size = gameState.gridSize;
+            const offset = 2;
+            const start = -offset * (size - 1) / 2;
+            
+            const checkTile = (wx, wz) => {
+                const col = Math.round((wx - start) / offset);
+                const row = Math.round((wz - start) / offset);
                 
-                // 修正: 画面外は「未開拓(false)」扱いに変更。
-                // これにより、画面外エリアは「両側が未開拓」判定となり、透明になります。
-                if (col < 0 || col > 4 || row < 0 || row > 4) return false;
+                if (col < 0 || col >= size || row < 0 || row >= size) return false;
                 
-                const idx = row * 5 + col;
+                const idx = row * size + col;
                 return gameState.tiles[idx] && gameState.tiles[idx].unlocked;
             };
 
@@ -660,7 +736,6 @@
                 t2_unlocked = checkTile(Math.round(x), z + 1);
             }
 
-            // 両側が未開拓(false)なら、そこは「自然の中」なので透明にする
             return (!t1_unlocked && !t2_unlocked);
         }
         
@@ -670,7 +745,6 @@
                 return;
             }
 
-            // 立ち止まり処理
             if (this.isStopped) {
                 this.stopTimer--;
                 if (this.stopTimer <= 0) {
@@ -680,27 +754,28 @@
                 return;
             }
 
-            // ランダム行動 (立ち止まり)
             if (Math.random() < 0.005) {
                 this.isStopped = true;
                 this.stopTimer = 30 + Math.random() * 60;
                 return;
             }
 
-            // --- 交差点での右左折ロジック ---
-            const rx = Math.round(this.mesh.position.x);
-            const rz = Math.round(this.mesh.position.z);
+            // --- 交差点判定 ---
+            // 現在地に近い「縦の道」と「横の道」の中心座標を取得
+            const nearestRoadX = this.getNearestRoadCoord(this.mesh.position.x);
+            const nearestRoadZ = this.getNearestRoadCoord(this.mesh.position.z);
             
-            // 現在地が奇数座標（交差点）に近いか判定
-            // 奇数判定: 絶対値を2で割った余りが1に近い
-            const isOddX = Math.abs(rx) % 2 === 1;
-            const isOddZ = Math.abs(rz) % 2 === 1;
+            // それぞれの道からの距離
+            const distX = Math.abs(this.mesh.position.x - nearestRoadX);
+            const distZ = Math.abs(this.mesh.position.z - nearestRoadZ);
+            
+            // 両方の道に近い ＝ 交差点の中心付近
+            const intersectionThreshold = 0.1; 
+            const isAtIntersection = (distX < intersectionThreshold && distZ < intersectionThreshold);
 
-            if (isOddX && isOddZ) {
-                // 交差点の中心に近い場合
-                const dist = Math.sqrt((this.mesh.position.x - rx)**2 + (this.mesh.position.z - rz)**2);
-                if (dist < 0.1 && this.canTurn) {
-                    // 50%の確率で方向転換
+            if (isAtIntersection) {
+                if (this.canTurn) {
+                    // 50%で方向転換
                     if(Math.random() < 0.5) {
                         const dirs = [
                             new THREE.Vector3(1, 0, 0),
@@ -708,36 +783,33 @@
                             new THREE.Vector3(0, 0, 1),
                             new THREE.Vector3(0, 0, -1)
                         ];
-                        // ランダムに方向を選択
                         this.direction = dirs[Math.floor(Math.random() * dirs.length)];
                         
-                        // 位置を交差点の中心に補正して、綺麗に曲がれるようにする
-                        this.mesh.position.x = rx;
-                        this.mesh.position.z = rz;
+                        // きれいに曲がるために位置を補正
+                        this.mesh.position.x = nearestRoadX;
+                        this.mesh.position.z = nearestRoadZ;
                     }
-                    this.canTurn = false; // 同じ交差点で連続して曲がらないようにする
+                    this.canTurn = false; // 通過しきるまで再判定しない
                 }
             } else {
-                // 交差点を抜けたらフラグをリセット
-                // (0.5以上離れたらリセット)
-                const dist = Math.sqrt((this.mesh.position.x - rx)**2 + (this.mesh.position.z - rz)**2);
-                if (dist > 0.4) {
+                // 交差点を離れたらフラグ復帰 (0.4以上離れたら)
+                // 進行方向に対して垂直な軸は見なくて良いので、単純に「中心から離れたか」で判定
+                if (Math.max(distX, distZ) > 0.4) {
                     this.canTurn = true;
                 }
             }
-            // ---------------------------
+            // ----------------
 
             this.mesh.position.addScaledVector(this.direction, this.speed);
             
-            // 画面外に出たらリセット
-            if (Math.abs(this.mesh.position.x) > 12 || Math.abs(this.mesh.position.z) > 12) {
+            // 画面外リセット距離 (グリッドサイズに応じて可変)
+            const limit = gameState.gridSize * 1.5 + 5;
+            if (Math.abs(this.mesh.position.x) > limit || Math.abs(this.mesh.position.z) > limit) {
                 this.reset();
                 return;
             }
             
             this.updateVisibility();
-            
-            // 歩行アニメーション
             this.mesh.position.y = Math.abs(Math.sin(Date.now() * 0.005)) * 0.05;
         }
 
@@ -752,8 +824,14 @@
     }
 
     function initPedestrians() {
-        for (let i = 0; i < 15; i++) { 
-            pedestrians.push(new Person(scene));
+        // グリッドサイズに合わせて人数を増やす？一旦固定
+        if(pedestrians.length === 0) {
+            for (let i = 0; i < 15; i++) { 
+                pedestrians.push(new Person(scene));
+            }
+        } else {
+            // リセット
+            pedestrians.forEach(p => p.reset());
         }
     }
 
@@ -927,17 +1005,20 @@
         const heightHalf = height / 2;
 
         tileMeshes.forEach((t, i) => {
-            const tileData = gameState.tiles[i];
+            // タイルが範囲外なら非表示にする（パフォーマンス向上）
+            // const tData = gameState.tiles[i];
+            
             const pos = t.mesh.position.clone();
-            if (tileData.unlocked) pos.y += 1.5; 
-            else pos.y += 0.5;
+            // 高さオフセットは状態により異なるが、ざっくり高めに設定してラベルが見切れないように
+            pos.y += 1.5; 
 
             pos.project(camera);
 
             const x = (pos.x * widthHalf) + widthHalf;
             const y = -(pos.y * heightHalf) + heightHalf;
 
-            if (x < -50 || x > width + 50 || y < -50 || y > height + 50) {
+            // 画面外判定に少し余裕を持たせる
+            if (x < -100 || x > width + 100 || y < -100 || y > height + 100) {
                 t.overlayEl.style.display = 'none';
             } else {
                 t.overlayEl.style.display = 'flex';
@@ -946,7 +1027,6 @@
             }
         });
         
-        // メニューボタンの位置更新 (3D追従)
         if (menuAnchor) {
             const pos = menuAnchor.clone();
             pos.project(camera);
@@ -1140,10 +1220,8 @@
         }
     }
 
-    // 追加: ズーム関連の関数群
     function setCameraZoom(val) {
         if (!camera) return;
-        // ズーム範囲の制限 (0.5倍 〜 2.5倍)
         const minZoom = 0.5;
         const maxZoom = 2.5;
         camera.zoom = Math.max(minZoom, Math.min(maxZoom, val));
@@ -1153,7 +1231,6 @@
     function onMouseWheel(event) {
         event.preventDefault();
         const zoomSpeed = 0.001;
-        // deltaYは下スクロールで正(縮小)、上スクロールで負(拡大)
         const newZoom = camera.zoom - event.deltaY * zoomSpeed;
         setCameraZoom(newZoom);
     }
@@ -1217,27 +1294,33 @@
     function getStorageCapacity(t,l){ const b=BUILDINGS[t], s=CONFIG.storageHours*3600, c={}; for(let r in b.prod) if(b.prod[r]>0) c[r]=b.prod[r]*l*Math.pow(1.05,l-1)*s; return c; }
     
     function getExpandCost(r){ 
-        let b=500*Math.pow(1.5,gameState.tiles.filter(t=>t.unlocked).length-4); 
+        // 5x5(初期25マス)からどれだけ拡張したかでコストを決める
+        // 初期状態は4マスだけアンロック済み。
+        // アンロック数に応じてコスト増。グリッドサイズが大きくなればアンロック数も増えるので自然と高くなる
+        const unlockedCount = gameState.tiles.filter(t=>t.unlocked).length;
+        let b = 500 * Math.pow(1.5, unlockedCount - 4); 
+        
         const reqRank = getRequiredRankForExpansion();
         if(reqRank >= 6) b *= 20;
         
         return {money:Math.floor(b),food:Math.floor(b*0.5),wood:Math.floor(b*0.3),stone:Math.floor(b*0.1),iron:0}; 
     }
     
-    function getRequiredRankForExpansion(){ return Math.max(2, gameState.tiles.filter(t=>t.unlocked).length - 2); }
+    function getRequiredRankForExpansion(){ 
+        const unlockedCount = gameState.tiles.filter(t=>t.unlocked).length;
+        return Math.max(2, unlockedCount - 2); 
+    }
+
     function checkAfford(c){ for(let k in c) if((gameState.resources[k]||0)<c[k]) return false; return true; }
     function payCost(c){ for(let k in c) gameState.resources[k]-=c[k]; updateHeader(); }
     function addXP(a){ gameState.xp+=a; if(gameState.xp>=getNextRankXP(gameState.rank)){ gameState.xp-=getNextRankXP(gameState.rank); gameState.rank++; document.getElementById('levelup-rank').innerText=gameState.rank; document.getElementById('modal-levelup').style.display='flex'; } }
 
-    // 現在の工事数を取得
     function getActiveBuilders() {
         return gameState.tiles.filter(t => t.finishTime !== null).length;
     }
 
-    // 次の大工雇用コスト
     function getBuilderCost() {
         const extra = Math.max(0, gameState.maxBuilders - CONFIG.initialMaxBuilders);
-        // 最初の1人(4->5)は200,000。次はさらに1.5倍ずつ増える
         return Math.floor(200000 * Math.pow(1.5, extra));
     }
 
@@ -1275,6 +1358,52 @@
         }
         return false;
     }
+    
+    // 世界拡張チェック
+    function checkAndExpandWorld() {
+        const allUnlocked = gameState.tiles.every(t => t.unlocked);
+        if (allUnlocked) {
+            expandWorldSize();
+        }
+    }
+
+    function expandWorldSize() {
+        const oldSize = gameState.gridSize;
+        const newSize = oldSize + 1;
+        const newTiles = [];
+        
+        // 新しいグリッドサイズに合わせてデータを再構築
+        for(let i=0; i<newSize*newSize; i++) {
+            const row = Math.floor(i / newSize);
+            const col = i % newSize;
+            
+            // 既存エリアの範囲内であれば旧データをコピー
+            if (row < oldSize && col < oldSize) {
+                const oldIdx = row * oldSize + col;
+                newTiles.push(gameState.tiles[oldIdx]);
+            } else {
+                // 新規エリア (右端の列と下端の行)
+                newTiles.push({
+                    type: null, level: 0, finishTime: null,
+                    unlocked: false, // 新規はロック状態
+                    stored: {},
+                    lastCollectTime: 0
+                });
+            }
+        }
+        
+        gameState.tiles = newTiles;
+        gameState.gridSize = newSize;
+        
+        // 3D再構築
+        createTiles();
+        updateMenuAnchor();
+        showToast(`🎉 世界が広がりました！ (${newSize}x${newSize})`);
+        
+        // 歩行者の移動範囲などをリセット
+        initPedestrians();
+        saveGame();
+    }
 
     function showPanel(index) {
         const tile = gameState.tiles[index];
@@ -1310,7 +1439,6 @@
         
         if (!tile.type) {
             let html = "";
-            // 工事制限警告
             if (getActiveBuilders() >= gameState.maxBuilders) {
                 html += `<div style="color:var(--danger-color); font-size:0.9em; font-weight:bold; margin-bottom:5px; text-align:center;">⚠️ 工事がいっぱいです！</div>`;
             }
@@ -1376,7 +1504,6 @@
                 storeInfo += `<div>${(r=='money'?'💰':r=='food'?'🌾':r=='wood'?'🌲':r=='stone'?'🪨':'🔩')} ${Math.floor(tile.stored[r])}/${Math.floor(caps[r])}</div>`;
             }
             
-            // 工事制限の確認
             const buildersBusy = getActiveBuilders() >= gameState.maxBuilders;
 
             content.innerHTML = `
@@ -1402,7 +1529,6 @@
     window.actBuild = function(type) {
         if(selectedTileIndex===null) return;
         
-        // 工事枠チェック
         if (getActiveBuilders() >= gameState.maxBuilders) {
             alert("⚠️ 大工が全員作業中です！\n工事が終わるのを待つか、ショップで大工を雇ってください。");
             return;
@@ -1419,7 +1545,7 @@
             saveGame();
             sync3DState();
             updatePanelUI();
-            updateHeader(); // 大工数更新のため
+            updateHeader();
         }
     }
     
@@ -1440,13 +1566,12 @@
         saveGame();
         sync3DState();
         updatePanelUI();
-        updateHeader(); // 大工数更新
+        updateHeader(); 
     };
 
     window.actRestore = function(invIndex) {
         if(selectedTileIndex===null) return;
         
-        // 工事枠チェック
         if (getActiveBuilders() >= gameState.maxBuilders) {
             alert("⚠️ 大工が全員作業中です！");
             return;
@@ -1467,7 +1592,7 @@
         saveGame();
         sync3DState();
         updatePanelUI();
-        updateHeader(); // 大工数更新
+        updateHeader();
     };
     
     window.actExpand = function() {
@@ -1477,6 +1602,10 @@
             payCost(c);
             gameState.tiles[selectedTileIndex].unlocked = true;
             saveGame();
+            
+            // 拡張後のチェック
+            checkAndExpandWorld();
+            
             sync3DState();
             updatePanelUI();
         }
@@ -1508,7 +1637,8 @@
             <div class="shop-item">
                 <strong>📝 ゲームについて</strong>
                 <p style="font-size:0.9em; color:#666;">
-                    同時工事数上限は購入するごとに価格が上昇します。
+                    現在のマップサイズ: ${gameState.gridSize}x${gameState.gridSize}<br>
+                    全て開拓すると世界が広がります！
                 </p>
             </div>
         `;
@@ -1523,7 +1653,6 @@
             gameState.maxBuilders++;
             saveGame();
             updateHeader();
-            // メニューを更新
             openMenu();
         }
     };
@@ -1534,7 +1663,6 @@
         document.getElementById('display-next-xp').innerText = (getNextRankXP(gameState.rank)-gameState.xp).toLocaleString();
         document.getElementById('display-xp-bar').style.width = Math.min(100, (gameState.xp/getNextRankXP(gameState.rank))*100)+'%';
         
-        // 大工表示更新
         const active = getActiveBuilders();
         const max = gameState.maxBuilders;
         const builderEl = document.getElementById('display-builders');
