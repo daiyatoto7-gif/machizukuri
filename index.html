@@ -29,6 +29,8 @@
             --accent-color: #3498db;
             --text-color: #2c3e50;
             --xp-color: #f1c40f;
+            --danger-color: #e74c3c;
+            --success-color: #2ecc71;
         }
 
         body {
@@ -222,7 +224,18 @@
             font-weight: bold; cursor: pointer; font-size: 0.9em;
         }
         button.action-btn { width: 100%; padding: 12px; font-size: 1em; margin-top: 5px; }
+        button.store-btn { background-color: var(--text-color); margin-top: 10px; }
         button:disabled { background-color: #bdc3c7; cursor: not-allowed; }
+
+        /* 保管庫リスト */
+        .inventory-section {
+            margin-top: 15px;
+            border-top: 2px dashed #eee;
+            padding-top: 10px;
+        }
+        .inventory-title {
+            font-size: 0.9em; font-weight: bold; color: #7f8c8d; margin-bottom: 5px;
+        }
 
         /* モーダル */
         .modal {
@@ -346,6 +359,7 @@
         rank: 1, xp: 0,
         resources: { money: 200, food: 100, wood: 50, stone: 0, iron: 0 },
         tiles: [],
+        inventory: [], // 保管庫: { type, level }
         lastSaveTime: Date.now()
     };
 
@@ -384,6 +398,7 @@
                  if(t.lastCollectTime === undefined) t.lastCollectTime = 0;
              });
         }
+        if(!gameState.inventory) gameState.inventory = [];
 
         try {
             init3D();
@@ -773,7 +788,7 @@
                 if (tile.finishTime) {
                     tObj.particles.active = true;
                     const remaining = Math.max(0, (tile.finishTime - Date.now()));
-                    const total = getBuildTime(tile.type, tile.level);
+                    const total = getBuildTime(tile.type, tile.level); // ※再設置中は tile.level が完了後レベルより1低い状態
                     const percent = Math.min(100, Math.max(0, 100 - (remaining / total * 100)));
                     
                     overlay.innerHTML = `
@@ -994,7 +1009,31 @@
         }
         
         if (!tile.type) {
+            // 空き地: 新規建設 + 保管庫からの設置
             let html = "";
+            
+            // 保管庫セクション
+            if (gameState.inventory && gameState.inventory.length > 0) {
+                html += `<div class="inventory-section"><div class="inventory-title">📦 保管庫から再設置</div>`;
+                gameState.inventory.forEach((item, idx) => {
+                    const b = BUILDINGS[item.type];
+                    // 再設置時間は「そのレベルへのアップグレード時間」とする（getBuildTime(type, item.level-1)）
+                    // ※ Lv1の再設置の場合は getBuildTime(type, 0)
+                    const timeSec = getBuildTime(item.type, item.level - 1) / 1000;
+                    
+                    html += `
+                        <div class="building-item" style="background:#fff8e1;">
+                            <div class="building-info">
+                                <strong>${b.icon} ${b.name} (Lv.${item.level})</strong>
+                                <span class="res-cost">⏳${formatTime(timeSec)}</span>
+                            </div>
+                            <button onclick="actRestore(${idx})" style="background-color:#f39c12;">配置</button>
+                        </div>
+                    `;
+                });
+                html += `</div><div class="inventory-title" style="margin-top:10px;">✨ 新規建設</div>`;
+            }
+
             for(let k in BUILDINGS) {
                 const b = BUILDINGS[k];
                 const c = getCost(k, 0);
@@ -1051,6 +1090,7 @@
                          <strong>時間:</strong> ${formatTime(getBuildTime(tile.type, tile.level)/1000)}
                     </div>
                     <button class="action-btn" onclick="actBuild('${tile.type}')" ${afford?'':'disabled'}>レベルアップ</button>
+                    <button class="action-btn store-btn" onclick="actStore()">📦 回収（保管庫へ）</button>
                 </div>`;
         }
     }
@@ -1071,6 +1111,57 @@
             updatePanelUI();
         }
     }
+    
+    // 施設回収（保管）
+    window.actStore = function() {
+        if(selectedTileIndex===null) return;
+        const t = gameState.tiles[selectedTileIndex];
+        if(!t.type) return;
+
+        // 資源回収
+        collectResource(selectedTileIndex);
+
+        // インベントリに追加
+        gameState.inventory.push({ type: t.type, level: t.level });
+
+        // タイル初期化
+        t.type = null;
+        t.level = 0;
+        t.finishTime = null;
+        t.stored = {};
+        
+        saveGame();
+        sync3DState();
+        updatePanelUI();
+    };
+
+    // 施設再設置
+    window.actRestore = function(invIndex) {
+        if(selectedTileIndex===null) return;
+        if(invIndex < 0 || invIndex >= gameState.inventory.length) return;
+
+        const item = gameState.inventory[invIndex];
+        const t = gameState.tiles[selectedTileIndex];
+
+        // インベントリから削除
+        gameState.inventory.splice(invIndex, 1);
+
+        // 配置
+        t.type = item.type;
+        
+        // 重要: 建設完了ロジック(level++)を利用するため、一時的にレベルを1下げる
+        // 例: Lv5を再設置 -> level=4で配置し、工事完了時にLv5になる
+        // 時間計算: getBuildTime(type, 4) -> Lv4からLv5への時間
+        t.level = Math.max(0, item.level - 1); 
+        
+        // 時間設定
+        t.finishTime = Date.now() + getBuildTime(item.type, t.level);
+        t.stored = {};
+
+        saveGame();
+        sync3DState();
+        updatePanelUI();
+    };
     
     window.actExpand = function() {
         if(selectedTileIndex===null) return;
