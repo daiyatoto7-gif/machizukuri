@@ -366,9 +366,11 @@
     let selectedTileIndex = null;
 
     // --- 3D用変数 ---
-    let scene, camera, renderer;
+    let scene, camera, renderer, textureLoader;
     let raycaster, mouse;
     let tileMeshes = []; 
+    let pedestrians = []; // 歩行者リスト
+    let textureCache = {}; // テクスチャキャッシュ { key: Texture, loading: boolean }
     
     let pointerDownPos = new THREE.Vector2();
     let isDragging = false;
@@ -454,6 +456,9 @@
         renderer.setClearColor( 0x000000, 0 ); 
         container.appendChild(renderer.domElement);
         
+        // テクスチャローダー初期化
+        textureLoader = new THREE.TextureLoader();
+
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
         scene.add(ambientLight);
 
@@ -467,7 +472,14 @@
         raycaster = new THREE.Raycaster();
         mouse = new THREE.Vector2();
 
+        // 地面(道)を作成
+        createGround();
+        
+        // タイル作成
         createTiles();
+        
+        // 歩行者作成
+        initPedestrians();
 
         window.addEventListener('resize', onWindowResize, false);
         
@@ -478,8 +490,22 @@
         setTimeout(onWindowResize, 100);
     }
 
+    function createGround() {
+        // グリッド全体を覆う地面（道）
+        // グリッド範囲: -offset*2 ~ +offset*2 => -4 ~ +4
+        // 全体サイズは10x10あれば十分カバーできる
+        const geo = new THREE.PlaneGeometry(12, 12);
+        const mat = new THREE.MeshStandardMaterial({ color: 0x555555 }); // アスファルト色
+        const ground = new THREE.Mesh(geo, mat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = -0.05; // タイルより少し下
+        ground.receiveShadow = true;
+        scene.add(ground);
+    }
+
     function createTiles() {
-        const geometry = new THREE.BoxGeometry(1.8, 0.5, 1.8);
+        // タイルサイズを少し小さくして隙間（道）を広げる
+        const geometry = new THREE.BoxGeometry(1.6, 0.5, 1.6);
         const lockedMat = new THREE.MeshStandardMaterial({ color: 0x95a5a6 });
         const unlockedMat = new THREE.MeshStandardMaterial({ color: 0xecf0f1 });
         
@@ -498,10 +524,15 @@
             mesh.userData = { index: i, type: 'tile' };
             scene.add(mesh);
 
-            // 建物用グループ (中身を入れ替える)
-            const bGroup = new THREE.Group();
-            bGroup.position.set(0, 0.25, 0); // 地面より少し上
-            mesh.add(bGroup);
+            const bGeo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+            // 透過対応: transparent: true
+            const bMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true }); 
+            const bMesh = new THREE.Mesh(bGeo, bMat);
+            bMesh.position.set(0, 0.86, 0); 
+            bMesh.castShadow = true;
+            bMesh.visible = false;
+            bMesh.userData = { index: i, type: 'building' };
+            mesh.add(bMesh);
 
             const overlay = document.createElement('div');
             overlay.className = 'overlay-item';
@@ -511,14 +542,88 @@
 
             tileMeshes.push({ 
                 mesh: mesh, 
-                buildingGroup: bGroup, 
+                buildingGroup: new THREE.Group(), 
                 overlayEl: overlay,
                 particles: particles,
                 currentType: null // 状態管理用
             });
+            
+            // ビルディンググループを追加
+            tileMeshes[i].buildingGroup.position.set(0, 0.25, 0);
+            mesh.add(tileMeshes[i].buildingGroup);
         }
         
         sync3DState();
+    }
+
+    // --- 歩行者クラス ---
+    class Person {
+        constructor(scene) {
+            this.scene = scene;
+            this.mesh = new THREE.Group();
+            
+            // 体
+            const bodyColor = Math.random() * 0xffffff;
+            const bodyGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.25, 8);
+            const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.position.y = 0.125;
+            this.mesh.add(body);
+            
+            // 頭
+            const headGeo = new THREE.SphereGeometry(0.1, 8, 8);
+            const headMat = new THREE.MeshStandardMaterial({ color: 0xffccaa }); // 肌色
+            const head = new THREE.Mesh(headGeo, headMat);
+            head.position.y = 0.35;
+            this.mesh.add(head);
+            
+            this.mesh.castShadow = true;
+            scene.add(this.mesh);
+            
+            this.reset();
+        }
+        
+        reset() {
+            // ランダムに道を選ぶ
+            // 縦道 (x固定, z移動) か 横道 (z固定, x移動) か
+            const isVertical = Math.random() < 0.5;
+            
+            // 道の座標候補: -5, -3, -1, 1, 3, 5
+            const lanes = [-5, -3, -1, 1, 3, 5];
+            const lane = lanes[Math.floor(Math.random() * lanes.length)];
+            
+            // 速度
+            this.speed = 0.02 + Math.random() * 0.02;
+            
+            if (isVertical) {
+                this.mesh.position.x = lane;
+                this.mesh.position.z = (Math.random() < 0.5 ? -6 : 6); // 端からスタート
+                this.direction = new THREE.Vector3(0, 0, this.mesh.position.z > 0 ? -1 : 1);
+            } else {
+                this.mesh.position.z = lane;
+                this.mesh.position.x = (Math.random() < 0.5 ? -6 : 6); // 端からスタート
+                this.direction = new THREE.Vector3(this.mesh.position.x > 0 ? -1 : 1, 0, 0);
+            }
+            this.mesh.position.y = 0;
+        }
+        
+        update() {
+            this.mesh.position.addScaledVector(this.direction, this.speed);
+            
+            // 範囲外に出たらリセット
+            if (Math.abs(this.mesh.position.x) > 7 || Math.abs(this.mesh.position.z) > 7) {
+                this.reset();
+            }
+            
+            // ぴょこぴょこ動かす
+            this.mesh.position.y = Math.abs(Math.sin(Date.now() * 0.01 * this.speed * 500)) * 0.05;
+        }
+    }
+
+    function initPedestrians() {
+        for (let i = 0; i < 15; i++) { // 15人
+            pedestrians.push(new Person(scene));
+        }
     }
 
     class ParticleSystem {
@@ -667,10 +772,146 @@
         return group;
     }
 
+    // --- テクスチャ管理 (画像優先・フォールバック対応) ---
+    function applyBuildingTexture(type, level, mesh) {
+        // 画像がある可能性のある範囲: 民家(house)のLv1-10
+        const hasImage = (type === 'house' && level >= 1 && level <= 10);
+        const key = `${type}_lv${level}`;
+        
+        // ヘルパー: Boxに戻す
+        const setToBox = () => {
+            if (mesh.geometry.type !== 'BoxGeometry') {
+                mesh.geometry.dispose();
+                mesh.geometry = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+                mesh.rotation.set(0, 0, 0); // 回転リセット
+            }
+            mesh.material.side = THREE.FrontSide;
+            mesh.material.transparent = true;
+        };
+
+        // ヘルパー: Plane(ビルボード)にする
+        const setToPlane = () => {
+            if (mesh.geometry.type !== 'PlaneGeometry') {
+                mesh.geometry.dispose();
+                // 少し大きめにする
+                mesh.geometry = new THREE.PlaneGeometry(1.8, 1.8);
+                // カメラの方を向く
+                mesh.quaternion.copy(camera.quaternion);
+            }
+            mesh.material.side = THREE.DoubleSide;
+            mesh.material.transparent = true;
+            mesh.material.alphaTest = 0.5; // 透過の抜きを綺麗にする
+        };
+
+        // 1. キャッシュにあれば即適用
+        if (textureCache[key] && textureCache[key] instanceof THREE.Texture) {
+            const tex = textureCache[key];
+            if (tex.isImage) { // 画像テクスチャかどうか
+                setToPlane();
+            } else {
+                setToBox();
+            }
+            if (mesh.material.map !== tex) {
+                mesh.material.map = tex;
+                mesh.material.needsUpdate = true;
+            }
+            return;
+        }
+
+        // 2. まずは絵文字テクスチャを生成してセット（これがデフォルト）
+        const emojiTex = getEmojiTexture(BUILDINGS[type].icon);
+        emojiTex.isImage = false; // フラグ
+
+        // 画像がない範囲なら絵文字で確定、キャッシュへ
+        if (!hasImage) {
+            textureCache[key] = emojiTex;
+            setToBox();
+            mesh.material.map = emojiTex;
+            mesh.material.needsUpdate = true;
+            return;
+        }
+
+        // 3. 画像ロード試行 (まだロード中でなければ)
+        if (!textureCache[key]) {
+            // ロード中フラグ
+            textureCache[key] = 'loading';
+            
+            // とりあえず絵文字を出しておく
+            setToBox();
+            mesh.material.map = emojiTex;
+
+            const path = `${type}_lv${level}.png`;
+            
+            textureLoader.load(
+                path,
+                (tex) => {
+                    // 成功
+                    tex.encoding = THREE.sRGBEncoding;
+                    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+                    tex.minFilter = THREE.LinearMipmapLinearFilter;
+                    tex.magFilter = THREE.LinearFilter;
+                    tex.isImage = true; // 画像フラグ
+                    
+                    textureCache[key] = tex;
+                    
+                    // 適用
+                    setToPlane();
+                    mesh.material.map = tex;
+                    mesh.material.needsUpdate = true;
+                },
+                undefined,
+                (err) => {
+                    // 失敗 (ファイルなしなど): 絵文字で確定
+                    textureCache[key] = emojiTex;
+                    // Boxのまま絵文字適用
+                    setToBox();
+                    mesh.material.map = emojiTex;
+                    mesh.material.needsUpdate = true;
+                }
+            );
+        }
+    }
+
+    function getEmojiTexture(emoji, bgColor = '#ffffff') {
+        // キーはキャッシュキーとは別（絵文字単位）
+        const key = `emoji_${emoji}`;
+        if (textureCache[key]) return textureCache[key];
+
+        const size = 2048; 
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+
+        ctx.fillStyle = bgColor;
+        ctx.fillRect(0, 0, size, size);
+        ctx.strokeStyle = '#ccc';
+        ctx.lineWidth = 48; 
+        ctx.strokeRect(0, 0, size, size);
+
+        ctx.font = '1200px serif'; 
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = 'black'; 
+        ctx.fillText(emoji, size/2, size/2 + 60); 
+
+        const tex = new THREE.CanvasTexture(canvas);
+        if (renderer) tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        tex.minFilter = THREE.LinearMipmapLinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+
+        textureCache[key] = tex;
+        return tex;
+    }
+
     // --- メインループ ---
     function animate3D() {
         requestAnimationFrame(animate3D);
         tileMeshes.forEach(t => t.particles.update());
+        
+        // 歩行者更新
+        pedestrians.forEach(p => p.update());
+
         if(renderer && scene && camera) {
             renderer.render(scene, camera);
         }
@@ -747,13 +988,24 @@
                 // ★モデル更新: タイプやレベルが変わったときだけ再生成
                 const stateKey = `${tile.type}_${tile.level}`;
                 if (tObj.currentType !== stateKey) {
-                    // 古いものを削除
                     while(tObj.buildingGroup.children.length > 0){ 
                         tObj.buildingGroup.remove(tObj.buildingGroup.children[0]); 
                     }
-                    // 新しいものを追加
-                    const newModel = createBuildingMesh(tile.type, tile.level);
-                    tObj.buildingGroup.add(newModel);
+                    
+                    // 民家Lv1-10で画像があればそれを使う、なければプロシージャル
+                    const hasImage = (tile.type === 'house' && tile.level >= 1 && tile.level <= 10);
+                    if(hasImage) {
+                        // 以前のテクスチャロジックを再利用するため Plane/Box を追加
+                        // しかしプロシージャルへの移行を推奨されたので、画像優先ロジックは残しつつ
+                        // デフォルトではプロシージャルモデルを生成
+                        // ここでは、プロシージャル生成を基本とする
+                        const newModel = createBuildingMesh(tile.type, tile.level);
+                        tObj.buildingGroup.add(newModel);
+                    } else {
+                        const newModel = createBuildingMesh(tile.type, tile.level);
+                        tObj.buildingGroup.add(newModel);
+                    }
+                    
                     tObj.currentType = stateKey;
                 }
                 
