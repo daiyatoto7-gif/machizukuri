@@ -366,11 +366,10 @@
     let selectedTileIndex = null;
 
     // --- 3D用変数 ---
-    let scene, camera, renderer, textureLoader;
+    let scene, camera, renderer;
     let raycaster, mouse;
     let tileMeshes = []; 
     let pedestrians = []; // 歩行者リスト
-    let textureCache = {}; // テクスチャキャッシュ
     
     let pointerDownPos = new THREE.Vector2();
     let isDragging = false;
@@ -456,8 +455,6 @@
         renderer.setClearColor( 0x000000, 0 ); 
         container.appendChild(renderer.domElement);
         
-        textureLoader = new THREE.TextureLoader();
-
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
         scene.add(ambientLight);
 
@@ -521,15 +518,6 @@
             mesh.userData = { index: i, type: 'tile' };
             scene.add(mesh);
 
-            const bGeo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
-            const bMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true }); 
-            const bMesh = new THREE.Mesh(bGeo, bMat);
-            bMesh.position.set(0, 0.86, 0); 
-            bMesh.castShadow = true;
-            bMesh.visible = false;
-            bMesh.userData = { index: i, type: 'building' };
-            mesh.add(bMesh);
-
             // 建物用グループ
             const bGroup = new THREE.Group();
             bGroup.position.set(0, 0.25, 0);
@@ -543,7 +531,6 @@
 
             tileMeshes.push({ 
                 mesh: mesh, 
-                buildingMesh: bMesh, // テクスチャ用(残しておくが基本プロシージャル優先)
                 buildingGroup: bGroup,
                 overlayEl: overlay,
                 particles: particles,
@@ -582,9 +569,7 @@
         }
         
         reset() {
-            // ランダムに道を選ぶ
             const isVertical = Math.random() < 0.5;
-            // 隙間の座標: -5, -3, -1, 1, 3, 5
             const lanes = [-5, -3, -1, 1, 3, 5];
             const lane = lanes[Math.floor(Math.random() * lanes.length)];
             
@@ -609,7 +594,6 @@
                 this.reset();
             }
             
-            // 歩行アニメーション
             this.mesh.position.y = Math.abs(Math.sin(Date.now() * 0.01)) * 0.05;
         }
     }
@@ -752,123 +736,11 @@
         return group;
     }
 
-    function applyBuildingTexture(type, level, mesh) {
-        const hasImage = (type === 'house' && level >= 1 && level <= 10);
-        const key = `${type}_lv${level}`;
-        
-        const setToBox = () => {
-            if (mesh.geometry.type !== 'BoxGeometry') {
-                mesh.geometry.dispose();
-                mesh.geometry = new THREE.BoxGeometry(1.2, 1.2, 1.2);
-                mesh.rotation.set(0, 0, 0); 
-            }
-            mesh.material.side = THREE.FrontSide;
-            mesh.material.transparent = true;
-        };
-
-        const setToPlane = () => {
-            if (mesh.geometry.type !== 'PlaneGeometry') {
-                mesh.geometry.dispose();
-                mesh.geometry = new THREE.PlaneGeometry(1.8, 1.8);
-                mesh.quaternion.copy(camera.quaternion);
-            }
-            mesh.material.side = THREE.DoubleSide;
-            mesh.material.transparent = true;
-            mesh.material.alphaTest = 0.5; 
-        };
-
-        if (textureCache[key] && textureCache[key] instanceof THREE.Texture) {
-            const tex = textureCache[key];
-            if (tex.isImage) setToPlane(); else setToBox();
-            if (mesh.material.map !== tex) {
-                mesh.material.map = tex;
-                mesh.material.needsUpdate = true;
-            }
-            return;
-        }
-
-        const emojiTex = getEmojiTexture(BUILDINGS[type].icon);
-        emojiTex.isImage = false; 
-
-        if (!hasImage) {
-            textureCache[key] = emojiTex;
-            setToBox();
-            mesh.material.map = emojiTex;
-            mesh.material.needsUpdate = true;
-            return;
-        }
-
-        if (!textureCache[key]) {
-            textureCache[key] = 'loading';
-            setToBox();
-            mesh.material.map = emojiTex;
-
-            const path = `${type}_lv${level}.png`;
-            textureLoader.load(
-                path,
-                (tex) => {
-                    tex.encoding = THREE.sRGBEncoding;
-                    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-                    tex.minFilter = THREE.LinearMipmapLinearFilter;
-                    tex.magFilter = THREE.LinearFilter;
-                    tex.isImage = true; 
-                    textureCache[key] = tex;
-                    setToPlane();
-                    mesh.material.map = tex;
-                    mesh.material.needsUpdate = true;
-                },
-                undefined,
-                (err) => {
-                    textureCache[key] = emojiTex;
-                    setToBox();
-                    mesh.material.map = emojiTex;
-                    mesh.material.needsUpdate = true;
-                }
-            );
-        }
-    }
-
-    function getEmojiTexture(emoji, bgColor = '#ffffff') {
-        const key = `emoji_${emoji}`;
-        if (textureCache[key]) return textureCache[key];
-
-        const size = 2048; 
-        const canvas = document.createElement('canvas');
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext('2d');
-
-        ctx.fillStyle = bgColor;
-        ctx.fillRect(0, 0, size, size);
-        ctx.strokeStyle = '#ccc';
-        ctx.lineWidth = 48; 
-        ctx.strokeRect(0, 0, size, size);
-
-        ctx.font = '1200px serif'; 
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = 'black'; 
-        ctx.fillText(emoji, size/2, size/2 + 60); 
-
-        const tex = new THREE.CanvasTexture(canvas);
-        if (renderer) tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-        tex.minFilter = THREE.LinearMipmapLinearFilter;
-        tex.magFilter = THREE.LinearFilter;
-
-        textureCache[key] = tex;
-        return tex;
-    }
-
     // --- メインループ ---
     function animate3D() {
         requestAnimationFrame(animate3D);
-        
-        // パーティクル更新
         tileMeshes.forEach(t => t.particles.update());
-        
-        // ★追加: 歩行者更新
-        pedestrians.forEach(p => p.update());
-
+        pedestrians.forEach(p => p.update()); // 歩行者更新
         if(renderer && scene && camera) {
             renderer.render(scene, camera);
         }
@@ -916,7 +788,6 @@
             if (!tile.unlocked) {
                 mesh.material.color.setHex(0x95a5a6); 
                 tObj.buildingGroup.visible = false;
-                tObj.buildingMesh.visible = false;
                 tObj.particles.active = false;
                 
                 const canUnlock = gameState.rank >= reqRank;
@@ -939,26 +810,17 @@
             }
 
             if (tile.type) {
-                // 画像適用判定(民家Lv1-10)
-                const hasImage = (tile.type === 'house' && tile.level >= 1 && tile.level <= 10);
+                tObj.buildingGroup.visible = true;
                 
-                if(hasImage) {
-                    tObj.buildingGroup.visible = false;
-                    tObj.buildingMesh.visible = true;
-                    applyBuildingTexture(tile.type, tile.level, tObj.buildingMesh);
-                } else {
-                    tObj.buildingMesh.visible = false;
-                    tObj.buildingGroup.visible = true;
-                    // プロシージャルモデル更新
-                    const stateKey = `${tile.type}_${tile.level}`;
-                    if (tObj.currentType !== stateKey) {
-                        while(tObj.buildingGroup.children.length > 0){ 
-                            tObj.buildingGroup.remove(tObj.buildingGroup.children[0]); 
-                        }
-                        const newModel = createBuildingMesh(tile.type, tile.level);
-                        tObj.buildingGroup.add(newModel);
-                        tObj.currentType = stateKey;
+                // プロシージャルモデル更新
+                const stateKey = `${tile.type}_${tile.level}`;
+                if (tObj.currentType !== stateKey) {
+                    while(tObj.buildingGroup.children.length > 0){ 
+                        tObj.buildingGroup.remove(tObj.buildingGroup.children[0]); 
                     }
+                    const newModel = createBuildingMesh(tile.type, tile.level);
+                    tObj.buildingGroup.add(newModel);
+                    tObj.currentType = stateKey;
                 }
                 
                 if (tile.finishTime) {
@@ -995,7 +857,6 @@
                 }
             } else {
                 tObj.buildingGroup.visible = false;
-                tObj.buildingMesh.visible = false;
                 tObj.particles.active = false;
                 tObj.currentType = null;
                 overlay.innerHTML = "";
@@ -1103,11 +964,30 @@
     // --- ユーティリティ系 ---
     function formatTimeShort(s){ if(s<60)return`${Math.floor(s)}s`;if(s<3600)return`${Math.floor(s/60)}m`;return`${Math.floor(s/3600)}h`; }
     function formatTime(s){ if(s<60)return`${Math.floor(s)}秒`;if(s<3600)return`${Math.floor(s/60)}分${Math.floor(s%60)}秒`;return`${Math.floor(s/3600)}時間`; }
-    function getNextRankXP(r){ return r*500; }
+    
+    // ★XP4倍ロジック追加
+    function getNextRankXP(r){ 
+        const base = r * 500;
+        if(r >= 10) return base * 4;
+        return base; 
+    }
+    
     function getBuildTime(t,l){ const tl=l+1; if(tl===1)return BUILDINGS[t].baseTime; return Math.floor(BUILDINGS[t].baseTime*Math.pow(tl, 2.8)); }
+    
+    // ★コスト1.5倍ロジック追加
     function getCost(t,l){ const m=Math.pow(1.6,l) * 1.5; const r={}; for(let k in BUILDINGS[t].cost) r[k]=Math.floor(BUILDINGS[t].cost[k]*m); return r; }
+    
     function getStorageCapacity(t,l){ const b=BUILDINGS[t], s=CONFIG.storageHours*3600, c={}; for(let r in b.prod) if(b.prod[r]>0) c[r]=b.prod[r]*l*Math.pow(1.05,l-1)*s; return c; }
-    function getExpandCost(r){ const b=500*Math.pow(1.5,gameState.tiles.filter(t=>t.unlocked).length-4); return {money:Math.floor(b),food:Math.floor(b*0.5),wood:Math.floor(b*0.3),stone:Math.floor(b*0.1),iron:0}; }
+    
+    // ★土地拡張コスト20倍ロジック追加
+    function getExpandCost(r){ 
+        let b=500*Math.pow(1.5,gameState.tiles.filter(t=>t.unlocked).length-4); 
+        const reqRank = getRequiredRankForExpansion();
+        if(reqRank >= 6) b *= 20;
+        
+        return {money:Math.floor(b),food:Math.floor(b*0.5),wood:Math.floor(b*0.3),stone:Math.floor(b*0.1),iron:0}; 
+    }
+    
     function getRequiredRankForExpansion(){ return Math.max(2, gameState.tiles.filter(t=>t.unlocked).length - 2); }
     function checkAfford(c){ for(let k in c) if((gameState.resources[k]||0)<c[k]) return false; return true; }
     function payCost(c){ for(let k in c) gameState.resources[k]-=c[k]; updateHeader(); }
