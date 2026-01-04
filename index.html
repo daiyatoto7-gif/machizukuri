@@ -930,7 +930,7 @@
     function formatTime(s){ if(s<60)return`${Math.floor(s)}秒`;if(s<3600)return`${Math.floor(s/60)}分${Math.floor(s%60)}秒`;return`${Math.floor(s/3600)}時間`; }
     function getNextRankXP(r){ return r*500; }
     function getBuildTime(t,l){ const tl=l+1; if(tl===1)return BUILDINGS[t].baseTime; return Math.floor(BUILDINGS[t].baseTime*Math.pow(tl, 2.8)); }
-    function getCost(t,l){ const m=Math.pow(1.6,l); const r={}; for(let k in BUILDINGS[t].cost) r[k]=Math.floor(BUILDINGS[t].cost[k]*m); return r; }
+    function getCost(t,l){ const m=Math.pow(1.6,l) * 1.5; const r={}; for(let k in BUILDINGS[t].cost) r[k]=Math.floor(BUILDINGS[t].cost[k]*m); return r; }
     function getStorageCapacity(t,l){ const b=BUILDINGS[t], s=CONFIG.storageHours*3600, c={}; for(let r in b.prod) if(b.prod[r]>0) c[r]=b.prod[r]*l*Math.pow(1.05,l-1)*s; return c; }
     function getExpandCost(r){ const b=500*Math.pow(1.5,gameState.tiles.filter(t=>t.unlocked).length-4); return {money:Math.floor(b),food:Math.floor(b*0.5),wood:Math.floor(b*0.3),stone:Math.floor(b*0.1),iron:0}; }
     function getRequiredRankForExpansion(){ return Math.max(2, gameState.tiles.filter(t=>t.unlocked).length - 2); }
@@ -1061,6 +1061,7 @@
                     <h3>${b.name} (Lv.${tile.level} -> ${tile.level+1})</h3>
                     <h2 style="color:var(--accent-color)">${formatTime(rem/1000)}</h2>
                     <p>工事中...</p>
+                    <button class="action-btn store-btn" onclick="actStore()">📦 回収（保管庫へ）</button>
                 </div>`;
         } else {
             const next = tile.level+1;
