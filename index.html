@@ -2,15 +2,17 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>City Builder Grid</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Kingdom Builder 3D</title>
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
         :root {
-            --bg-color: #f4f7f6;
+            --bg-color: #f0f2f5;
             --panel-bg: #ffffff;
             --accent-color: #3498db;
             --text-color: #2c3e50;
-            --border-color: #dfe6e9;
+            --xp-color: #f1c40f;
         }
 
         body {
@@ -18,461 +20,964 @@
             background-color: var(--bg-color);
             color: var(--text-color);
             margin: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
+            overflow: hidden; /* スクロール禁止 */
+            user-select: none;
             height: 100vh;
+            width: 100vw;
         }
 
-        /* ヘッダーと資源表示 */
+        /* ヘッダー */
         header {
             width: 100%;
-            background: var(--panel-bg);
-            padding: 10px 0;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 5px 0;
             box-shadow: 0 2px 5px rgba(0,0,0,0.05);
             position: fixed;
             top: 0;
-            z-index: 10;
-            display: flex;
-            justify-content: center;
-        }
-
-        .resource-bar {
-            display: flex;
-            gap: 20px;
-            font-weight: bold;
-            font-size: 1.1em;
-        }
-
-        .res-item span { color: var(--accent-color); }
-
-        /* メインエリア */
-        main {
-            margin-top: 80px;
-            display: flex;
-            gap: 20px;
-            padding: 20px;
-            flex-wrap: wrap;
-            justify-content: center;
-        }
-
-        /* マップ (グリッド) */
-        #map-grid {
-            display: grid;
-            grid-template-columns: repeat(5, 80px); /* 5x5 */
-            grid-template-rows: repeat(5, 80px);
-            gap: 5px;
-            background: #bdc3c7;
-            padding: 5px;
-            border-radius: 8px;
-        }
-
-        .tile {
-            width: 80px;
-            height: 80px;
-            background-color: #ecf0f1;
-            cursor: pointer;
+            z-index: 20;
             display: flex;
             flex-direction: column;
             align-items: center;
+            pointer-events: none; /* 下の3D操作を阻害しないように */
+        }
+        header > * { pointer-events: auto; } /* 中身は操作可能に */
+
+        .status-bar {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        .rank-badge {
+            background: var(--accent-color);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.9em;
+        }
+        .xp-container {
+            width: 150px;
+            height: 10px;
+            background: #eee;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        .xp-fill {
+            height: 100%;
+            background: var(--xp-color);
+            width: 0%;
+            transition: width 0.5s;
+        }
+        .resource-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            font-size: 0.9em;
             justify-content: center;
-            font-size: 0.8em;
-            text-align: center;
-            transition: background 0.2s;
-            user-select: none;
+            padding: 0 10px;
+            background: rgba(255,255,255,0.8);
+            border-radius: 10px;
         }
 
-        .tile:hover { background-color: #d1ecf1; }
-        .tile.active { border: 2px solid var(--accent-color); background-color: #dbeeff; }
-        
-        .tile-icon { font-size: 24px; margin-bottom: 4px; }
-        .tile-level { font-size: 10px; color: #7f8c8d; }
-        .progress-bar { width: 80%; height: 4px; background: #ddd; margin-top: 2px; border-radius: 2px; overflow: hidden; }
+        /* 3Dキャンバスコンテナ */
+        #game-container {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 1;
+            background: radial-gradient(circle at center, #dcecf5 0%, #b0c4de 100%);
+        }
+
+        /* UIオーバーレイレイヤー (3Dオブジェクトに追従するHTML要素用) */
+        #ui-overlay-layer {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 10;
+            pointer-events: none; /* クリックは3Dへ通す */
+            overflow: hidden;
+        }
+
+        /* 追従UIパーツ */
+        .overlay-item {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            pointer-events: auto; /* ここだけクリック可能に */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* 建設タイマー */
+        .tile-timer {
+            font-size: 10px;
+            font-weight: bold;
+            color: white;
+            background: rgba(0,0,0,0.6);
+            padding: 2px 4px;
+            border-radius: 4px;
+            margin-bottom: 2px;
+            white-space: nowrap;
+        }
+        .progress-bar-container {
+            width: 40px; height: 4px; background: rgba(255,255,255,0.5); 
+            border-radius: 2px; overflow: hidden;
+        }
         .progress-fill { height: 100%; background: #2ecc71; width: 0%; transition: width 0.2s linear; }
+
+        /* 資源回収バブル */
+        .harvest-bubble {
+            background: white;
+            border: 2px solid #f39c12;
+            border-radius: 50%;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            animation: bounce 1s infinite alternate;
+            cursor: pointer;
+        }
+        @keyframes bounce { from { transform: translateY(0); } to { transform: translateY(-5px); } }
+
+        /* ロックアイコン */
+        .lock-icon {
+            font-size: 24px;
+            opacity: 0.6;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        /* フローティングテキスト */
+        .float-text {
+            position: absolute;
+            color: #27ae60;
+            font-weight: bold;
+            font-size: 16px;
+            text-shadow: 1px 1px 0 #fff;
+            animation: floatUp 1s ease-out forwards;
+            pointer-events: none;
+            z-index: 100;
+        }
+        @keyframes floatUp { 
+            0% { transform: translate(-50%, -50%); opacity: 1; } 
+            100% { transform: translate(-50%, -150%); opacity: 0; } 
+        }
 
         /* 操作パネル */
         #control-panel {
-            width: 300px;
+            position: absolute;
+            bottom: 20px; left: 50%;
+            transform: translateX(-50%);
+            width: 90%; max-width: 400px;
+            max-height: 40vh;
             background: var(--panel-bg);
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            padding: 15px;
+            border-radius: 12px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+            z-index: 30;
+            display: none; /* 初期非表示 */
+            flex-direction: column;
         }
+        #control-panel.active { display: flex; }
 
-        h2 { margin-top: 0; font-size: 1.2em; border-bottom: 2px solid var(--bg-color); padding-bottom: 10px; }
-        
-        .btn-group { display: flex; flex-direction: column; gap: 10px; }
+        #panel-header {
+            display: flex; justify-content: space-between; align-items: center;
+            border-bottom: 2px solid var(--bg-color);
+            padding-bottom: 10px; margin-bottom: 10px;
+        }
+        #panel-title { margin: 0; font-size: 1.1em; color: var(--accent-color); }
+        .close-btn { cursor: pointer; font-weight: bold; padding: 0 5px; color: #999; }
+        #panel-content { flex: 1; overflow-y: auto; padding-right: 5px; }
+
+        .building-item {
+            display: flex; justify-content: space-between; align-items: center;
+            border: 1px solid #eee; padding: 8px; border-radius: 6px;
+            margin-bottom: 8px; font-size: 0.9em;
+        }
+        .building-info { display: flex; flex-direction: column; gap: 2px; }
+        .res-cost { font-size: 0.85em; color: #666; }
 
         button {
-            padding: 10px;
-            border: none;
-            border-radius: 5px;
-            background-color: var(--accent-color);
-            color: white;
-            font-weight: bold;
-            cursor: pointer;
-            transition: opacity 0.2s;
+            padding: 8px 12px; border: none; border-radius: 4px;
+            background-color: var(--accent-color); color: white;
+            font-weight: bold; cursor: pointer; font-size: 0.9em;
         }
-        button:disabled { background-color: #95a5a6; cursor: not-allowed; }
-        button:hover:not(:disabled) { opacity: 0.9; }
-        
-        .cost-info { font-size: 0.9em; color: #555; margin-bottom: 5px; }
+        button.action-btn { width: 100%; padding: 12px; font-size: 1em; margin-top: 5px; }
+        button:disabled { background-color: #bdc3c7; cursor: not-allowed; }
 
-        /* モーダル (オフライン収益通知) */
-        #modal {
-            display: none;
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.5);
-            justify-content: center;
-            align-items: center;
-            z-index: 100;
+        /* モーダル */
+        .modal {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 100;
         }
         .modal-content {
-            background: white;
-            padding: 30px;
-            border-radius: 10px;
-            text-align: center;
-            max-width: 400px;
+            background: white; padding: 30px; border-radius: 10px; text-align: center;
+            max-width: 400px; box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         }
+        @keyframes popIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
     </style>
 </head>
 <body>
 
 <header>
+    <div class="status-bar">
+        <div class="rank-badge">RANK <span id="display-rank">1</span></div>
+        <div class="xp-container">
+            <div class="xp-fill" id="display-xp-bar"></div>
+        </div>
+        <div style="font-size:0.8em; color:#7f8c8d;">Next: <span id="display-next-xp">0</span> XP</div>
+    </div>
     <div class="resource-bar">
-        <div class="res-item">💰資金: <span id="display-money">0</span></div>
-        <div class="res-item">🌲木材: <span id="display-wood">0</span></div>
-        <div class="res-item">🪨石材: <span id="display-stone">0</span></div>
+        <div class="res-item">💰 <span id="display-money">0</span></div>
+        <div class="res-item">🌾 <span id="display-food">0</span></div>
+        <div class="res-item">🌲 <span id="display-wood">0</span></div>
+        <div class="res-item">🪨 <span id="display-stone">0</span></div>
+        <div class="res-item">🔩 <span id="display-iron">0</span></div>
     </div>
 </header>
 
-<main>
-    <div>
-        <h3 style="text-align:center;">街のマップ</h3>
-        <div id="map-grid">
-            </div>
-    </div>
+<div id="game-container"></div>
+<div id="ui-overlay-layer"></div>
 
-    <div id="control-panel">
-        <h2 id="panel-title">タイルを選択してください</h2>
-        <div id="panel-content">
-            <p>マップ上のタイルをクリックすると、建設やレベルアップができます。</p>
-        </div>
+<div id="control-panel">
+    <div id="panel-header">
+        <h2 id="panel-title">タイル選択</h2>
+        <div class="close-btn" onclick="closePanel()">✕</div>
     </div>
-</main>
+    <div id="panel-content"></div>
+</div>
 
-<div id="modal">
+<div id="modal-offline" class="modal">
     <div class="modal-content">
         <h3>おかえりなさい！</h3>
-        <p>不在の間に以下の資源を獲得しました。</p>
-        <p id="offline-report"></p>
-        <button onclick="document.getElementById('modal').style.display='none'">再開する</button>
+        <p>不在の間に生産された資源が<br>貯蔵庫に保管されました。</p>
+        <div style="text-align:left; background:#f9f9f9; padding:10px; border-radius:5px; margin:10px 0;">
+            <div id="offline-report"></div>
+        </div>
+        <button onclick="closeModal('modal-offline')" class="action-btn">再開する</button>
+    </div>
+</div>
+
+<div id="modal-levelup" class="modal">
+    <div class="modal-content">
+        <h3 style="color:var(--accent-color);">🎉 ランクアップ！ 🎉</h3>
+        <p style="font-size:1.2em; font-weight:bold;">RANK <span id="levelup-rank"></span> になりました！</p>
+        <button onclick="closeModal('modal-levelup')" class="action-btn">閉じる</button>
     </div>
 </div>
 
 <script>
-    // --- データ定義 ---
+    // --- データ・設定 ---
     const CONFIG = {
         gridSize: 25, // 5x5
-        fps: 10,
-        autoSaveInterval: 5000 // 5秒ごとに保存
+        fps: 30, // 描画更新用
+        autoSaveInterval: 5000,
+        initialUnlocked: [6, 7, 11, 12],
+        storageHours: 8
     };
 
-    // 施設データ定義
     const BUILDINGS = {
-        house: { 
-            name: "民家", icon: "🏠", 
-            baseProd: { money: 1, wood: 0, stone: 0 }, 
-            baseCost: { money: 10, wood: 0, stone: 0 }, 
-            baseTime: 2000 
-        },
-        lumber: { 
-            name: "伐採所", icon: "🌲", 
-            baseProd: { money: 0, wood: 1, stone: 0 }, 
-            baseCost: { money: 50, wood: 0, stone: 0 }, 
-            baseTime: 4000 
-        },
-        quarry: { 
-            name: "採石場", icon: "⛏️", 
-            baseProd: { money: 0, wood: 0, stone: 1 }, 
-            baseCost: { money: 100, wood: 50, stone: 0 }, // 木材が必要
-            baseTime: 6000 
-        }
+        house: { name: "民家", icon: "🏠", prod: { money: 2 }, cost: { money: 20, food: 10 }, baseTime: 2000 },
+        farm: { name: "畑", icon: "🌾", prod: { food: 2 }, cost: { money: 30, wood: 10 }, baseTime: 2000 },
+        lumber: { name: "伐採所", icon: "🌲", prod: { wood: 1 }, cost: { money: 50, food: 20 }, baseTime: 3000 },
+        quarry: { name: "採石場", icon: "🪨", prod: { stone: 1 }, cost: { money: 100, food: 50, wood: 50 }, baseTime: 4000 },
+        mine: { name: "鉱山", icon: "🔩", prod: { iron: 1 }, cost: { money: 200, food: 100, wood: 100, stone: 50 }, baseTime: 5000 },
+        market: { name: "市場", icon: "⚖️", prod: { money: 10 }, cost: { money: 500, food: 200, wood: 200, stone: 50 }, baseTime: 6000 },
+        blacksmith: { name: "鍛冶屋", icon: "⚔️", prod: { money: 5, iron: 2 }, cost: { money: 800, food: 300, wood: 300, stone: 200, iron: 100 }, baseTime: 7000 }
     };
+    
+    // prodの補完
+    for(let k in BUILDINGS) {
+        const b = BUILDINGS[k];
+        for(let r of ['money','food','wood','stone','iron']) {
+            if(!b.prod[r]) b.prod[r] = 0;
+            if(!b.cost[r]) b.cost[r] = 0;
+        }
+    }
 
-    // ゲーム状態 (初期値)
     let gameState = {
-        resources: { money: 100, wood: 0, stone: 0 },
-        tiles: Array(CONFIG.gridSize).fill(null).map(() => ({
-            type: null,
-            level: 0,
-            finishTime: null // 建設完了時刻
-        })),
+        rank: 1, xp: 0,
+        resources: { money: 200, food: 100, wood: 50, stone: 0, iron: 0 },
+        tiles: [],
         lastSaveTime: Date.now()
     };
 
     let selectedTileIndex = null;
+    let uiUpdateInterval = null;
 
-    // --- ゲームシステム ---
+    // --- 3D用変数 ---
+    let scene, camera, renderer;
+    let raycaster, mouse;
+    let tileMeshes = []; // { mesh, buildingMesh, overlayEl, particleSystem }
+    let textureCache = {}; // 絵文字テクスチャキャッシュ
 
-    function initGame() {
+    // --- 初期化 ---
+    function init() {
         loadGame();
-        renderMap();
-        setInterval(gameLoop, 1000 / CONFIG.fps);
+        
+        // データ初期化チェック
+        if (gameState.tiles.length !== CONFIG.gridSize) {
+            gameState.tiles = Array(CONFIG.gridSize).fill(null).map((_, i) => ({
+                type: null, level: 0, finishTime: null, 
+                unlocked: CONFIG.initialUnlocked.includes(i),
+                stored: {}
+            }));
+        } else {
+             gameState.tiles.forEach(t => { if(!t.stored) t.stored = {}; });
+        }
+
+        init3D();
+        updateHeader();
+        
+        // ループ開始
+        requestAnimationFrame(animate3D);
+        setInterval(gameLogicLoop, 1000); // ロジックは1秒ごと
         setInterval(saveGame, CONFIG.autoSaveInterval);
         
-        // 初回描画
-        updateUI();
+        // パネルUI更新用
+        setInterval(updatePanelUI, 500);
     }
 
-    // ゲームループ
-    function gameLoop() {
-        const now = Date.now();
+    // --- Three.js セットアップ ---
+    function init3D() {
+        const container = document.getElementById('game-container');
         
-        // 1. 建設完了チェック
-        gameState.tiles.forEach(tile => {
-            if (tile.finishTime && now >= tile.finishTime) {
-                tile.level++;
-                tile.finishTime = null;
-                if(selectedTileIndex !== null) showPanel(selectedTileIndex); // パネル更新
-                renderMap(); // マップ更新
-            }
-        });
+        // シーン
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xb0c4de); // 空色っぽい背景
+        scene.fog = new THREE.Fog(0xb0c4de, 15, 30);
 
-        // 2. 資源生産
-        gameState.tiles.forEach(tile => {
-            if (tile.type && tile.level > 0 && !tile.finishTime) {
-                const b = BUILDINGS[tile.type];
-                // FPS分割して加算
-                gameState.resources.money += (b.baseProd.money * tile.level) / CONFIG.fps;
-                gameState.resources.wood += (b.baseProd.wood * tile.level) / CONFIG.fps;
-                gameState.resources.stone += (b.baseProd.stone * tile.level) / CONFIG.fps;
-            }
-        });
+        // カメラ (平行投影でクォータービュー)
+        const aspect = container.clientWidth / container.clientHeight;
+        const d = 10;
+        camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 1, 1000);
+        camera.position.set(20, 20, 20); // 斜め上から
+        camera.lookAt(scene.position);
 
-        updateUI();
+        // レンダラー
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.shadowMap.enabled = true;
+        container.appendChild(renderer.domElement);
+
+        // ライト
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 1024;
+        dirLight.shadow.mapSize.height = 1024;
+        scene.add(dirLight);
+
+        // マウスインタラクション
+        raycaster = new THREE.Raycaster();
+        mouse = new THREE.Vector2();
+
+        // タイル生成
+        createTiles();
+
+        // イベント
+        window.addEventListener('resize', onWindowResize, false);
+        renderer.domElement.addEventListener('pointerdown', onPointerDown, false);
     }
 
-    // UI更新 (資源バーとプログレスバー)
-    function updateUI() {
-        document.getElementById('display-money').innerText = Math.floor(gameState.resources.money);
-        document.getElementById('display-wood').innerText = Math.floor(gameState.resources.wood);
-        document.getElementById('display-stone').innerText = Math.floor(gameState.resources.stone);
+    function createTiles() {
+        const geometry = new THREE.BoxGeometry(1.8, 0.5, 1.8);
+        const lockedMat = new THREE.MeshStandardMaterial({ color: 0x95a5a6 });
+        const unlockedMat = new THREE.MeshStandardMaterial({ color: 0xecf0f1 });
+        
+        // グリッド配置 (5x5) 中心を0,0に
+        const offset = 2; // 間隔
+        const start = -offset * 2;
 
-        // 建設中タイルのバー更新
-        gameState.tiles.forEach((tile, idx) => {
-            if (tile.finishTime) {
-                const totalTime = getBuildTime(tile.type, tile.level);
-                const remaining = tile.finishTime - Date.now();
-                const percent = Math.max(0, 100 - (remaining / totalTime * 100));
-                
-                const bar = document.getElementById(`progress-${idx}`);
-                if (bar) bar.style.width = `${percent}%`;
-            }
-        });
+        for (let i = 0; i < 25; i++) {
+            const row = Math.floor(i / 5);
+            const col = i % 5;
+            const x = start + col * offset;
+            const z = start + row * offset;
+
+            // 地面タイル
+            const mesh = new THREE.Mesh(geometry, unlockedMat.clone());
+            mesh.position.set(x, 0, z);
+            mesh.receiveShadow = true;
+            mesh.userData = { index: i, type: 'tile' };
+            scene.add(mesh);
+
+            // 施設用メッシュ (初期は非表示)
+            const bGeo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+            const bMat = new THREE.MeshStandardMaterial({ color: 0xffffff }); // テクスチャ貼る
+            const bMesh = new THREE.Mesh(bGeo, bMat);
+            bMesh.position.set(0, 0.85, 0); // タイルの上に乗せる
+            bMesh.castShadow = true;
+            bMesh.visible = false;
+            bMesh.userData = { index: i, type: 'building' };
+            mesh.add(bMesh);
+
+            // HTMLオーバーレイ用Div生成
+            const overlay = document.createElement('div');
+            overlay.className = 'overlay-item';
+            document.getElementById('ui-overlay-layer').appendChild(overlay);
+
+            // パーティクルシステム初期化
+            const particles = new ParticleSystem(mesh.position, scene);
+
+            tileMeshes.push({ 
+                mesh: mesh, 
+                buildingMesh: bMesh, 
+                overlayEl: overlay,
+                particles: particles
+            });
+        }
+        
+        // 初回同期
+        sync3DState();
     }
 
-    // マップ描画
-    function renderMap() {
-        const grid = document.getElementById('map-grid');
-        grid.innerHTML = "";
+    // --- パーティクルシステム (建設エフェクト) ---
+    class ParticleSystem {
+        constructor(position, scene) {
+            this.origin = position.clone().add(new THREE.Vector3(0, 1, 0));
+            this.particles = [];
+            this.scene = scene;
+            this.active = false;
+            
+            // ジオメトリ再利用
+            this.geo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+            this.mat = new THREE.MeshBasicMaterial({ color: 0xdddddd, transparent: true });
+        }
 
-        gameState.tiles.forEach((tile, index) => {
-            const div = document.createElement('div');
-            div.className = `tile ${selectedTileIndex === index ? 'active' : ''}`;
-            div.onclick = () => selectTile(index);
+        update() {
+            if (!this.active && this.particles.length === 0) return;
 
-            if (tile.type) {
-                const info = BUILDINGS[tile.type];
-                let content = `<div class="tile-icon">${info.icon}</div>`;
-                content += `<div class="tile-level">Lv.${tile.level}</div>`;
-                
-                if (tile.finishTime) {
-                    content += `<div class="progress-bar"><div class="progress-fill" id="progress-${index}"></div></div>`;
+            // 新規発生
+            if (this.active && Math.random() < 0.2) {
+                const mesh = new THREE.Mesh(this.geo, this.mat.clone());
+                // ランダム位置
+                const offset = new THREE.Vector3((Math.random()-0.5)*1.5, 0, (Math.random()-0.5)*1.5);
+                mesh.position.copy(this.origin).add(offset);
+                this.scene.add(mesh);
+                this.particles.push({ 
+                    mesh: mesh, 
+                    vel: new THREE.Vector3(0, 0.05 + Math.random()*0.05, 0), 
+                    life: 1.0 
+                });
+            }
+
+            // 更新
+            for (let i = this.particles.length - 1; i >= 0; i--) {
+                const p = this.particles[i];
+                p.mesh.position.add(p.vel);
+                p.mesh.rotation.x += 0.1;
+                p.mesh.rotation.y += 0.1;
+                p.life -= 0.02;
+                p.mesh.material.opacity = p.life;
+
+                if (p.life <= 0) {
+                    this.scene.remove(p.mesh);
+                    this.particles.splice(i, 1);
                 }
-                div.innerHTML = content;
-            } else {
-                div.innerHTML = `<span style="color:#bdc3c7;">空き</span>`;
             }
-            grid.appendChild(div);
+        }
+    }
+
+    // --- 絵文字テクスチャ生成 ---
+    function getEmojiTexture(emoji, bgColor = '#ffffff') {
+        const key = emoji + bgColor;
+        if (textureCache[key]) return textureCache[key];
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+
+        // 背景
+        ctx.fillStyle = bgColor;
+        ctx.fillRect(0, 0, 128, 128);
+        
+        // 枠線
+        ctx.strokeStyle = '#ccc';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(0, 0, 128, 128);
+
+        // 絵文字
+        ctx.font = '80px serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(emoji, 64, 64);
+
+        const tex = new THREE.CanvasTexture(canvas);
+        textureCache[key] = tex;
+        return tex;
+    }
+
+    // --- メインループ ---
+    function animate3D() {
+        requestAnimationFrame(animate3D);
+
+        // パーティクル更新
+        tileMeshes.forEach(t => t.particles.update());
+
+        // レンダリング
+        renderer.render(scene, camera);
+        
+        // UI追従更新
+        updateOverlayPositions();
+    }
+
+    function updateOverlayPositions() {
+        // 3D座標 -> スクリーン座標
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        const widthHalf = width / 2;
+        const heightHalf = height / 2;
+
+        tileMeshes.forEach((t, i) => {
+            const tileData = gameState.tiles[i];
+            const pos = t.mesh.position.clone();
+            // 施設がある場合は少し上に
+            if (tileData.unlocked) pos.y += 1.5; 
+            else pos.y += 0.5;
+
+            pos.project(camera);
+
+            const x = (pos.x * widthHalf) + widthHalf;
+            const y = -(pos.y * heightHalf) + heightHalf;
+
+            // 画面外判定
+            if (x < -50 || x > width + 50 || y < -50 || y > height + 50) {
+                t.overlayEl.style.display = 'none';
+            } else {
+                t.overlayEl.style.display = 'flex';
+                t.overlayEl.style.left = `${x}px`;
+                t.overlayEl.style.top = `${y}px`;
+            }
         });
     }
 
-    // タイル選択時の処理
+    // --- 状態同期 (ロジック -> 3D/UI) ---
+    function sync3DState() {
+        const reqRank = getRequiredRankForExpansion();
+        
+        gameState.tiles.forEach((tile, i) => {
+            const tObj = tileMeshes[i];
+            const mesh = tObj.mesh;
+            const bMesh = tObj.buildingMesh;
+            const overlay = tObj.overlayEl;
+
+            // 1. ロック/アンロック状態
+            if (!tile.unlocked) {
+                mesh.material.color.setHex(0x95a5a6); // グレー
+                bMesh.visible = false;
+                tObj.particles.active = false;
+                
+                // 拡張可能ならアイコン表示
+                const canUnlock = gameState.rank >= reqRank;
+                if (canUnlock) {
+                     mesh.material.color.setHex(0xdcdde1); // 少し明るく
+                     overlay.innerHTML = `<div class="lock-icon">🔒</div>`;
+                } else {
+                    overlay.innerHTML = "";
+                }
+                return;
+            } else {
+                mesh.material.color.setHex(0xecf0f1); // 白
+            }
+            
+            // 選択中のハイライト
+            if (selectedTileIndex === i) {
+                mesh.material.emissive.setHex(0x3498db);
+                mesh.material.emissiveIntensity = 0.3;
+            } else {
+                mesh.material.emissive.setHex(0x000000);
+            }
+
+            // 2. 施設表示
+            if (tile.type) {
+                bMesh.visible = true;
+                const bInfo = BUILDINGS[tile.type];
+                
+                // テクスチャ更新 (レベルに応じて背景色変えるなどの演出も可能だが今回はシンプルに)
+                bMesh.material.map = getEmojiTexture(bInfo.icon);
+                
+                // 建設中かどうか
+                if (tile.finishTime) {
+                    tObj.particles.active = true; // エフェクトON
+                    // オーバーレイ: タイマー
+                    const remaining = Math.max(0, (tile.finishTime - Date.now()));
+                    const total = getBuildTime(tile.type, tile.level);
+                    const percent = Math.min(100, Math.max(0, 100 - (remaining / total * 100)));
+                    
+                    overlay.innerHTML = `
+                        <div class="tile-timer">${formatTimeShort(remaining/1000)}</div>
+                        <div class="progress-bar-container"><div class="progress-fill" style="width:${percent}%"></div></div>
+                    `;
+                } else {
+                    tObj.particles.active = false; // エフェクトOFF
+                    // オーバーレイ: 資源回収アイコン
+                    let content = "";
+                    let hasResource = false;
+                    let maxRes = ""; let maxVal = 0;
+                    if(tile.stored) {
+                        for(let r in tile.stored) {
+                            if(tile.stored[r] >= 1) {
+                                hasResource = true;
+                                if(tile.stored[r] > maxVal) { maxVal = tile.stored[r]; maxRes = r; }
+                            }
+                        }
+                    }
+                    if (hasResource) {
+                        const icon = maxRes=='money'?'💰':maxRes=='food'?'🌾':maxRes=='wood'?'🌲':maxRes=='stone'?'🪨':'🔩';
+                        // クリックイベントは親のoverlay-itemが受けるのでバブル自体は飾り
+                        // ただし親がpointer-events:autoなので、バブルをクリック＝親をクリック
+                        content = `<div class="harvest-bubble" onclick="collectResourceUI(${i}, event)">${icon}</div>`;
+                    }
+                    overlay.innerHTML = content;
+                }
+            } else {
+                bMesh.visible = false;
+                tObj.particles.active = false;
+                overlay.innerHTML = "";
+            }
+        });
+    }
+    
+    // --- ゲームロジック (1秒ごとに実行) ---
+    function gameLogicLoop() {
+        const now = Date.now();
+        let dirty = false;
+
+        // 建設完了 & 生産
+        gameState.tiles.forEach(tile => {
+            if (tile.unlocked) {
+                // 建設完了
+                if (tile.finishTime && now >= tile.finishTime) {
+                    tile.level++;
+                    tile.finishTime = null;
+                    const xp = Math.floor(getBuildTime(tile.type, tile.level-1) / 1000);
+                    addXP(xp);
+                    dirty = true;
+                    if(selectedTileIndex !== null) updatePanelUI();
+                }
+                
+                // 生産
+                if (tile.type && tile.level > 0 && !tile.finishTime) {
+                    const b = BUILDINGS[tile.type];
+                    const caps = getStorageCapacity(tile.type, tile.level);
+                    for (let r in b.prod) {
+                        if (b.prod[r] > 0) {
+                            const amount = (b.prod[r] * tile.level * Math.pow(1.05, tile.level - 1));
+                            if (!tile.stored[r]) tile.stored[r] = 0;
+                            if (tile.stored[r] < caps[r]) {
+                                tile.stored[r] = Math.min(caps[r], tile.stored[r] + amount);
+                                // 生産があったらDirtyにしてバブル表示更新
+                                if(Math.floor(tile.stored[r]) >= 1) dirty = true;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        if(dirty || true) { // タイマー更新のため常に同期
+            sync3DState();
+        }
+        updateHeader();
+    }
+
+    // --- インタラクション ---
+    function onPointerDown(event) {
+        event.preventDefault();
+        
+        // パネルが開いていたら閉じる（簡易化のため、背景クリックで閉じる）
+        // 実際はRaycastが外れたら閉じるなどが良い
+        
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(scene.children, true); // true for recursive
+
+        if (intersects.length > 0) {
+            // 親をたどってuserDataを持つメッシュを探す
+            let target = intersects[0].object;
+            while(target && !target.userData.index && target.parent) {
+                target = target.parent;
+            }
+
+            if (target && target.userData.index !== undefined) {
+                const idx = target.userData.index;
+                // 資源回収優先
+                const collected = collectResource(idx);
+                if (collected) {
+                     // 回収だけ
+                } else {
+                     selectTile(idx);
+                }
+            }
+        } else {
+            // 何もないところクリックで選択解除
+            closePanel();
+        }
+    }
+    
+    // UIからの資源回収トリガー (バブルクリック時)
+    window.collectResourceUI = function(index, e) {
+        e.stopPropagation(); // パネルが開くのを防ぐ
+        collectResource(index);
+    };
+
     function selectTile(index) {
         selectedTileIndex = index;
-        renderMap(); // 選択枠を表示するため再描画
+        sync3DState(); // ハイライト更新
         showPanel(index);
     }
+    
+    function closePanel() {
+        selectedTileIndex = null;
+        document.getElementById('control-panel').classList.remove('active');
+        sync3DState();
+    }
 
-    // 操作パネル表示
+    // --- ユーティリティ系 ---
+    // (以前のロジックと同じ)
+    function formatTimeShort(s){ if(s<60)return`${Math.floor(s)}s`;if(s<3600)return`${Math.floor(s/60)}m`;return`${Math.floor(s/3600)}h`; }
+    function formatTime(s){ if(s<60)return`${Math.floor(s)}秒`;if(s<3600)return`${Math.floor(s/60)}分${Math.floor(s%60)}秒`;return`${Math.floor(s/3600)}時間`; }
+    function getNextRankXP(r){ return r*500; }
+    function getBuildTime(t,l){ const tl=l+1; if(tl===1)return BUILDINGS[t].baseTime; return Math.floor(BUILDINGS[t].baseTime*Math.pow(tl, 2.8)); }
+    function getCost(t,l){ const m=Math.pow(1.6,l); const r={}; for(let k in BUILDINGS[t].cost) r[k]=Math.floor(BUILDINGS[t].cost[k]*m); return r; }
+    function getStorageCapacity(t,l){ const b=BUILDINGS[t], s=CONFIG.storageHours*3600, c={}; for(let r in b.prod) if(b.prod[r]>0) c[r]=b.prod[r]*l*Math.pow(1.05,l-1)*s; return c; }
+    function getExpandCost(r){ const b=500*Math.pow(1.5,gameState.tiles.filter(t=>t.unlocked).length-4); return {money:Math.floor(b),food:Math.floor(b*0.5),wood:Math.floor(b*0.3),stone:Math.floor(b*0.1),iron:0}; }
+    function getRequiredRankForExpansion(){ return Math.max(2, gameState.tiles.filter(t=>t.unlocked).length - 2); }
+    function checkAfford(c){ for(let k in c) if((gameState.resources[k]||0)<c[k]) return false; return true; }
+    function payCost(c){ for(let k in c) gameState.resources[k]-=c[k]; updateHeader(); }
+    function addXP(a){ gameState.xp+=a; if(gameState.xp>=getNextRankXP(gameState.rank)){ gameState.xp-=getNextRankXP(gameState.rank); gameState.rank++; document.getElementById('levelup-rank').innerText=gameState.rank; document.getElementById('modal-levelup').style.display='flex'; } }
+
+    function collectResource(index) {
+        const t = gameState.tiles[index];
+        if(!t || !t.stored) return false;
+        let total = 0, txt = "";
+        for(let r in t.stored) {
+            const val = Math.floor(t.stored[r]);
+            if(val > 0) {
+                gameState.resources[r] += val;
+                t.stored[r] = 0;
+                total += val;
+                const icon = r=='money'?'💰':r=='food'?'🌾':r=='wood'?'🌲':r=='stone'?'🪨':'🔩';
+                txt += `${icon}+${val} `;
+            }
+        }
+        if(total > 0) {
+            updateHeader();
+            sync3DState(); // バブル消す
+            // フローティングテキスト
+            const overlay = tileMeshes[index].overlayEl;
+            const el = document.createElement('div');
+            el.className = 'float-text';
+            el.innerText = txt;
+            overlay.appendChild(el);
+            setTimeout(()=>el.remove(), 1000);
+            return true;
+        }
+        return false;
+    }
+
+    // --- パネルUI ---
     function showPanel(index) {
         const tile = gameState.tiles[index];
-        const title = document.getElementById('panel-title');
+        const p = document.getElementById('control-panel');
         const content = document.getElementById('panel-content');
+        p.classList.add('active');
+        
+        // 内容生成は updatePanelUI に任せるが、初回呼び出しもここで行う
+        updatePanelUI();
+    }
+    
+    // パネルの中身を現在の状態に合わせて更新
+    function updatePanelUI() {
+        if(selectedTileIndex === null) return;
+        const tile = gameState.tiles[selectedTileIndex];
+        const content = document.getElementById('panel-content');
+        if(!content) return;
 
-        if (tile.type === null) {
-            // 新規建設メニュー
-            title.innerText = "新規建設";
-            let html = `<div class="btn-group">`;
-            
-            for (let key in BUILDINGS) {
-                const b = BUILDINGS[key];
-                const cost = getCost(key, 0);
-                const time = (getBuildTime(key, 0)/1000).toFixed(1);
-                const canAfford = checkAfford(cost);
-                
+        // ロック中
+        if (!tile.unlocked) {
+            const req = getRequiredRankForExpansion();
+            const cost = getExpandCost(gameState.rank);
+            const ok = gameState.rank >= req;
+            const afford = checkAfford(cost);
+            content.innerHTML = `
+                <div style="text-align:center;">
+                    <p><strong>未開拓の土地</strong></p>
+                    <div style="background:#eee; padding:10px; border-radius:5px; text-align:left; font-size:0.9em;">
+                        条件: ランク${req} (${ok?'✅':'❌'})<br>
+                        費用: 💰${cost.money} 🌾${cost.food} 🌲${cost.wood} 🪨${cost.stone}
+                    </div>
+                    <button class="action-btn" onclick="actExpand()" ${ok&&afford?'':'disabled'}>拡張</button>
+                    ${!ok ? '<p style="color:red;font-size:0.8em">ランク不足</p>' : ''}
+                </div>`;
+            return;
+        }
+        
+        // 新規建設
+        if (!tile.type) {
+            let html = "";
+            for(let k in BUILDINGS) {
+                const b = BUILDINGS[k];
+                const c = getCost(k, 0);
+                const afford = checkAfford(c);
+                let cs = []; for(let r in c) if(c[r]>0) cs.push((r=='money'?'💰':r=='food'?'🌾':r=='wood'?'🌲':r=='stone'?'🪨':'🔩')+c[r]);
                 html += `
-                    <div style="border:1px solid #eee; padding:5px; border-radius:5px;">
-                        <strong>${b.icon} ${b.name}</strong><br>
-                        <span class="cost-info">費用: 💰${cost.money} 🌲${cost.wood} 🪨${cost.stone}</span><br>
-                        <span class="cost-info">時間: ${time}秒</span><br>
-                        <button onclick="build('${key}')" ${canAfford ? '' : 'disabled'}>建設する</button>
-                    </div>
-                `;
+                    <div class="building-item">
+                        <div class="building-info">
+                            <strong>${b.icon} ${b.name}</strong>
+                            <span class="res-cost">${cs.join(' ')}</span>
+                            <span class="res-cost">⏳${formatTime(getBuildTime(k,0)/1000)}</span>
+                        </div>
+                        <button onclick="actBuild('${k}')" ${afford?'':'disabled'}>建設</button>
+                    </div>`;
             }
-            html += `</div>`;
             content.innerHTML = html;
+            return;
+        }
+        
+        // 建設中/稼働中
+        const b = BUILDINGS[tile.type];
+        if (tile.finishTime) {
+            const rem = Math.max(0, (tile.finishTime - Date.now()));
+            content.innerHTML = `
+                <div style="text-align:center;">
+                    <h3>${b.name} (Lv.${tile.level} -> ${tile.level+1})</h3>
+                    <h2 style="color:var(--accent-color)">${formatTime(rem/1000)}</h2>
+                    <p>工事中...</p>
+                </div>`;
         } else {
-            // レベルアップメニュー
-            const b = BUILDINGS[tile.type];
-            title.innerText = `${b.name} (Lv.${tile.level})`;
+            const next = tile.level+1;
+            const c = getCost(tile.type, tile.level);
+            const afford = checkAfford(c);
+            const caps = getStorageCapacity(tile.type, tile.level);
+            let cs = []; for(let r in c) if(c[r]>0) cs.push((r=='money'?'💰':r=='food'?'🌾':r=='wood'?'🌲':r=='stone'?'🪨':'🔩')+c[r]);
             
-            if (tile.finishTime) {
-                content.innerHTML = `<p>建設/拡張工事中です...</p>`;
-            } else {
-                const nextLv = tile.level; // 現在Lv0(建設前)なら次はLv1コスト
-                const cost = getCost(tile.type, nextLv);
-                const time = (getBuildTime(tile.type, nextLv)/1000).toFixed(1);
-                const canAfford = checkAfford(cost);
-
-                content.innerHTML = `
-                    <p>生産力アップ: +${b.baseProd.money}💰 +${b.baseProd.wood}🌲 +${b.baseProd.stone}🪨</p>
-                    <div class="cost-info">
-                        必要コスト: 💰${cost.money} 🌲${cost.wood} 🪨${cost.stone}<br>
-                        所要時間: ${time}秒
-                    </div>
-                    <button onclick="upgrade()" ${canAfford ? '' : 'disabled'}>レベルアップ</button>
-                `;
+            // 生産・貯蔵情報
+            let prodInfo = ""; let storeInfo = "";
+            for(let r in b.prod) if(b.prod[r]>0) {
+                const val = b.prod[r]*tile.level*Math.pow(1.05, tile.level-1);
+                prodInfo += `${(r=='money'?'💰':r=='food'?'🌾':r=='wood'?'🌲':r=='stone'?'🪨':'🔩')}${val.toFixed(1)}/s `;
+                storeInfo += `<div>${(r=='money'?'💰':r=='food'?'🌾':r=='wood'?'🌲':r=='stone'?'🪨':'🔩')} ${Math.floor(tile.stored[r])}/${Math.floor(caps[r])}</div>`;
             }
+
+            content.innerHTML = `
+                <div style="text-align:center;">
+                    <h3>${b.name} (Lv.${tile.level})</h3>
+                    <div style="background:#f0f0f0; padding:5px; border-radius:5px; margin-bottom:5px;">
+                        <strong>生産力:</strong><br>${prodInfo}
+                    </div>
+                    <div style="background:#e8f4f8; padding:5px; border-radius:5px; margin-bottom:10px;">
+                        <strong>貯蔵庫:</strong><br>${storeInfo}
+                    </div>
+                    <div style="text-align:left; font-size:0.9em; margin-bottom:5px;">
+                         <strong>LvUP費用:</strong> ${cs.join(' ')}<br>
+                         <strong>時間:</strong> ${formatTime(getBuildTime(tile.type, tile.level)/1000)}
+                    </div>
+                    <button class="action-btn" onclick="actBuild('${tile.type}')" ${afford?'':'disabled'}>レベルアップ</button>
+                </div>`;
         }
     }
 
-    // --- アクション ---
-
-    // 建設開始
-    function build(type) {
-        if (selectedTileIndex === null) return;
-        const tile = gameState.tiles[selectedTileIndex];
-        const cost = getCost(type, 0);
-
-        if (checkAfford(cost)) {
-            payCost(cost);
-            tile.type = type;
-            tile.level = 0; // 建設中はLv0扱い
-            tile.finishTime = Date.now() + getBuildTime(type, 0);
-            
+    // --- ボタンアクション ---
+    window.actBuild = function(type) {
+        if(selectedTileIndex===null) return;
+        const t = gameState.tiles[selectedTileIndex];
+        const lv = t.type===type ? t.level : 0;
+        const c = getCost(type, lv);
+        if(checkAfford(c)) {
+            payCost(c);
+            t.type = type;
+            t.finishTime = Date.now() + getBuildTime(type, lv);
+            t.stored = {};
             saveGame();
-            renderMap();
-            showPanel(selectedTileIndex);
+            sync3DState();
+            updatePanelUI();
         }
     }
-
-    // レベルアップ開始
-    function upgrade() {
-        if (selectedTileIndex === null) return;
-        const tile = gameState.tiles[selectedTileIndex];
-        const cost = getCost(tile.type, tile.level);
-
-        if (checkAfford(cost)) {
-            payCost(cost);
-            tile.finishTime = Date.now() + getBuildTime(tile.type, tile.level);
-            
+    
+    window.actExpand = function() {
+        if(selectedTileIndex===null) return;
+        const c = getExpandCost(gameState.rank);
+        if(checkAfford(c)) {
+            payCost(c);
+            gameState.tiles[selectedTileIndex].unlocked = true;
             saveGame();
-            renderMap();
-            showPanel(selectedTileIndex);
+            sync3DState();
+            updatePanelUI();
         }
     }
 
-    // --- 計算ロジック ---
-
-    function getCost(type, currentLevel) {
-        const b = BUILDINGS[type];
-        const multiplier = Math.pow(1.5, currentLevel);
-        return {
-            money: Math.floor(b.baseCost.money * multiplier),
-            wood: Math.floor(b.baseCost.wood * multiplier),
-            stone: Math.floor(b.baseCost.stone * multiplier)
-        };
+    function updateHeader() {
+        for(let k in gameState.resources) document.getElementById('display-'+k).innerText = Math.floor(gameState.resources[k]).toLocaleString();
+        document.getElementById('display-rank').innerText = gameState.rank;
+        document.getElementById('display-next-xp').innerText = (getNextRankXP(gameState.rank)-gameState.xp).toLocaleString();
+        document.getElementById('display-xp-bar').style.width = Math.min(100, (gameState.xp/getNextRankXP(gameState.rank))*100)+'%';
     }
 
-    function getBuildTime(type, currentLevel) {
-        const b = BUILDINGS[type];
-        return Math.floor(b.baseTime * Math.pow(1.2, currentLevel));
+    // --- その他 ---
+    function onWindowResize() {
+        const c = document.getElementById('game-container');
+        const aspect = c.clientWidth / c.clientHeight;
+        const d = 10;
+        camera.left = -d * aspect;
+        camera.right = d * aspect;
+        camera.top = d;
+        camera.bottom = -d;
+        camera.updateProjectionMatrix();
+        renderer.setSize(c.clientWidth, c.clientHeight);
     }
-
-    function checkAfford(cost) {
-        return gameState.resources.money >= cost.money &&
-               gameState.resources.wood >= cost.wood &&
-               gameState.resources.stone >= cost.stone;
-    }
-
-    function payCost(cost) {
-        gameState.resources.money -= cost.money;
-        gameState.resources.wood -= cost.wood;
-        gameState.resources.stone -= cost.stone;
-        updateUI();
-    }
-
-    // --- セーブ & ロード & オフライン計算 ---
 
     function saveGame() {
         gameState.lastSaveTime = Date.now();
-        localStorage.setItem('cityBuilderSave', JSON.stringify(gameState));
+        localStorage.setItem('kingdomBuilder3DSave', JSON.stringify(gameState));
     }
 
     function loadGame() {
-        const saved = localStorage.getItem('cityBuilderSave');
-        if (saved) {
-            const loadedState = JSON.parse(saved);
-            
-            // オフライン経過時間の計算
+        const s = localStorage.getItem('kingdomBuilder3DSave');
+        if(s) {
+            const d = JSON.parse(s);
+            gameState = { ...gameState, ...d };
+            // オフライン経過
             const now = Date.now();
-            const elapsedSeconds = (now - loadedState.lastSaveTime) / 1000;
-            
-            let earned = { money: 0, wood: 0, stone: 0 };
-
-            loadedState.tiles.forEach(tile => {
-                if (tile.type && tile.level > 0 && !tile.finishTime) {
-                    const b = BUILDINGS[tile.type];
-                    earned.money += b.baseProd.money * tile.level * elapsedSeconds;
-                    earned.wood += b.baseProd.wood * tile.level * elapsedSeconds;
-                    earned.stone += b.baseProd.stone * tile.level * elapsedSeconds;
-                }
-            });
-
-            // 資源加算
-            loadedState.resources.money += earned.money;
-            loadedState.resources.wood += earned.wood;
-            loadedState.resources.stone += earned.stone;
-            loadedState.lastSaveTime = now;
-
-            // 状態反映
-            gameState = loadedState;
-
-            // オフライン収益レポート表示
-            if (elapsedSeconds > 10) { // 10秒以上経過していたら表示
-                document.getElementById('offline-report').innerHTML = 
-                    `💰 +${Math.floor(earned.money)}<br>🌲 +${Math.floor(earned.wood)}<br>🪨 +${Math.floor(earned.stone)}`;
-                document.getElementById('modal').style.display = 'flex';
+            const sec = (now - gameState.lastSaveTime)/1000;
+            if(sec > 10) {
+                // (簡易実装: 建設完了と生産のみ計算)
+                let rep = ""; let built = 0; let earn = {};
+                gameState.tiles.forEach(t => {
+                    if(t.finishTime && t.finishTime <= now) { t.level++; t.finishTime=null; built++; gameState.xp+=Math.floor(getBuildTime(t.type,t.level-1)/1000); }
+                    if(t.type && t.level>0 && !t.finishTime) {
+                        const b=BUILDINGS[t.type]; const caps=getStorageCapacity(t.type,t.level);
+                        for(let r in b.prod) if(b.prod[r]>0) {
+                            if(!earn[r]) earn[r]=0;
+                            const add = Math.min(caps[r]-(t.stored[r]||0), b.prod[r]*t.level*Math.pow(1.05,t.level-1)*sec);
+                            if(add>0) { t.stored[r]=(t.stored[r]||0)+add; earn[r]+=add; }
+                        }
+                    }
+                });
+                if(built>0) rep+=`<div>🏗️ ${built}件完了</div>`;
+                for(let r in earn) if(earn[r]>1) rep+=`<div>+${Math.floor(earn[r]).toLocaleString()} ${r}</div>`;
+                if(rep) { document.getElementById('offline-report').innerHTML=rep; document.getElementById('modal-offline').style.display='flex'; }
             }
+            gameState.lastSaveTime = now;
         }
     }
+    
+    window.closeModal = function(id) { document.getElementById(id).style.display='none'; }
 
-    // 開始
-    window.onload = initGame;
+    // Start
+    window.onload = init;
 
 </script>
 </body>
