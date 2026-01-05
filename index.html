@@ -203,7 +203,18 @@
             padding-bottom: 10px; margin-bottom: 10px;
         }
         #panel-title { margin: 0; font-size: 1.1em; color: var(--accent-color); }
-        .close-btn { cursor: pointer; font-weight: bold; padding: 0 5px; color: #999; }
+        
+        /* 閉じるボタンのタップ領域を拡大 */
+        .close-btn { 
+            cursor: pointer; 
+            font-weight: bold; 
+            padding: 10px 15px; 
+            color: #999; 
+            font-size: 1.2em; 
+            margin: -10px -10px -10px 0;
+        }
+        .close-btn:hover { color: #666; }
+
         #panel-content { flex: 1; overflow-y: auto; padding-right: 5px; }
 
         .building-item {
@@ -303,7 +314,6 @@
 </head>
 <body>
 
-<!-- ... (中略: HTML構造は変更なし) ... -->
 <div id="debug-log"></div>
 <div id="toast-notification"></div>
 
@@ -409,7 +419,6 @@
 
     // --- Firebase Init ---
     async function initFirebase() {
-        // ... (Firebase初期化ロジック: 変更なし) ...
         const loadingText = document.getElementById('loading-text');
         
         try {
@@ -469,7 +478,6 @@
     }
     
     // --- Cloud Load & Save Logic ---
-    // ... (loadGameFromCloud, saveGameToCloudは変更なし) ...
     async function loadGameFromCloud() {
         try {
             // オフラインモード または Cloud読込
@@ -586,7 +594,7 @@
 
 
     // --- Game Logic ---
-    // ... (Constants, GameState, etc. 変更なし) ...
+
     function log(msg, isError = false) {
         const el = document.getElementById('debug-log');
         if (!el) return;
@@ -636,6 +644,29 @@
         blacksmith: { name: "鍛冶屋", icon: "⚔️", prod: { money: 5, iron: 2 }, cost: { money: 800, food: 300, wood: 300, stone: 200, iron: 100 }, baseTime: 7000 }
     };
     
+    // 施設制限のためのキー配列と制限開始インデックス
+    const BUILDING_KEYS = Object.keys(BUILDINGS);
+    const LIMIT_START_INDEX = BUILDING_KEYS.indexOf('market'); // market以降は制限対象
+
+    // 特定の施設の数をカウント（マップ上 + インベントリ）
+    function getBuildingCount(type) {
+        const onMap = gameState.tiles.filter(t => t.type === type).length;
+        const inInventory = gameState.inventory.filter(i => i.type === type).length;
+        return onMap + inInventory;
+    }
+
+    // 建設制限のチェック
+    function checkBuildingLimit(type) {
+        const typeIndex = BUILDING_KEYS.indexOf(type);
+        // 市場以降の施設、かつ4つ以上持っている場合はNG
+        if (typeIndex >= LIMIT_START_INDEX && typeIndex !== -1) {
+            if (getBuildingCount(type) >= 4) {
+                return false;
+            }
+        }
+        return true;
+    }
+    
     for(let k in BUILDINGS) {
         const b = BUILDINGS[k];
         for(let r of ['money','food','wood','stone','iron']) {
@@ -670,7 +701,6 @@
 
     // Called after Firestore load
     function initGame() {
-        // ... (initGame 変更なし) ...
         log("Game initializing...");
 
         if (typeof THREE === 'undefined') {
@@ -791,7 +821,6 @@
         setTimeout(onWindowResize, 100);
     }
     
-    // ... (updateMenuAnchor, createTiles, Person, initPedestrians, ParticleSystem, createBuildingMesh 変更なし) ...
     function updateMenuAnchor() {
         const offset = 2;
         const halfSize = (gameState.gridSize * offset) / 2;
@@ -1380,11 +1409,16 @@
         mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
         raycaster.setFromCamera(mouse, camera);
-        const intersects = raycaster.intersectObjects(scene.children, true);
+        
+        // ヒット判定対象をタイルのメッシュ（とっその子要素）に限定
+        // これにより、歩行者や地面の裏側などをクリックしてしまうのを防ぐ
+        const targetObjects = tileMeshes.map(t => t.mesh);
+        const intersects = raycaster.intersectObjects(targetObjects, true);
 
         if (intersects.length > 0) {
             let target = intersects[0].object;
-            while(target && !target.userData.index && target.parent) {
+            // 親を遡ってタイルルート(userData.indexを持つ)を探す
+            while(target && target.userData.index === undefined && target.parent) {
                 target = target.parent;
             }
 
@@ -1657,13 +1691,19 @@
                 gameState.inventory.forEach((item, idx) => {
                     const b = BUILDINGS[item.type];
                     const timeSec = getBuildTime(item.type, item.level - 1) / 1000;
+                    
+                    // 制限チェック
+                    const canRestore = checkBuildingLimit(item.type);
+                    const disabledAttr = canRestore ? '' : 'disabled';
+                    const warnText = canRestore ? '' : '<span style="color:red; font-size:0.8em;">(上限到達)</span>';
+
                     html += `
                         <div class="building-item" style="background:#fff8e1;">
                             <div class="building-info">
-                                <strong>${b.icon} ${b.name} (Lv.${item.level})</strong>
+                                <strong>${b.icon} ${b.name} (Lv.${item.level}) ${warnText}</strong>
                                 <span class="res-cost">⏳${formatTime(timeSec)}</span>
                             </div>
-                            <button onclick="actRestore(${idx})" style="background-color:#f39c12;">配置</button>
+                            <button onclick="actRestore(${idx})" style="background-color:#f39c12;" ${disabledAttr}>配置</button>
                         </div>
                     `;
                 });
@@ -1675,14 +1715,21 @@
                 const c = getCost(k, 0);
                 const afford = checkAfford(c);
                 let cs = []; for(let r in c) if(c[r]>0) cs.push((r=='money'?'💰':r=='food'?'🌾':r=='wood'?'🌲':r=='stone'?'🪨':'🔩')+c[r]);
+                
+                // 制限チェック
+                const canBuild = checkBuildingLimit(k);
+                const disabledAttr = (afford && canBuild) ? '' : 'disabled';
+                const limitText = canBuild ? '' : '<br><span style="color:red; font-size:0.8em;">⚠️ 上限(4つ)に達しています</span>';
+
                 html += `
                     <div class="building-item">
                         <div class="building-info">
                             <strong>${b.icon} ${b.name}</strong>
                             <span class="res-cost">${cs.join(' ')}</span>
                             <span class="res-cost">⏳${formatTime(getBuildTime(k,0)/1000)}</span>
+                            ${limitText}
                         </div>
-                        <button onclick="actBuild('${k}')" ${afford?'':'disabled'}>建設</button>
+                        <button onclick="actBuild('${k}')" ${disabledAttr}>建設</button>
                     </div>`;
             }
             content.innerHTML = html;
@@ -1745,6 +1792,13 @@
 
         const t = gameState.tiles[selectedTileIndex];
         const lv = t.type===type ? t.level : 0;
+        
+        // 新規建設の場合のみ数制限チェック
+        if(lv === 0 && !checkBuildingLimit(type)) {
+            showToast("⚠️ この施設はこれ以上建設できません");
+            return;
+        }
+
         const c = getCost(type, lv);
         if(checkAfford(c)) {
             payCost(c);
@@ -1789,6 +1843,13 @@
         if(invIndex < 0 || invIndex >= gameState.inventory.length) return;
 
         const item = gameState.inventory[invIndex];
+        
+        // 復元時も数制限チェック
+        if (!checkBuildingLimit(item.type)) {
+            showToast("⚠️ この施設はこれ以上配置できません");
+            return;
+        }
+
         const t = gameState.tiles[selectedTileIndex];
 
         gameState.inventory.splice(invIndex, 1);
