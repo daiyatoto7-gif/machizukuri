@@ -728,7 +728,7 @@
                          unlocked: false,
                          stored: {},
                          lastCollectTime: 0
-                     });
+                      });
                 }
             }
         } else {
@@ -1542,10 +1542,16 @@
     function getStorageCapacity(t,l){ const b=BUILDINGS[t], s=CONFIG.storageHours*3600, c={}; for(let r in b.prod) if(b.prod[r]>0) c[r]=b.prod[r]*l*Math.pow(1.05,l-1)*s; return c; }
     
     function getExpandCost(r){ 
-        const unlockedCount = gameState.tiles.filter(t=>t.unlocked).length;
-        let b = 500 * Math.pow(1.5, unlockedCount - 4); 
-        
+        // 修正: 実際のタイル数(unlockedCount)ではなく、
+        // 「そのランクで本来到達しているはずの進行度」を基準にコストを計算する。
+        // これにより、ランク12で拡張する際の費用を「元のコードのランク12での費用」と一致させる。
         const reqRank = getRequiredRankForExpansion();
+        
+        // 元の仕様では Rank = Count - 2 なので、Count = Rank + 2 となる
+        const virtualUnlockedCount = reqRank + 2;
+
+        let b = 500 * Math.pow(1.5, virtualUnlockedCount - 4); 
+        
         if(reqRank >= 6) b *= 20;
         
         return {money:Math.floor(b),food:Math.floor(b*0.5),wood:Math.floor(b*0.3),stone:Math.floor(b*0.1),iron:0}; 
@@ -1553,7 +1559,19 @@
     
     function getRequiredRankForExpansion(){ 
         const unlockedCount = gameState.tiles.filter(t=>t.unlocked).length;
-        return Math.max(2, unlockedCount - 2); 
+        
+        // 元の計算式: 基本的には タイル数 - 2 が必要ランク
+        const baseReq = Math.max(2, unlockedCount - 2); 
+
+        // ランク10までは今まで通り (1ランク1拡張)
+        if (baseReq <= 10) {
+            return baseReq;
+        } else {
+            // ランク10以降はペースを落とす (2ランク1拡張)
+            // baseReqが11 (本来ランク11で解放) の場合 -> ランク12で解放にする
+            // 計算式: 10 + (超過分 * 2)
+            return 10 + (baseReq - 10) * 2;
+        }
     }
 
     function checkAfford(c){ for(let k in c) if((gameState.resources[k]||0)<c[k]) return false; return true; }
