@@ -255,20 +255,21 @@
         }
         @keyframes popIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
-        /* メニューボタン: absolute配置 */
+        /* メニューボタン: 固定配置に変更 */
         #menu-btn {
-            position: absolute;
+            position: fixed;
+            top: 15px;
+            left: 15px;
             background: white;
             width: 40px; height: 40px;
             border-radius: 50%;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-            display: none; 
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            display: flex; 
             justify-content: center; align-items: center;
             font-size: 24px;
             cursor: pointer;
             z-index: 50;
             pointer-events: auto;
-            transform: translate(-50%, -50%);
         }
         #menu-btn:hover { background: #f0f0f0; }
 
@@ -377,6 +378,15 @@
         <h3 style="margin-top:0;">メニュー</h3>
         <div id="menu-content" style="max-height:60vh; overflow-y:auto;"></div>
         <button onclick="closeModal('modal-menu')" class="action-btn" style="background-color:#95a5a6; margin-top:20px;">閉じる</button>
+    </div>
+</div>
+
+<!-- 施設一覧用モーダル -->
+<div id="modal-building-list" class="modal">
+    <div class="modal-content" style="max-width:500px; max-height:80vh; overflow:hidden; display:flex; flex-direction:column;">
+        <h3 style="margin-top:0;">📋 施設一覧</h3>
+        <div id="building-list-content" style="flex:1; overflow-y:auto; text-align:left;"></div>
+        <button onclick="closeModal('modal-building-list')" class="action-btn" style="background-color:#95a5a6; margin-top:10px;">閉じる</button>
     </div>
 </div>
 
@@ -691,7 +701,7 @@
     let raycaster, mouse;
     let tileMeshes = []; 
     let pedestrians = []; 
-    let menuAnchor;
+    // let menuAnchor; // 削除
     
     // カメラ移動用変数
     let pointerDownPos = new THREE.Vector2();
@@ -802,7 +812,7 @@
         raycaster = new THREE.Raycaster();
         mouse = new THREE.Vector2();
         
-        updateMenuAnchor();
+        // updateMenuAnchor(); // 削除
 
         createTiles();
         initPedestrians();
@@ -821,11 +831,7 @@
         setTimeout(onWindowResize, 100);
     }
     
-    function updateMenuAnchor() {
-        const offset = 2;
-        const halfSize = (gameState.gridSize * offset) / 2;
-        menuAnchor = new THREE.Vector3(0, 0, -(halfSize + 2.0));
-    }
+    // function updateMenuAnchor() {} // 削除
 
     function createTiles() {
         tileMeshes.forEach(t => {
@@ -1221,19 +1227,7 @@
             }
         });
         
-        if (menuAnchor) {
-            const pos = menuAnchor.clone();
-            pos.project(camera);
-            const x = (pos.x * widthHalf) + widthHalf;
-            const y = -(pos.y * heightHalf) + heightHalf;
-            
-            const btn = document.getElementById('menu-btn');
-            if(btn) {
-                btn.style.display = 'flex';
-                btn.style.left = `${x}px`;
-                btn.style.top = `${y}px`;
-            }
-        }
+        // menuAnchor関連削除
     }
 
     function sync3DState() {
@@ -1959,6 +1953,12 @@
 
         content.innerHTML = `
             <div class="shop-item">
+                <button class="action-btn" onclick="openBuildingList()" style="width:100%; margin-bottom:10px; background-color:#3498db;">
+                    📋 施設一覧
+                </button>
+            </div>
+
+            <div class="shop-item">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <div>
                         <strong>👷 大工の増員</strong><br>
@@ -2000,6 +2000,105 @@
         `;
         
         modal.style.display = 'flex';
+    };
+
+    window.openBuildingList = function() {
+        closeModal('modal-menu');
+        const modal = document.getElementById('modal-building-list');
+        const content = document.getElementById('building-list-content');
+        
+        let html = '<div style="font-weight:bold; margin-bottom:5px; color:#2c3e50;">🌍 マップ上の施設</div>';
+        
+        let mapBuildings = [];
+        gameState.tiles.forEach((t, i) => {
+            if(t.type) {
+                mapBuildings.push({ tile: t, index: i });
+            }
+        });
+        
+        if(mapBuildings.length === 0) {
+            html += '<p style="color:#999; font-size:0.9em;">施設はありません</p>';
+        } else {
+            mapBuildings.forEach(item => {
+                const b = BUILDINGS[item.tile.type];
+                const level = item.tile.level;
+                
+                let prodStr = "";
+                for(let r in b.prod) if(b.prod[r]>0) {
+                    const val = b.prod[r] * level * Math.pow(1.05, level - 1);
+                    const icon = (r=='money'?'💰':r=='food'?'🌾':r=='wood'?'🌲':r=='stone'?'🪨':'🔩');
+                    prodStr += `${icon}${val.toFixed(1)}/s `;
+                }
+                
+                html += `
+                    <div class="building-item" style="background:white; margin-bottom:5px;">
+                        <div class="building-info">
+                            <strong>${b.icon} ${b.name} (Lv.${level})</strong>
+                            <span style="font-size:0.8em; color:#666;">${prodStr}</span>
+                        </div>
+                        <button onclick="focusTile(${item.index})" style="padding:5px 10px; font-size:0.8em;">詳細</button>
+                    </div>
+                `;
+            });
+        }
+        
+        html += '<div style="font-weight:bold; margin-top:15px; margin-bottom:5px; color:#7f8c8d; border-top:1px dashed #ccc; padding-top:10px;">📦 保管庫の施設</div>';
+        
+        if(gameState.inventory.length === 0) {
+            html += '<p style="color:#999; font-size:0.9em;">保管庫は空です</p>';
+        } else {
+            gameState.inventory.forEach(item => {
+                const b = BUILDINGS[item.type];
+                html += `
+                    <div class="building-item" style="background:#f5f5f5; color:#666;">
+                        <div class="building-info">
+                            <strong>${b.icon} ${b.name} (Lv.${item.level})</strong>
+                            <span style="font-size:0.8em;">再設置待ち</span>
+                        </div>
+                        <span style="font-size:0.8em; background:#eee; padding:3px 6px; border-radius:4px;">保管中</span>
+                    </div>
+                `;
+            });
+        }
+        
+        content.innerHTML = html;
+        modal.style.display = 'flex';
+    };
+
+    window.focusTile = function(index) {
+        closeModal('modal-building-list');
+        selectTile(index);
+        
+        // カメラ移動
+        const tObj = tileMeshes[index];
+        if(tObj && camera) {
+            const targetX = tObj.mesh.position.x;
+            const targetZ = tObj.mesh.position.z;
+            
+            // 現在のY, Zoom, Rotationを維持しつつX,Zだけ移動
+            // OrthographicCameraなので、X,Z移動だけでOK（setCameraZoom等は維持）
+            // アニメーションなしで即移動させる
+            const offset = 20; // 初期位置のオフセット (20, 20, 20) を考慮
+            // カメラは (20, 20, 20) から (0,0,0) を見ている。
+            // ターゲットを画面中央にするには、カメラ位置をターゲット座標分ずらせばよい？
+            // OrthographicCameraでのパンニングは camera.position を動かすことで実現している。
+            // moveCamera関数は相対移動だが、ここでは絶対位置へ行きたい。
+            
+            // 現在のカメラ位置から、LookAt中心（と仮定される点）へのオフセットを維持して移動したいが、
+            // 簡易的に、タイルの真上にカメラを持ってくるような移動をする。
+            // 初期カメラ: pos(20,20,20), lookAt(0,0,0) -> 方向ベクトル(1,1,1)
+            
+            // 既存のパンニングロジックに合わせるため、カメラ位置を直接操作
+            // XとZをターゲットに合わせて移動
+            // ただし斜め視点なので、単純に x=targetX ではずれる。
+            // 既存のmoveCameraの逆算は複雑なので、パンニング位置変数をリセットして再計算などが理想だが...
+            
+            // シンプルに: カメラのX,Zを、ターゲットのX,Zにオフセットを加えたものにする
+            camera.position.x = targetX + 20;
+            camera.position.z = targetZ + 20;
+            // Yは変えない
+            camera.updateProjectionMatrix();
+        }
     };
 
     window.actLinkID = function() {
