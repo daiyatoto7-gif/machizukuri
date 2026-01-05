@@ -44,6 +44,11 @@
             width: 100vw;
         }
 
+        /* キャンバスのタッチアクションを無効化してブラウザスクロールを防ぐ */
+        canvas {
+            touch-action: none;
+        }
+
         header {
             width: 100%;
             background: rgba(255, 255, 255, 0.95);
@@ -298,6 +303,7 @@
 </head>
 <body>
 
+<!-- ... (中略: HTML構造は変更なし) ... -->
 <div id="debug-log"></div>
 <div id="toast-notification"></div>
 
@@ -403,6 +409,7 @@
 
     // --- Firebase Init ---
     async function initFirebase() {
+        // ... (Firebase初期化ロジック: 変更なし) ...
         const loadingText = document.getElementById('loading-text');
         
         try {
@@ -461,7 +468,8 @@
         });
     }
     
-    // --- Cloud Load Logic with Migration & Offline Fallback ---
+    // --- Cloud Load & Save Logic ---
+    // ... (loadGameFromCloud, saveGameToCloudは変更なし) ...
     async function loadGameFromCloud() {
         try {
             // オフラインモード または Cloud読込
@@ -537,7 +545,6 @@
         }
     }
 
-    // --- Cloud Save Logic with Offline Fallback ---
     async function saveGameToCloud(silent = false) {
         gameState.lastSaveTime = Date.now();
         
@@ -562,10 +569,8 @@
         }
     }
 
-    // Make save function globally available for the game logic
     window.saveGame = saveGameToCloud;
 
-    // Start Everything
     window.onload = function() {
         try {
             initFirebase();
@@ -580,8 +585,8 @@
     };
 
 
-    // --- Game Logic (Original Code Adapted) ---
-
+    // --- Game Logic ---
+    // ... (Constants, GameState, etc. 変更なし) ...
     function log(msg, isError = false) {
         const el = document.getElementById('debug-log');
         if (!el) return;
@@ -614,7 +619,7 @@
     const CONFIG = {
         initialGridSize: 5, 
         fps: 30, 
-        autoSaveInterval: 10000, // 10秒毎にオートセーブ
+        autoSaveInterval: 10000, 
         initialUnlocked: [6, 7, 8, 11, 12, 13],
         storageHours: 8,
         collectCooldown: 30000,
@@ -657,11 +662,15 @@
     let pedestrians = []; 
     let menuAnchor;
     
+    // カメラ移動用変数
     let pointerDownPos = new THREE.Vector2();
+    let lastPointerPos = new THREE.Vector2();
     let isDragging = false;
+    let isPanning = false;
 
     // Called after Firestore load
     function initGame() {
+        // ... (initGame 変更なし) ...
         log("Game initializing...");
 
         if (typeof THREE === 'undefined') {
@@ -672,11 +681,9 @@
         if (!gameState.maxBuilders) gameState.maxBuilders = CONFIG.initialMaxBuilders;
         if (!gameState.gridSize) gameState.gridSize = CONFIG.initialGridSize;
 
-        // タイルデータの整合性チェックと初期化
         const totalTiles = gameState.gridSize * gameState.gridSize;
         if (gameState.tiles.length !== totalTiles) {
             if (gameState.tiles.length === 0) {
-                // 完全新規
                 gameState.tiles = Array(totalTiles).fill(null).map((_, i) => ({
                     type: null, level: 0, finishTime: null, 
                     unlocked: CONFIG.initialUnlocked.includes(i), 
@@ -684,7 +691,6 @@
                     lastCollectTime: 0
                 }));
             } else {
-                // データ数とサイズが合わない場合、足りない分を埋める
                 const currentLen = gameState.tiles.length;
                 for(let i=currentLen; i<totalTiles; i++) {
                       gameState.tiles.push({
@@ -715,7 +721,7 @@
         
         requestAnimationFrame(animate3D);
         setInterval(gameLogicLoop, 1000); 
-        setInterval(() => window.saveGame(true), CONFIG.autoSaveInterval); // Auto-save silently
+        setInterval(() => window.saveGame(true), CONFIG.autoSaveInterval);
         setInterval(updatePanelUI, 500);
 
         log("Game loop started.");
@@ -750,7 +756,7 @@
         renderer.setSize(width, height);
         renderer.shadowMap.enabled = true;
         renderer.setClearColor( 0x000000, 0 ); 
-        container.innerHTML = ''; // Clear previous if any
+        container.innerHTML = ''; 
         container.appendChild(renderer.domElement);
         
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -780,10 +786,12 @@
         renderer.domElement.addEventListener('wheel', onMouseWheel, { passive: false });
         renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
         renderer.domElement.addEventListener('touchmove', onTouchMove, { passive: false });
+        renderer.domElement.addEventListener('touchend', onTouchEnd, { passive: false });
         
         setTimeout(onWindowResize, 100);
     }
     
+    // ... (updateMenuAnchor, createTiles, Person, initPedestrians, ParticleSystem, createBuildingMesh 変更なし) ...
     function updateMenuAnchor() {
         const offset = 2;
         const halfSize = (gameState.gridSize * offset) / 2;
@@ -791,7 +799,6 @@
     }
 
     function createTiles() {
-        // 既存メッシュの削除
         tileMeshes.forEach(t => {
             scene.remove(t.mesh);
             scene.remove(t.groundMesh);
@@ -801,7 +808,6 @@
 
         const geometry = new THREE.BoxGeometry(1.4, 0.5, 1.4);
         const unlockedMat = new THREE.MeshStandardMaterial({ color: 0xecf0f1 });
-        
         const groundGeo = new THREE.PlaneGeometry(2.0, 2.0);
         const groundMatBase = new THREE.MeshStandardMaterial({ color: 0x555555 });
 
@@ -846,7 +852,6 @@
                 currentType: null 
             });
         }
-        
         sync3DState();
     }
 
@@ -854,64 +859,49 @@
         constructor(scene) {
             this.scene = scene;
             this.mesh = new THREE.Group();
-            
             const bodyColor = Math.random() * 0xffffff;
             const bodyGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.25, 8);
             const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor });
             const body = new THREE.Mesh(bodyGeo, bodyMat);
             body.position.y = 0.125;
             this.mesh.add(body);
-            
             const headGeo = new THREE.SphereGeometry(0.1, 8, 8);
             const headMat = new THREE.MeshStandardMaterial({ color: 0xffccaa });
             const head = new THREE.Mesh(headGeo, headMat);
             head.position.y = 0.35;
             this.mesh.add(head);
-            
             this.mesh.castShadow = true;
             scene.add(this.mesh);
-            
             this.active = false;
             this.mesh.visible = false;
             this.isStopped = false;
             this.stopTimer = 0;
             this.canTurn = true;
-            
             this.reset();
         }
-        
         getNearestRoadCoord(val) {
             const size = gameState.gridSize;
             const offset = 2; 
             const tileStart = -offset * (size - 1) / 2;
             const roadStart = tileStart + 1;
-            
             const index = Math.round((val - roadStart) / offset);
             return roadStart + index * offset;
         }
-
         reset() {
             const isVertical = Math.random() < 0.5;
             const size = gameState.gridSize;
             const offset = 2; 
-            
             const tileStart = -offset * (size - 1) / 2;
             const roadStart = tileStart + 1;
-            
             const roadCount = Math.max(1, size - 1); 
             const roadIndex = Math.floor(Math.random() * roadCount);
-            
             const laneCenter = roadStart + roadIndex * offset;
-            
             const jitter = (Math.random() - 0.5) * 0.4;
             const lane = laneCenter + jitter;
-            
             this.baseSpeed = (0.02 + Math.random() * 0.02) * 0.25;
             this.speed = this.baseSpeed;
-            
             let sx, sz, dx, dz;
             const spawnDist = size + 5; 
-            
             if (isVertical) {
                 sx = lane;
                 sz = (Math.random() < 0.5 ? -spawnDist : spawnDist);
@@ -921,34 +911,26 @@
                 sx = (Math.random() < 0.5 ? -spawnDist : spawnDist);
                 dx = sx > 0 ? -1 : 1; dz = 0;
             }
-
             this.mesh.position.set(sx, 0, sz);
             this.direction = new THREE.Vector3(dx, 0, dz);
-            
             this.active = true;
             this.isStopped = false;
             this.canTurn = true;
             this.updateVisibility();
         }
-
         isOnGreenRoad(x, z, isVertical) {
             const size = gameState.gridSize;
             const offset = 2;
             const start = -offset * (size - 1) / 2;
-            
             const checkTile = (wx, wz) => {
                 const col = Math.round((wx - start) / offset);
                 const row = Math.round((wz - start) / offset);
-                
                 if (col < 0 || col >= size || row < 0 || row >= size) return false;
-                
                 const idx = row * size + col;
                 return gameState.tiles[idx] && gameState.tiles[idx].unlocked;
             };
-
             let t1_unlocked = false;
             let t2_unlocked = false;
-
             if (isVertical) {
                 t1_unlocked = checkTile(x - 1, Math.round(z));
                 t2_unlocked = checkTile(x + 1, Math.round(z));
@@ -956,16 +938,13 @@
                 t1_unlocked = checkTile(Math.round(x), z - 1);
                 t2_unlocked = checkTile(Math.round(x), z + 1);
             }
-
             return (!t1_unlocked && !t2_unlocked);
         }
-        
         update() {
             if (!this.active) {
                 if (Math.random() < 0.01) this.reset();
                 return;
             }
-
             if (this.isStopped) {
                 this.stopTimer--;
                 if (this.stopTimer <= 0) {
@@ -974,22 +953,17 @@
                 this.updateVisibility();
                 return;
             }
-
             if (Math.random() < 0.005) {
                 this.isStopped = true;
                 this.stopTimer = 30 + Math.random() * 60;
                 return;
             }
-
             const nearestRoadX = this.getNearestRoadCoord(this.mesh.position.x);
             const nearestRoadZ = this.getNearestRoadCoord(this.mesh.position.z);
-            
             const distX = Math.abs(this.mesh.position.x - nearestRoadX);
             const distZ = Math.abs(this.mesh.position.z - nearestRoadZ);
-            
             const intersectionThreshold = 0.1; 
             const isAtIntersection = (distX < intersectionThreshold && distZ < intersectionThreshold);
-
             if (isAtIntersection) {
                 if (this.canTurn) {
                     if(Math.random() < 0.5) {
@@ -1000,7 +974,6 @@
                             new THREE.Vector3(0, 0, -1)
                         ];
                         this.direction = dirs[Math.floor(Math.random() * dirs.length)];
-                        
                         this.mesh.position.x = nearestRoadX;
                         this.mesh.position.z = nearestRoadZ;
                     }
@@ -1011,19 +984,15 @@
                     this.canTurn = true;
                 }
             }
-
             this.mesh.position.addScaledVector(this.direction, this.speed);
-            
             const limit = gameState.gridSize * 1.5 + 5;
             if (Math.abs(this.mesh.position.x) > limit || Math.abs(this.mesh.position.z) > limit) {
                 this.reset();
                 return;
             }
-            
             this.updateVisibility();
             this.mesh.position.y = Math.abs(Math.sin(Date.now() * 0.005)) * 0.05;
         }
-
         updateVisibility() {
             const isVertical = (this.direction.z !== 0);
             if (this.isOnGreenRoad(this.mesh.position.x, this.mesh.position.z, isVertical)) {
@@ -1050,14 +1019,11 @@
             this.particles = [];
             this.scene = scene;
             this.active = false;
-            
             this.geo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
             this.mat = new THREE.MeshBasicMaterial({ color: 0xdddddd, transparent: true });
         }
-
         update() {
             if (!this.active && this.particles.length === 0) return;
-
             if (this.active && Math.random() < 0.2) {
                 const mesh = new THREE.Mesh(this.geo, this.mat.clone());
                 const offset = new THREE.Vector3((Math.random()-0.5)*1.5, 0, (Math.random()-0.5)*1.5);
@@ -1069,7 +1035,6 @@
                     life: 1.0 
                 });
             }
-
             for (let i = this.particles.length - 1; i >= 0; i--) {
                 const p = this.particles[i];
                 p.mesh.position.add(p.vel);
@@ -1077,7 +1042,6 @@
                 p.mesh.rotation.y += 0.1;
                 p.life -= 0.02;
                 p.mesh.material.opacity = p.life;
-
                 if (p.life <= 0) {
                     this.scene.remove(p.mesh);
                     this.particles.splice(i, 1);
@@ -1090,7 +1054,6 @@
         const group = new THREE.Group();
         const scale = 1 + (level * 0.05);
         group.scale.set(scale, scale, scale);
-
         const matRoof = new THREE.MeshStandardMaterial({ color: 0xe74c3c }); 
         const matWall = new THREE.MeshStandardMaterial({ color: 0xf39c12 }); 
         const matLeaf = new THREE.MeshStandardMaterial({ color: 0x2ecc71 }); 
@@ -1098,7 +1061,6 @@
         const matDark = new THREE.MeshStandardMaterial({ color: 0x34495e }); 
         const matTent = new THREE.MeshStandardMaterial({ color: 0x3498db }); 
         const matGrass = new THREE.MeshStandardMaterial({ color: 0x27ae60 });
-
         switch(type) {
             case 'wild': // 未開拓地の草
                 for(let i=0; i<8; i++) {
@@ -1116,7 +1078,6 @@
                     group.add(leaves);
                 }
                 break;
-
             case 'house':
                 const wall = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.6, 0.8), matWall);
                 wall.position.y = 0.3;
@@ -1131,7 +1092,6 @@
                 chimney.position.set(0.2, 0.8, 0.2);
                 group.add(chimney);
                 break;
-
             case 'farm':
                 const soil = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.1, 1.0), new THREE.MeshStandardMaterial({color:0x8B4513}));
                 soil.position.y = 0.05;
@@ -1143,7 +1103,6 @@
                     group.add(crop);
                 }
                 break;
-
             case 'lumber':
                 const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.15, 0.4), new THREE.MeshStandardMaterial({color:0x8B4513}));
                 trunk.position.y = 0.2;
@@ -1155,7 +1114,6 @@
                 stump.position.set(0.4, 0.1, 0.4);
                 group.add(stump);
                 break;
-
             case 'quarry':
                 const rock1 = new THREE.Mesh(new THREE.DodecahedronGeometry(0.4), matStone);
                 rock1.position.y = 0.3;
@@ -1164,7 +1122,6 @@
                 rock2.position.set(0.4, 0.2, 0.3);
                 group.add(rock2);
                 break;
-
             case 'mine':
                 const frame = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.6, 0.2), new THREE.MeshStandardMaterial({color:0x5d4037}));
                 frame.position.set(0, 0.3, -0.2);
@@ -1173,7 +1130,6 @@
                 hole.position.set(0, 0.25, -0.1);
                 group.add(hole);
                 break;
-
             case 'market':
                 const post = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.4, 0.8), new THREE.MeshStandardMaterial({color:0xecf0f1}));
                 post.position.y = 0.2;
@@ -1183,7 +1139,6 @@
                 tent.rotation.y = Math.PI / 4;
                 group.add(tent);
                 break;
-
             case 'blacksmith':
                 const houseB = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.5, 0.6), matDark);
                 houseB.position.y = 0.25;
@@ -1386,16 +1341,37 @@
 
     function onPointerDown(event) {
         pointerDownPos.set(event.clientX, event.clientY);
+        lastPointerPos.set(event.clientX, event.clientY); // パンニング用
         isDragging = false;
+        
+        // 左クリックまたはタッチの場合のみ移動開始
+        if (event.button === 0 || event.pointerType === 'touch') {
+            isPanning = true;
+        }
     }
 
     function onPointerMove(event) {
-        if (Math.abs(event.clientX - pointerDownPos.x) > 5 || Math.abs(event.clientY - pointerDownPos.y) > 5) {
+        // ドラッグ判定（クリックと区別するため）
+        if (!isDragging && (Math.abs(event.clientX - pointerDownPos.x) > 5 || Math.abs(event.clientY - pointerDownPos.y) > 5)) {
             isDragging = true;
+        }
+
+        // パンニング処理
+        if (isPanning) {
+            const deltaX = event.clientX - lastPointerPos.x;
+            const deltaY = event.clientY - lastPointerPos.y;
+            lastPointerPos.set(event.clientX, event.clientY);
+
+            // ズーム中（2本指）は移動させない
+            if (touchStartDist > 0) return; 
+
+            moveCamera(deltaX, deltaY);
         }
     }
 
     function onPointerUp(event) {
+        isPanning = false;
+        
         if (isDragging) return;
 
         event.preventDefault();
@@ -1423,6 +1399,29 @@
             closePanel();
         }
     }
+    
+    // カメラ移動関数
+    function moveCamera(dx, dy) {
+        if (!camera) return;
+        
+        // ズームレベルに応じて移動速度を調整
+        const speed = 0.05 / camera.zoom; 
+
+        const vec = new THREE.Vector3();
+        const quat = camera.quaternion.clone();
+        
+        // 画面右方向（X軸）
+        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quat);
+        right.y = 0; right.normalize();
+        
+        // 画面上方向（Y軸）
+        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(quat);
+        up.y = 0; up.normalize();
+
+        // カメラ位置更新 (逆方向に動かすと地面をつかんで動かす感覚になる)
+        camera.position.addScaledVector(right, -dx * speed);
+        camera.position.addScaledVector(up, dy * speed);
+    }
 
     function setCameraZoom(val) {
         if (!camera) return;
@@ -1444,6 +1443,7 @@
 
     function onTouchStart(event) {
         if (event.touches.length === 2) {
+            isPanning = false; // ズーム開始時はパンニング停止
             const dx = event.touches[0].pageX - event.touches[1].pageX;
             const dy = event.touches[0].pageY - event.touches[1].pageY;
             touchStartDist = Math.sqrt(dx * dx + dy * dy);
@@ -1452,8 +1452,12 @@
     }
 
     function onTouchMove(event) {
+        // キャンバス上でのデフォルトスクロール防止
+        if(event.target === renderer.domElement) {
+             event.preventDefault();
+        }
+
         if (event.touches.length === 2) {
-            event.preventDefault();
             const dx = event.touches[0].pageX - event.touches[1].pageX;
             const dy = event.touches[0].pageY - event.touches[1].pageY;
             const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1462,6 +1466,12 @@
                 const scale = dist / touchStartDist;
                 setCameraZoom(touchStartZoom * scale);
             }
+        }
+    }
+    
+    function onTouchEnd(event) {
+        if (event.touches.length < 2) {
+            touchStartDist = 0;
         }
     }
     
