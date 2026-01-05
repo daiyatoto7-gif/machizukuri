@@ -399,6 +399,7 @@
 
     let currentUser = null;
     let userDocRef = null;
+    let currentDocId = null; // 実際に読み書きするID（共有IDまたは自分のUID）
 
     // --- Firebase Init ---
     async function initFirebase() {
@@ -441,8 +442,18 @@
         onAuthStateChanged(auth, async (user) => {
             if (user) {
                 currentUser = user;
-                // Rule: /artifacts/{appId}/users/{userId}/{collectionName}
-                userDocRef = doc(db, 'artifacts', appId, 'users', user.uid, 'gameData', 'saveSlot1');
+                
+                // 共有設定(ID連携)があるか確認
+                const sharedId = localStorage.getItem('kingdomBuilder_sharedId');
+                if (sharedId) {
+                    currentDocId = sharedId;
+                    console.log("Using Shared ID:", currentDocId);
+                } else {
+                    currentDocId = user.uid;
+                }
+
+                // Rule: /artifacts/{appId}/users/{userId}/gameData/saveSlot1
+                userDocRef = doc(db, 'artifacts', appId, 'users', currentDocId, 'gameData', 'saveSlot1');
                 
                 loadingText.innerText = "Loading Kingdom...";
                 await loadGameFromCloud();
@@ -1806,6 +1817,10 @@
         const builderCost = getBuilderCost();
         const canBuyBuilder = gameState.resources.money >= builderCost;
         const currentUid = currentUser ? currentUser.uid : "未接続(オフライン)";
+        
+        // 共有ID設定があればそちらを表示
+        const sharedUid = localStorage.getItem('kingdomBuilder_sharedId');
+        const displayUid = sharedUid ? `${sharedUid} (連携中)` : currentUid;
 
         content.innerHTML = `
             <div class="shop-item">
@@ -1824,17 +1839,18 @@
             </div>
             
             <div class="shop-item">
-                <strong>🔄 データ引き継ぎ・復元</strong>
+                <strong>🔄 ID連携 (同期プレイ)</strong>
                 <p style="font-size:0.8em; color:#666; margin:5px 0;">
-                    あなたのユーザーID (コピーして保存):<br>
-                    <input type="text" value="${currentUid}" readonly style="width:100%; padding:5px; background:#eee; border:1px solid #ddd; border-radius:4px;" onclick="this.select();document.execCommand('copy');showToast('IDをコピーしました')">
+                    現在のID (このIDを別端末に入力):<br>
+                    <input type="text" value="${sharedUid || currentUid}" readonly style="width:100%; padding:5px; background:#eee; border:1px solid #ddd; border-radius:4px;" onclick="this.select();document.execCommand('copy');showToast('IDをコピーしました')">
                 </p>
                 <div style="margin-top:10px; border-top:1px dashed #ccc; padding-top:10px;">
-                    <p style="font-size:0.8em; color:#666; margin:0 0 5px 0;">以前のIDを入力して復元:</p>
+                    <p style="font-size:0.8em; color:#666; margin:0 0 5px 0;">別端末のIDを入力して連携:</p>
                     <div style="display:flex; gap:5px;">
-                        <input type="text" id="restore-uid-input" placeholder="旧ユーザーID" style="flex:1; padding:5px; border:1px solid #ddd; border-radius:4px;">
-                        <button onclick="actRestoreFromID()" style="padding:5px 10px; font-size:0.9em;">復元</button>
+                        <input type="text" id="restore-uid-input" placeholder="連携するIDを入力" style="flex:1; padding:5px; border:1px solid #ddd; border-radius:4px;">
+                        <button onclick="actLinkID()" style="padding:5px 10px; font-size:0.9em;">連携</button>
                     </div>
+                    ${sharedUid ? '<div style="margin-top:5px;"><button onclick="actUnlinkID()" style="width:100%; background-color:#e74c3c;">連携を解除する</button></div>' : ''}
                 </div>
             </div>
 
@@ -1851,47 +1867,22 @@
         modal.style.display = 'flex';
     };
 
-    window.actRestoreFromID = async function() {
-        if (!db) return showToast("エラー: データベース未接続");
+    window.actLinkID = function() {
         const input = document.getElementById('restore-uid-input');
         const targetUid = input.value.trim();
+        if(!targetUid) return showToast("⚠️ IDを入力してください");
         
-        if (!targetUid) return showToast("⚠️ IDを入力してください");
-        if (currentUser && targetUid === currentUser.uid) return showToast("⚠️ 現在のIDと同じです");
-
-        if (!confirm("⚠️ 警告: データを復元すると、現在の進行状況は上書きされます。\n本当によろしいですか？")) return;
-
-        try {
-            // 他のユーザーIDのパスからデータを読み込む試み
-            // Note: Firebaseのセキュリティルールで許可されている必要があります
-            const targetDocRef = doc(db, 'artifacts', appId, 'users', targetUid, 'gameData', 'saveSlot1');
-            const snap = await getDoc(targetDocRef);
-
-            if (snap.exists()) {
-                const data = snap.data();
-                // データを適用
-                gameState = { ...gameState, ...data };
-                gameState.lastSaveTime = Date.now(); // 時刻は更新
-                
-                // 自分のIDで保存し直す
-                await saveGameToCloud(true);
-                
-                // 再描画とリセット
-                createTiles(); // タイル再生成
-                initPedestrians();
-                updateHeader();
-                sync3DState();
-                
-                showToast("✅ データの復元に成功しました！");
-                closeModal('modal-menu');
-            } else {
-                showToast("❌ 指定されたIDのデータは見つかりませんでした");
-            }
-        } catch (e) {
-            console.error("Restore failed:", e);
-            showToast("❌ 復元エラー: アクセス権限がないかIDが間違っています");
-        }
+        if(!confirm("⚠️ ID連携モード\n\n入力したIDのデータを『共有』してプレイします。\n複数の端末で同じデータを同期できます。\n(※Firebaseのルール設定が必要です)\n\n切り替えますか？")) return;
+        
+        localStorage.setItem('kingdomBuilder_sharedId', targetUid);
+        location.reload();
     };
+    
+    window.actUnlinkID = function() {
+        if(!confirm("連携を解除し、本来の自分のIDに戻りますか？")) return;
+        localStorage.removeItem('kingdomBuilder_sharedId');
+        location.reload();
+    }
 
     window.actBuyBuilder = function() {
         const cost = getBuilderCost();
