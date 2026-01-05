@@ -1199,7 +1199,13 @@
 
         tileMeshes.forEach((t, i) => {
             const pos = t.mesh.position.clone();
-            pos.y += 1.5; 
+            
+            // 修正: 未開拓地の場合はアイコン位置を低くする
+            if (gameState.tiles[i] && !gameState.tiles[i].unlocked) {
+                pos.y += 0.5;
+            } else {
+                pos.y += 1.5; 
+            }
 
             pos.project(camera);
 
@@ -1554,7 +1560,23 @@
         
         if(reqRank >= 6) b *= 20;
         
-        return {money:Math.floor(b),food:Math.floor(b*0.5),wood:Math.floor(b*0.3),stone:Math.floor(b*0.1),iron:0}; 
+        let cost = {
+            money: Math.floor(b),
+            food: Math.floor(b*0.5),
+            wood: Math.floor(b*0.3),
+            stone: Math.floor(b*0.1),
+            iron: 0
+        };
+        
+        // ランク12以上の場合、さらにコストを増加
+        if (reqRank >= 12) {
+            cost.money *= 20;
+            cost.food *= 20;
+            cost.wood *= 5;
+            cost.stone *= 5;
+        }
+        
+        return cost; 
     }
     
     function getRequiredRankForExpansion(){ 
