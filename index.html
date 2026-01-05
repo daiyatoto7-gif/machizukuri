@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Kingdom Builder 3D (Cloud Save)</title>
+    <title>Kingdom Builder 3D (Cloud Save & Migration)</title>
     
     <!-- デバッグ用スタイル -->
     <style>
@@ -366,24 +366,13 @@
 
 <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
-    import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
+    import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
     import { getFirestore, doc, setDoc, getDoc, collection } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
 
     // Global Firebase Variables
-    // ユーザー指定のConfig
-    const firebaseConfig = {
-      apiKey: "AIzaSyBzJkeWGrzm5pFKAuX_Vkk-w1w4tsKHsDo",
-      authDomain: "kingdom-builder-cdfb9.firebaseapp.com",
-      projectId: "kingdom-builder-cdfb9",
-      storageBucket: "kingdom-builder-cdfb9.firebasestorage.app",
-      messagingSenderId: "672874506084",
-      appId: "1:672874506084:web:573a57495e5a350d4fbc71",
-      measurementId: "G-F6JMJJR146"
-    };
-
-    // Firestoreのパス /artifacts/{appId}/users/... に使用するため、
-    // プロジェクトIDをApp IDとして使用します。
-    const appId = firebaseConfig.projectId;
+    // ユーザー指定のConfigを削除し、環境変数を使用
+    const firebaseConfig = JSON.parse(__firebase_config);
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
@@ -396,13 +385,23 @@
     async function initFirebase() {
         const loadingText = document.getElementById('loading-text');
         
-        // 1. Authenticate (Anonymous only)
+        // 1. Authenticate (Custom Token Priority -> Anonymous)
         try {
-            await signInAnonymously(auth);
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                 await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                 await signInAnonymously(auth);
+            }
         } catch (error) {
             console.error("Auth failed:", error);
             loadingText.innerText = "Auth Error: " + error.message;
-            return;
+            // リトライ（カスタムトークンが期限切れなどの場合、匿名認証を試みる）
+            try {
+                await signInAnonymously(auth);
+            } catch (e) {
+                 loadingText.innerText += " / Retry Failed: " + e.message;
+                 return;
+            }
         }
 
         // 2. Auth Listener
@@ -418,18 +417,56 @@
         });
     }
     
-    // --- Cloud Load Logic ---
+    // --- Cloud Load Logic with Migration ---
     async function loadGameFromCloud() {
         try {
             const snap = await getDoc(userDocRef);
+            
             if (snap.exists()) {
+                // 1. クラウドにデータがある場合はそれを優先
                 const data = snap.data();
                 gameState = { ...gameState, ...data };
                 processOfflineProgress();
+                console.log("Loaded game from Cloud");
             } else {
-                console.log("New User: Creating initial save.");
-                // 初回セーブ
-                await saveGameToCloud(true);
+                // 2. クラウドにデータがない場合（新規/初回移行）
+                console.log("No cloud save found. Checking local storage for migration...");
+                
+                // 旧バージョンで使われていそうなローカルストレージのキー候補
+                // ※もし以前のコードでこれら以外のキーを使っていた場合はここに追加してください
+                const legacyKeys = ['kingdomBuilderSave', 'kb_save_data', 'gameState']; 
+                let migrated = false;
+
+                for (const key of legacyKeys) {
+                    const localRaw = localStorage.getItem(key);
+                    if (localRaw) {
+                        try {
+                            const localData = JSON.parse(localRaw);
+                            // データが有効か簡単なチェック（リソース情報を持っているか）
+                            if (localData && (localData.resources || localData.tiles)) {
+                                console.log(`Found legacy data in key: ${key}. Migrating...`);
+                                
+                                // ローカルデータをgameStateにマージ
+                                gameState = { ...gameState, ...localData };
+                                migrated = true;
+                                
+                                showToast("📦 古いデータを引き継ぎました！");
+                                
+                                // 即座にクラウドへ保存して移行完了とする
+                                await saveGameToCloud(true);
+                                break; // 最初に見つかった有効なデータを採用
+                            }
+                        } catch (e) {
+                            console.warn("Failed to parse local data:", e);
+                        }
+                    }
+                }
+
+                if (!migrated) {
+                    console.log("New User: Creating initial save.");
+                    // 本当の新規ユーザー
+                    await saveGameToCloud(true);
+                }
             }
         } catch (e) {
             console.error("Load failed:", e);
@@ -453,7 +490,13 @@
         try {
             // シリアライズして関数などを除去
             const dataToSave = JSON.parse(JSON.stringify(gameState));
+            
+            // 1. Firebaseへ保存
             await setDoc(userDocRef, dataToSave);
+            
+            // 2. ローカルストレージにもバックアップとして保存（オフライン対策/キーは'kingdomBuilderSave'で統一）
+            localStorage.setItem('kingdomBuilderSave', JSON.stringify(dataToSave));
+
             if (!silent) showToast("☁️ 保存しました");
         } catch (e) {
             console.error("Save failed:", e);
@@ -577,12 +620,12 @@
                 // データ数とサイズが合わない場合、足りない分を埋める
                 const currentLen = gameState.tiles.length;
                 for(let i=currentLen; i<totalTiles; i++) {
-                     gameState.tiles.push({
-                        type: null, level: 0, finishTime: null, 
-                        unlocked: false,
-                        stored: {},
-                        lastCollectTime: 0
-                    });
+                      gameState.tiles.push({
+                         type: null, level: 0, finishTime: null, 
+                         unlocked: false,
+                         stored: {},
+                         lastCollectTime: 0
+                     });
                 }
             }
         } else {
