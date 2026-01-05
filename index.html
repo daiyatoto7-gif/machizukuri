@@ -370,9 +370,28 @@
     import { getFirestore, doc, setDoc, getDoc, collection } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
 
     // Global Firebase Variables
-    // ユーザー指定のConfigを削除し、環境変数を使用
-    const firebaseConfig = JSON.parse(__firebase_config);
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    let firebaseConfig;
+    let appId;
+    let offlineMode = false; // クラウドエラー時のフォールバックフラグ
+
+    // 環境判定：このプレビュー環境(Canvas)か、外部環境(GitHub Pages等)かを判定して設定を切り替え
+    if (typeof __firebase_config !== 'undefined') {
+        // Canvas環境
+        firebaseConfig = JSON.parse(__firebase_config);
+        appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    } else {
+        // 外部環境 (GitHub Pages等): 元のハードコード設定を使用
+        firebaseConfig = {
+            apiKey: "AIzaSyBzJkeWGrzm5pFKAuX_Vkk-w1w4tsKHsDo",
+            authDomain: "kingdom-builder-cdfb9.firebaseapp.com",
+            projectId: "kingdom-builder-cdfb9",
+            storageBucket: "kingdom-builder-cdfb9.firebasestorage.app",
+            messagingSenderId: "672874506084",
+            appId: "1:672874506084:web:573a57495e5a350d4fbc71",
+            measurementId: "G-F6JMJJR146"
+        };
+        appId = firebaseConfig.projectId;
+    }
 
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
@@ -385,26 +404,40 @@
     async function initFirebase() {
         const loadingText = document.getElementById('loading-text');
         
-        // 1. Authenticate (Custom Token Priority -> Anonymous)
         try {
+            // Canvas環境: カスタムトークンを使用 (推奨)
             if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                  await signInWithCustomToken(auth, __initial_auth_token);
             } else {
+                 // 外部環境またはトークンがない場合: 匿名認証
                  await signInAnonymously(auth);
             }
         } catch (error) {
             console.error("Auth failed:", error);
-            loadingText.innerText = "Auth Error: " + error.message;
-            // リトライ（カスタムトークンが期限切れなどの場合、匿名認証を試みる）
+            
+            // エラーの種類がリファラー制限の場合、オフラインモードで続行
+            if(error.code === 'auth/requests-from-referer-blocked' || error.message.includes('referer')) {
+                console.warn("Domain restricted: Switching to Offline Mode.");
+                offlineMode = true;
+                loadingText.innerText = "Offline Mode (Cloud Disabled)";
+                setTimeout(loadGameFromCloud, 1000); // 直接ロードへ
+                return;
+            }
+
+            // その他のエラーでのリトライ
             try {
                 await signInAnonymously(auth);
-            } catch (e) {
-                 loadingText.innerText += " / Retry Failed: " + e.message;
-                 return;
+            } catch(e) {
+                // ここでもダメならオフラインモードへ
+                console.error("Retry Auth Failed, using offline", e);
+                offlineMode = true;
+                loadingText.innerText = "Offline Mode";
+                setTimeout(loadGameFromCloud, 1000);
+                return;
             }
         }
 
-        // 2. Auth Listener
+        // 2. Auth Listener (オンライン時のみ発火)
         onAuthStateChanged(auth, async (user) => {
             if (user) {
                 currentUser = user;
@@ -417,57 +450,67 @@
         });
     }
     
-    // --- Cloud Load Logic with Migration ---
+    // --- Cloud Load Logic with Migration & Offline Fallback ---
     async function loadGameFromCloud() {
         try {
-            const snap = await getDoc(userDocRef);
-            
-            if (snap.exists()) {
-                // 1. クラウドにデータがある場合はそれを優先
-                const data = snap.data();
-                gameState = { ...gameState, ...data };
-                processOfflineProgress();
-                console.log("Loaded game from Cloud");
-            } else {
-                // 2. クラウドにデータがない場合（新規/初回移行）
-                console.log("No cloud save found. Checking local storage for migration...");
-                
-                // 旧バージョンで使われていそうなローカルストレージのキー候補
-                // ※もし以前のコードでこれら以外のキーを使っていた場合はここに追加してください
-                const legacyKeys = ['kingdomBuilderSave', 'kb_save_data', 'gameState']; 
-                let migrated = false;
+            // オフラインモード または Cloud読込
+            let data = null;
+            let loadedFrom = "";
 
+            if (!offlineMode && userDocRef) {
+                try {
+                    const snap = await getDoc(userDocRef);
+                    if (snap.exists()) {
+                        data = snap.data();
+                        loadedFrom = "Cloud";
+                    }
+                } catch(e) {
+                    console.warn("Cloud read failed, falling back to local:", e);
+                    // Cloud読込失敗時もローカルへフォールバック
+                }
+            }
+
+            // クラウドになければローカル(バックアップ)を確認
+            if (!data) {
+                const backup = localStorage.getItem('kingdomBuilderSave');
+                if (backup) {
+                    try {
+                        data = JSON.parse(backup);
+                        loadedFrom = "Local Backup";
+                    } catch(e){}
+                }
+            }
+
+            // それでもなければ旧データをマイグレーション探索
+            if (!data) {
+                const legacyKeys = ['kingdomBuilderSave', 'kb_save_data', 'gameState']; 
                 for (const key of legacyKeys) {
                     const localRaw = localStorage.getItem(key);
                     if (localRaw) {
                         try {
                             const localData = JSON.parse(localRaw);
-                            // データが有効か簡単なチェック（リソース情報を持っているか）
                             if (localData && (localData.resources || localData.tiles)) {
-                                console.log(`Found legacy data in key: ${key}. Migrating...`);
-                                
-                                // ローカルデータをgameStateにマージ
-                                gameState = { ...gameState, ...localData };
-                                migrated = true;
-                                
+                                data = localData;
+                                loadedFrom = "Legacy Migration";
                                 showToast("📦 古いデータを引き継ぎました！");
-                                
-                                // 即座にクラウドへ保存して移行完了とする
-                                await saveGameToCloud(true);
-                                break; // 最初に見つかった有効なデータを採用
+                                break; 
                             }
-                        } catch (e) {
-                            console.warn("Failed to parse local data:", e);
-                        }
+                        } catch (e) {}
                     }
                 }
-
-                if (!migrated) {
-                    console.log("New User: Creating initial save.");
-                    // 本当の新規ユーザー
-                    await saveGameToCloud(true);
-                }
             }
+
+            if (data) {
+                gameState = { ...gameState, ...data };
+                processOfflineProgress();
+                console.log(`Loaded game from: ${loadedFrom}`);
+                // 初回ロード成功時に即座に保存して整合性を保つ
+                saveGameToCloud(true);
+            } else {
+                console.log("New User: Creating initial state.");
+                saveGameToCloud(true);
+            }
+
         } catch (e) {
             console.error("Load failed:", e);
             showToast("データの読み込みに失敗しました");
@@ -477,30 +520,34 @@
         initGame();
         
         const loader = document.getElementById('loading-screen');
-        loader.style.opacity = 0;
-        setTimeout(() => loader.style.display = 'none', 500);
+        if(loader) {
+            loader.style.opacity = 0;
+            setTimeout(() => loader.style.display = 'none', 500);
+        }
     }
 
-    // --- Cloud Save Logic ---
+    // --- Cloud Save Logic with Offline Fallback ---
     async function saveGameToCloud(silent = false) {
-        if (!currentUser || !userDocRef) return;
-        
         gameState.lastSaveTime = Date.now();
         
         try {
-            // シリアライズして関数などを除去
+            // シリアライズ
             const dataToSave = JSON.parse(JSON.stringify(gameState));
             
-            // 1. Firebaseへ保存
-            await setDoc(userDocRef, dataToSave);
-            
-            // 2. ローカルストレージにもバックアップとして保存（オフライン対策/キーは'kingdomBuilderSave'で統一）
+            // 1. ローカルストレージに常にバックアップ (オフライン時 & 次回高速ロード用)
             localStorage.setItem('kingdomBuilderSave', JSON.stringify(dataToSave));
 
-            if (!silent) showToast("☁️ 保存しました");
+            // 2. オンラインかつ認証済みならクラウドへ保存
+            if (!offlineMode && currentUser && userDocRef) {
+                await setDoc(userDocRef, dataToSave);
+                if (!silent) showToast("☁️ 保存しました");
+            } else {
+                if (!silent) showToast("💾 保存しました (オフライン)");
+            }
         } catch (e) {
             console.error("Save failed:", e);
-            if (!silent) showToast("⚠️ 保存に失敗しました");
+            // Cloud保存失敗時もローカルには保存されているので致命的ではない
+            if (!silent && !offlineMode) showToast("⚠️ クラウド保存失敗(ローカルに保存)");
         }
     }
 
@@ -509,7 +556,16 @@
 
     // Start Everything
     window.onload = function() {
-        initFirebase();
+        try {
+            initFirebase();
+        } catch(e) {
+            console.error("Firebase init crash:", e);
+            document.getElementById('loading-text').innerText = "Offline Mode";
+            offlineMode = true;
+            setTimeout(() => {
+                loadGameFromCloud();
+            }, 1000);
+        }
     };
 
 
