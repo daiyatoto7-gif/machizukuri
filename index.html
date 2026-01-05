@@ -635,13 +635,13 @@
     };
 
     const BUILDINGS = {
-        house: { name: "民家", icon: "🏠", prod: { money: 2 }, cost: { money: 20, food: 10 }, baseTime: 2000 },
-        farm: { name: "畑", icon: "🌾", prod: { food: 2 }, cost: { money: 30, wood: 10 }, baseTime: 2000 },
-        lumber: { name: "伐採所", icon: "🌲", prod: { wood: 1 }, cost: { money: 50, food: 20 }, baseTime: 3000 },
-        quarry: { name: "採石場", icon: "🪨", prod: { stone: 1 }, cost: { money: 100, food: 50, wood: 50 }, baseTime: 4000 },
-        mine: { name: "鉱山", icon: "🔩", prod: { iron: 1 }, cost: { money: 200, food: 100, wood: 100, stone: 50 }, baseTime: 5000 },
-        market: { name: "市場", icon: "⚖️", prod: { money: 10 }, cost: { money: 500, food: 200, wood: 200, stone: 50 }, baseTime: 6000 },
-        blacksmith: { name: "鍛冶屋", icon: "⚔️", prod: { money: 5, iron: 2 }, cost: { money: 800, food: 300, wood: 300, stone: 200, iron: 100 }, baseTime: 7000 }
+        house: { name: "民家", icon: "🏠", desc: "住民が住む家。お金を生産します。", prod: { money: 2 }, cost: { money: 20, food: 10 }, baseTime: 2000 },
+        farm: { name: "畑", icon: "🌾", desc: "作物を育てます。食料を生産します。", prod: { food: 2 }, cost: { money: 30, wood: 10 }, baseTime: 2000 },
+        lumber: { name: "伐採所", icon: "🌲", desc: "木を切り出します。木材を生産します。", prod: { wood: 1 }, cost: { money: 50, food: 20 }, baseTime: 3000 },
+        quarry: { name: "採石場", icon: "🪨", desc: "石を切り出します。石材を生産します。", prod: { stone: 1 }, cost: { money: 100, food: 50, wood: 50 }, baseTime: 4000 },
+        mine: { name: "鉱山", icon: "🔩", desc: "地下資源を掘ります。鉄を生産します。", prod: { iron: 1 }, cost: { money: 200, food: 100, wood: 100, stone: 50 }, baseTime: 5000 },
+        market: { name: "市場", icon: "⚖️", desc: "交易を行います。大量のお金を生産します。", prod: { money: 10 }, cost: { money: 500, food: 200, wood: 200, stone: 50 }, baseTime: 6000 },
+        blacksmith: { name: "鍛冶屋", icon: "⚔️", desc: "武具を作ります。お金と鉄を生産します。", prod: { money: 5, iron: 2 }, cost: { money: 800, food: 300, wood: 300, stone: 200, iron: 100 }, baseTime: 7000 }
     };
     
     // 施設制限のためのキー配列と制限開始インデックス
@@ -1712,7 +1712,7 @@
                     <p><strong>未開拓の土地</strong></p>
                     <div style="background:#eee; padding:10px; border-radius:5px; text-align:left; font-size:0.9em;">
                         条件: ランク${req} (${ok?'✅':'❌'})<br>
-                        費用: 💰${cost.money} 🌾${cost.food} 🌲${cost.wood} 🪨${cost.stone}
+                        費用: 💰${cost.money.toLocaleString()} 🌾${cost.food.toLocaleString()} 🌲${cost.wood.toLocaleString()} 🪨${cost.stone.toLocaleString()}
                     </div>
                     <button class="action-btn" onclick="actExpand()" ${ok&&afford?'':'disabled'}>拡張</button>
                     ${!ok ? '<p style="color:red;font-size:0.8em">ランク不足</p>' : ''}
@@ -1754,7 +1754,7 @@
                 const b = BUILDINGS[k];
                 const c = getCost(k, 0);
                 const afford = checkAfford(c);
-                let cs = []; for(let r in c) if(c[r]>0) cs.push((r=='money'?'💰':r=='food'?'🌾':r=='wood'?'🌲':r=='stone'?'🪨':'🔩')+c[r]);
+                let cs = []; for(let r in c) if(c[r]>0) cs.push((r=='money'?'💰':r=='food'?'🌾':r=='wood'?'🌲':r=='stone'?'🪨':'🔩')+c[r].toLocaleString());
                 
                 // 制限チェック
                 const canBuild = checkBuildingLimit(k);
@@ -1765,6 +1765,7 @@
                     <div class="building-item">
                         <div class="building-info">
                             <strong>${b.icon} ${b.name}</strong>
+                            <p style="font-size:0.8em; color:#666; margin:2px 0;">${b.desc}</p>
                             <span class="res-cost">${cs.join(' ')}</span>
                             <span class="res-cost">⏳${formatTime(getBuildTime(k,0)/1000)}</span>
                             ${limitText}
@@ -1779,9 +1780,31 @@
         const b = BUILDINGS[tile.type];
         if (tile.finishTime) {
             const rem = Math.max(0, (tile.finishTime - Date.now()));
+            
+            let prodDiff = "";
+            for(let r in b.prod) if(b.prod[r]>0) {
+                const currentLevel = tile.level;
+                const nextLevel = tile.level + 1;
+                
+                const getVal = (lvl) => {
+                    if(lvl === 0) return 0;
+                    return b.prod[r] * lvl * Math.pow(1.05, lvl - 1);
+                };
+                
+                const currVal = getVal(currentLevel);
+                const nextVal = getVal(nextLevel);
+                const icon = (r=='money'?'💰':r=='food'?'🌾':r=='wood'?'🌲':r=='stone'?'🪨':'🔩');
+                
+                prodDiff += `<div>${icon} ${currVal.toFixed(1)}/s <span style="color:#2ecc71; font-weight:bold;">➞ ${nextVal.toFixed(1)}/s</span></div>`;
+            }
+
             content.innerHTML = `
                 <div style="text-align:center;">
-                    <h3>${b.name} (Lv.${tile.level} -> ${tile.level+1})</h3>
+                    <h3>${b.name} (Lv.${tile.level} ➞ ${tile.level+1})</h3>
+                    <div style="background:#f9f9f9; padding:5px; border-radius:5px; margin:5px 0; font-size:0.9em;">
+                        <strong>工事後の性能:</strong>
+                        ${prodDiff}
+                    </div>
                     <h2 style="color:var(--accent-color)">${formatTime(rem/1000)}</h2>
                     <p>工事中...</p>
                     <button class="action-btn store-btn" onclick="actStore()">📦 回収（保管庫へ）</button>
@@ -1791,7 +1814,7 @@
             const c = getCost(tile.type, tile.level);
             const afford = checkAfford(c);
             const caps = getStorageCapacity(tile.type, tile.level);
-            let cs = []; for(let r in c) if(c[r]>0) cs.push((r=='money'?'💰':r=='food'?'🌾':r=='wood'?'🌲':r=='stone'?'🪨':'🔩')+c[r]);
+            let cs = []; for(let r in c) if(c[r]>0) cs.push((r=='money'?'💰':r=='food'?'🌾':r=='wood'?'🌲':r=='stone'?'🪨':'🔩')+c[r].toLocaleString());
             
             let prodInfo = ""; let storeInfo = "";
             for(let r in b.prod) if(b.prod[r]>0) {
@@ -1805,6 +1828,7 @@
             content.innerHTML = `
                 <div style="text-align:center;">
                     <h3>${b.name} (Lv.${tile.level})</h3>
+                    <p style="font-size:0.85em; color:#666; margin:0 0 10px 0;">${b.desc}</p>
                     <div style="background:#f0f0f0; padding:5px; border-radius:5px; margin-bottom:5px;">
                         <strong>生産力:</strong><br>${prodInfo}
                     </div>
