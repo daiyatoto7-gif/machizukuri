@@ -255,11 +255,11 @@
         }
         @keyframes popIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
-        /* メニューボタン: 固定配置に変更 */
+        /* メニューボタン: 固定配置 (右上に変更) */
         #menu-btn {
             position: fixed;
             top: 15px;
-            left: 15px;
+            right: 15px; /* 右側に配置してランク表示と被らないように */
             background: white;
             width: 40px; height: 40px;
             border-radius: 50%;
@@ -701,7 +701,6 @@
     let raycaster, mouse;
     let tileMeshes = []; 
     let pedestrians = []; 
-    // let menuAnchor; // 削除
     
     // カメラ移動用変数
     let pointerDownPos = new THREE.Vector2();
@@ -812,8 +811,6 @@
         raycaster = new THREE.Raycaster();
         mouse = new THREE.Vector2();
         
-        // updateMenuAnchor(); // 削除
-
         createTiles();
         initPedestrians();
 
@@ -831,8 +828,6 @@
         setTimeout(onWindowResize, 100);
     }
     
-    // function updateMenuAnchor() {} // 削除
-
     function createTiles() {
         tileMeshes.forEach(t => {
             scene.remove(t.mesh);
@@ -1226,8 +1221,6 @@
                 t.overlayEl.style.top = `${y}px`;
             }
         });
-        
-        // menuAnchor関連削除
     }
 
     function sync3DState() {
@@ -1537,7 +1530,13 @@
     
     function getBuildTime(t,l){ const tl=l+1; if(tl===1)return BUILDINGS[t].baseTime; return Math.floor(BUILDINGS[t].baseTime*Math.pow(tl, 2.8)); }
     
-    function getCost(t,l){ const m=Math.pow(1.6,l) * 1.5; const r={}; for(let k in BUILDINGS[t].cost) r[k]=Math.floor(BUILDINGS[t].cost[k]*m); return r; }
+    function getCost(t,l){ 
+        let m=Math.pow(1.6,l) * 1.5; 
+        if(l >= 10) m *= 10; // Level 11+ Cost Increase
+        const r={}; 
+        for(let k in BUILDINGS[t].cost) r[k]=Math.floor(BUILDINGS[t].cost[k]*m); 
+        return r; 
+    }
     
     function getStorageCapacity(t,l){ const b=BUILDINGS[t], s=CONFIG.storageHours*3600, c={}; for(let r in b.prod) if(b.prod[r]>0) c[r]=b.prod[r]*l*Math.pow(1.05,l-1)*s; return c; }
     
@@ -1792,6 +1791,11 @@
                 prodDiff += `<div>${icon} ${currVal.toFixed(1)}/s <span style="color:#2ecc71; font-weight:bold;">➞ ${nextVal.toFixed(1)}/s</span></div>`;
             }
 
+            // Cancel Button Logic
+            const c = getCost(tile.type, tile.level);
+            let refund = [];
+            for(let r in c) if(c[r]>0) refund.push(`${(r=='money'?'💰':r=='food'?'🌾':r=='wood'?'🌲':r=='stone'?'🪨':'🔩')}${Math.floor(c[r]*0.5).toLocaleString()}`);
+
             content.innerHTML = `
                 <div style="text-align:center;">
                     <h3>${b.name} (Lv.${tile.level} ➞ ${tile.level+1})</h3>
@@ -1802,6 +1806,7 @@
                     <h2 style="color:var(--accent-color)">${formatTime(rem/1000)}</h2>
                     <p>工事中...</p>
                     <button class="action-btn store-btn" onclick="actStore()">📦 回収（保管庫へ）</button>
+                    <button class="action-btn" style="background-color:var(--danger-color); margin-top:5px;" onclick="actCancelBuild()">🚫 工事中止 (返還: ${refund.join(' ')})</button>
                 </div>`;
         } else {
             const next = tile.level+1;
@@ -1838,6 +1843,37 @@
                     <button class="action-btn store-btn" onclick="actStore()">📦 回収（保管庫へ）</button>
                 </div>`;
         }
+    }
+
+    window.actCancelBuild = function() {
+        if(selectedTileIndex===null) return;
+        const t = gameState.tiles[selectedTileIndex];
+        if(!t.finishTime) return;
+        
+        if(!confirm("工事を中止しますか？\n費用の一部(50%)が返還されます。")) return;
+
+        const c = getCost(t.type, t.level);
+        let refundTxt = "";
+        for(let r in c) {
+            const amount = Math.floor(c[r] * 0.5);
+            if(amount > 0) {
+                gameState.resources[r] += amount;
+                const icon = (r=='money'?'💰':r=='food'?'🌾':r=='wood'?'🌲':r=='stone'?'🪨':'🔩');
+                refundTxt += `${icon}+${amount.toLocaleString()} `;
+            }
+        }
+        
+        t.finishTime = null;
+        if(t.level === 0) {
+            t.type = null;
+            t.stored = {};
+        }
+        
+        saveGame();
+        sync3DState();
+        updatePanelUI();
+        updateHeader();
+        showToast(`工事を中止しました ${refundTxt}`);
     }
 
     window.actBuild = function(type) {
@@ -2016,6 +2052,30 @@
             }
         });
         
+        const getResScore = (type) => {
+             const b = BUILDINGS[type];
+             if(b.prod.money) return 1;
+             if(b.prod.food) return 2;
+             if(b.prod.wood) return 3;
+             if(b.prod.stone) return 4;
+             if(b.prod.iron) return 5;
+             return 6;
+        };
+        const sortFn = (a, b) => {
+             const typeA = a.tile ? a.tile.type : a.type;
+             const lvlA = a.tile ? a.tile.level : a.level;
+             const typeB = b.tile ? b.tile.type : b.type;
+             const lvlB = b.tile ? b.tile.level : b.level;
+             
+             const sA = getResScore(typeA);
+             const sB = getResScore(typeB);
+             
+             if(sA !== sB) return sA - sB;
+             return lvlB - lvlA;
+        };
+
+        mapBuildings.sort(sortFn);
+        
         if(mapBuildings.length === 0) {
             html += '<p style="color:#999; font-size:0.9em;">施設はありません</p>';
         } else {
@@ -2047,7 +2107,12 @@
         if(gameState.inventory.length === 0) {
             html += '<p style="color:#999; font-size:0.9em;">保管庫は空です</p>';
         } else {
-            gameState.inventory.forEach(item => {
+            // 表示用にソートしたコピーを作成（インデックスを保持しないとリストアでバグる可能性があるため、表示のみ）
+            // 注: 今回の実装ではインベントリ一覧に操作ボタンがないため、表示順序を変えても問題ない
+            let sortedInv = [...gameState.inventory];
+            sortedInv.sort(sortFn);
+
+            sortedInv.forEach(item => {
                 const b = BUILDINGS[item.type];
                 html += `
                     <div class="building-item" style="background:#f5f5f5; color:#666;">
