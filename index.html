@@ -1409,11 +1409,11 @@
         showPanel(index);
     }
     
-    function closePanel() {
+    window.closePanel = function() {
         selectedTileIndex = null;
         document.getElementById('control-panel').classList.remove('active');
         sync3DState();
-    }
+    };
 
     function formatTimeShort(s){ if(s<60)return`${Math.floor(s)}s`;if(s<3600)return`${Math.floor(s/60)}m`;return`${Math.floor(s/3600)}h`; }
     function formatTime(s){ if(s<60)return`${Math.floor(s)}秒`;if(s<3600)return`${Math.floor(s/60)}分${Math.floor(s%60)}秒`;return`${Math.floor(s/3600)}時間`; }
