@@ -687,36 +687,37 @@
         canvas.height = 512;
         const ctx = canvas.getContext('2d');
         
-        // ベースカラー
-        ctx.fillStyle = '#bdc3c7'; // 舗装の色
+        // ベース（目地の色）
+        ctx.fillStyle = '#7f8c8d'; 
         ctx.fillRect(0, 0, 512, 512);
         
-        // 石模様
         const rows = 4;
         const cols = 4;
         const w = 512/cols;
         const h = 512/rows;
         
-        ctx.strokeStyle = '#95a5a6'; // 目地の色
-        ctx.lineWidth = 4;
-        
+        // 石を描画
         for(let i=0; i<rows; i++){
             for(let j=0; j<cols; j++){
                const x = j*w;
                const y = i*h;
-               // ランダムなオフセットとサイズで四角を描く
-               const pad = 6;
-               ctx.fillStyle = Math.random() > 0.5 ? '#ecf0f1' : '#dfe6e9';
                
-               const rx = x + pad + Math.random()*2;
-               const ry = y + pad + Math.random()*2;
-               const rw = w - pad*2 - Math.random()*4;
-               const rh = h - pad*2 - Math.random()*4;
+               // 石のベース色（ランダムに少し変える）
+               const tint = Math.random() * 20;
+               const baseVal = 200 + tint;
+               ctx.fillStyle = `rgb(${baseVal}, ${baseVal}, ${baseVal})`; 
                
-               ctx.fillRect(rx, ry, rw, rh);
-               ctx.strokeRect(x, y, w, h);
+               // 少し隙間を空けて石を描く
+               const gap = 8;
+               ctx.fillRect(x + gap, y + gap, w - gap*2, h - gap*2);
+               
+               // 石のハイライト（立体感）
+               ctx.strokeStyle = `rgba(255,255,255,0.3)`;
+               ctx.lineWidth = 2;
+               ctx.strokeRect(x + gap, y + gap, w - gap*2, h - gap*2);
             }
         }
+        
         const tex = new THREE.CanvasTexture(canvas);
         tex.wrapS = THREE.RepeatWrapping;
         tex.wrapT = THREE.RepeatWrapping;
@@ -920,7 +921,8 @@
         const geometry = new THREE.BoxGeometry(1.4, 0.5, 1.4);
         const invisibleMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0 });
         
-        const groundGeo = new THREE.PlaneGeometry(2.0, 2.0);
+        // 地面を少し大きくして隙間をなくす
+        const groundGeo = new THREE.PlaneGeometry(2.05, 2.05);
         // groundMatは個別インスタンスとして生成
         
         const offset = 2; 
@@ -937,7 +939,7 @@
             const groundMat = new THREE.MeshStandardMaterial({ color: 0x555555 });
             const ground = new THREE.Mesh(groundGeo, groundMat);
             ground.rotation.x = -Math.PI / 2;
-            ground.position.set(x, -0.01, z);
+            ground.position.set(x, -0.05, z); // ちらつき防止のため少し下げる
             ground.receiveShadow = true;
             scene.add(ground);
 
