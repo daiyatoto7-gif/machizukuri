@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Kingdom Builder 3D (Cloud Save & Migration)</title>
+    <title>Kingdom Builder 3D (Rank Balance Fix)</title>
     
     <!-- デバッグ用スタイル -->
     <style>
@@ -717,6 +717,9 @@
             return;
         }
         
+        // 経験値テーブル変更に伴う既存ユーザーのマイグレーション
+        migrateXPSystem();
+
         if (!gameState.maxBuilders) gameState.maxBuilders = CONFIG.initialMaxBuilders;
         if (!gameState.gridSize) gameState.gridSize = CONFIG.initialGridSize;
 
@@ -764,6 +767,58 @@
         setInterval(updatePanelUI, 500);
 
         log("Game loop started.");
+    }
+
+    // XPバランス調整に伴うマイグレーション
+    function migrateXPSystem() {
+        // すでに移行済みなら何もしない
+        if (gameState.xpMigrationDone) return;
+
+        // ランク12未満のユーザーは影響を受けないのでフラグだけ立てる
+        if (gameState.rank < 12) {
+            gameState.xpMigrationDone = true;
+            return; 
+        }
+
+        console.log("Migrating XP system for Rank 12+ user...");
+
+        // ランク12以上のユーザーの場合:
+        // 旧ロジックでの累積経験値を復元し、新ロジックで再計算する
+        let totalXP = gameState.xp;
+        
+        // 旧計算ロジック (一時的に再現)
+        const getLegacyXP = (r) => {
+             const base = r * 500;
+             if(r >= 10) return base * 4;
+             return base;
+        };
+
+        // これまでのランク分のXPを合計して総獲得XPを算出
+        for (let r = 1; r < gameState.rank; r++) {
+            totalXP += getLegacyXP(r);
+        }
+
+        // 新ロジックでランクを再計算
+        let newRank = 1;
+        while(true) {
+            const req = getNextRankXP(newRank);
+            if (totalXP >= req) {
+                totalXP -= req;
+                newRank++;
+            } else {
+                break;
+            }
+        }
+
+        if (newRank !== gameState.rank) {
+            console.log(`Rank migrated: ${gameState.rank} -> ${newRank}`);
+            showToast(`ランク調整: ${gameState.rank}→${newRank}`);
+            gameState.rank = newRank;
+            gameState.xp = totalXP;
+        }
+
+        gameState.xpMigrationDone = true;
+        saveGame(true);
     }
 
     function init3D() {
@@ -1524,6 +1579,8 @@
     
     function getNextRankXP(r){ 
         const base = r * 500;
+        // ランク12以上の場合、従来の3倍 (base * 4 * 3)
+        if(r >= 12) return base * 4 * 3;
         if(r >= 10) return base * 4;
         return base; 
     }
