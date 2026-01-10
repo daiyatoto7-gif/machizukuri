@@ -107,7 +107,8 @@
             top: 0; left: 0;
             width: 100vw; height: 100vh;
             z-index: 1;
-            background: radial-gradient(circle at center, #dcecf5 0%, #b0c4de 100%);
+            /* 背景を空と地平線をイメージしたグラデーションに変更 */
+            background: linear-gradient(to bottom, #87CEEB 0%, #E0F7FA 60%, #A9DFBF 100%);
         }
 
         #ui-overlay-layer {
@@ -674,6 +675,7 @@
     let raycaster, mouse;
     let tileMeshes = []; 
     let pedestrians = []; 
+    let environmentGroup = null; // 背景オブジェクト用グループ
     
     let pointerDownPos = new THREE.Vector2();
     let lastPointerPos = new THREE.Vector2();
@@ -907,6 +909,7 @@
         
         createTiles();
         initPedestrians();
+        createSurroundingEnvironment(); // 背景生成
 
         window.addEventListener('resize', onWindowResize, false);
         
@@ -926,8 +929,11 @@
     const MATERIALS = {
         roof: new THREE.MeshStandardMaterial({ color: 0xe74c3c, roughness: 0.8 }),
         wall: new THREE.MeshStandardMaterial({ color: 0xf39c12, roughness: 0.9 }),
-        leaf: new THREE.MeshStandardMaterial({ color: 0x2ecc71, roughness: 1.0 }),
+        leaf: new THREE.MeshStandardMaterial({ color: 0x2ecc71, roughness: 1.0 }), // 明るい緑
+        darkLeaf: new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 1.0 }), // 暗い緑（森用）
         stone: new THREE.MeshStandardMaterial({ color: 0x7f8c8d, roughness: 0.6 }),
+        mountain: new THREE.MeshStandardMaterial({ color: 0x95a5a6, roughness: 0.9 }), // 山用
+        snow: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 }), // 雪用
         dark: new THREE.MeshStandardMaterial({ color: 0x34495e, roughness: 0.5 }),
         tent: new THREE.MeshStandardMaterial({ color: 0x3498db, roughness: 0.9 }),
         grass: new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 1.0 }),
@@ -939,6 +945,106 @@
         water: new THREE.MeshStandardMaterial({ color: 0x3498db, transparent: true, opacity: 0.7 })
         // cobblestone と grassLocked は init3D 内で追加
     };
+
+    // 周囲の環境（山や森）を生成する関数
+    function createSurroundingEnvironment() {
+        if (environmentGroup) scene.remove(environmentGroup);
+        environmentGroup = new THREE.Group();
+        scene.add(environmentGroup);
+
+        const currentSize = gameState.gridSize * 2; // グリッドの倍の範囲を安全地帯とする
+        const range = 60; // 生成範囲の半径
+
+        // ヘルパー: 木を作成
+        const createTree = (x, z, scale = 1) => {
+            const g = new THREE.Group();
+            g.position.set(x, 0, z);
+            g.scale.set(scale, scale, scale);
+            
+            // 幹
+            const trunk = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.1, 0.15, 0.5, 5),
+                MATERIALS.wood
+            );
+            trunk.position.y = 0.25;
+            trunk.castShadow = true;
+            g.add(trunk);
+
+            // 葉 (3段)
+            const l1 = new THREE.Mesh(new THREE.ConeGeometry(0.4, 0.6, 5), MATERIALS.darkLeaf);
+            l1.position.y = 0.6;
+            l1.castShadow = true;
+            g.add(l1);
+            
+            const l2 = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.5, 5), MATERIALS.darkLeaf);
+            l2.position.y = 0.9;
+            l2.castShadow = true;
+            g.add(l2);
+
+            return g;
+        };
+
+        // ヘルパー: 山を作成
+        const createMountain = (x, z, height, radius) => {
+            const g = new THREE.Group();
+            g.position.set(x, 0, z);
+            
+            // 本体
+            const m = new THREE.Mesh(
+                new THREE.ConeGeometry(radius, height, 5),
+                MATERIALS.mountain
+            );
+            m.position.y = height / 2;
+            m.castShadow = true;
+            m.receiveShadow = true;
+            g.add(m);
+
+            // 雪解け（頂上）
+            const s = new THREE.Mesh(
+                new THREE.ConeGeometry(radius * 0.3, height * 0.3, 5),
+                MATERIALS.snow
+            );
+            s.position.y = height * 0.85;
+            g.add(s);
+
+            return g;
+        };
+
+        // 配置ロジック
+        for (let i = 0; i < 150; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            // グリッドの外側から遠くまで配置
+            const dist = currentSize / 1.5 * 2 + 5 + Math.random() * range; 
+            
+            const x = Math.cos(angle) * dist;
+            const z = Math.sin(angle) * dist;
+
+            // 奥側（北側）には山を多めに配置
+            if (z < -10 && Math.random() > 0.6) {
+                const h = 5 + Math.random() * 8;
+                const r = 3 + Math.random() * 3;
+                environmentGroup.add(createMountain(x, z, h, r));
+            } else {
+                // 木を配置
+                const scale = 1.5 + Math.random() * 1.5;
+                const tree = createTree(x, z, scale);
+                // ランダムに少し傾ける
+                tree.rotation.z = (Math.random() - 0.5) * 0.1;
+                tree.rotation.x = (Math.random() - 0.5) * 0.1;
+                environmentGroup.add(tree);
+            }
+        }
+
+        // 地面となる巨大な円盤（プレイエリアの下）
+        const bigGround = new THREE.Mesh(
+            new THREE.CircleGeometry(range + 30, 32),
+            new THREE.MeshStandardMaterial({ color: 0x3c5c35, roughness: 1.0 }) // 濃い緑の地面
+        );
+        bigGround.rotation.x = -Math.PI / 2;
+        bigGround.position.y = -0.1; // タイルの地面よりさらに下
+        bigGround.receiveShadow = true;
+        environmentGroup.add(bigGround);
+    }
 
     function createTiles() {
         tileMeshes.forEach(t => {
@@ -1001,6 +1107,7 @@
             });
         }
         sync3DState();
+        createSurroundingEnvironment(); // タイル生成時にも環境を更新（サイズ拡張対応）
     }
 
     class Person {
@@ -1998,6 +2105,7 @@
         gameState.gridSize = newSize;
         
         createTiles();
+        createSurroundingEnvironment(); // 環境再生成
         showToast(`🎉 世界が広がりました！ (${newSize}x${newSize})`);
         
         initPedestrians();
