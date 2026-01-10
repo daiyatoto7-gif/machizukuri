@@ -680,49 +680,80 @@
     let isDragging = false;
     let isPanning = false;
 
-    // 石畳テクスチャ生成
+    // 石畳テクスチャ生成 (改良版)
     function createCobblestoneTexture() {
         const canvas = document.createElement('canvas');
         canvas.width = 512;
         canvas.height = 512;
         const ctx = canvas.getContext('2d');
         
-        // ベース（目地の色）
-        ctx.fillStyle = '#7f8c8d'; 
+        // ベース（目地の色：濃いグレー）
+        ctx.fillStyle = '#555'; 
         ctx.fillRect(0, 0, 512, 512);
         
-        const rows = 4;
-        const cols = 4;
-        const w = 512/cols;
-        const h = 512/rows;
-        
+        const rows = 8; // 行数を増やして石を小さく
+        const cols = 8;
+        const cellW = 512 / cols;
+        const cellH = 512 / rows;
+
         // 石を描画
-        for(let i=0; i<rows; i++){
-            for(let j=0; j<cols; j++){
-               const x = j*w;
-               const y = i*h;
-               
-               // 石のベース色（ランダムに少し変える）
-               const tint = Math.random() * 20;
-               const baseVal = 200 + tint;
-               ctx.fillStyle = `rgb(${baseVal}, ${baseVal}, ${baseVal})`; 
-               
-               // 少し隙間を空けて石を描く
-               const gap = 8;
-               ctx.fillRect(x + gap, y + gap, w - gap*2, h - gap*2);
-               
-               // 石のハイライト（立体感）
-               ctx.strokeStyle = `rgba(255,255,255,0.3)`;
-               ctx.lineWidth = 2;
-               ctx.strokeRect(x + gap, y + gap, w - gap*2, h - gap*2);
+        for (let y = 0; y < rows; y++) {
+            // 行ごとにオフセットをずらす（レンガ積み風）
+            const offset = (y % 2 === 0) ? 0 : cellW / 2;
+            
+            for (let x = -1; x < cols; x++) { 
+                let sx = x * cellW + offset;
+                let sy = y * cellH;
+                
+                // ランダムな位置ずれ
+                sx += (Math.random() - 0.5) * 10;
+                sy += (Math.random() - 0.5) * 10;
+                
+                // 石のサイズ（少しランダムに不揃いにする）
+                const w = cellW - 8 + (Math.random() - 0.5) * 8;
+                const h = cellH - 8 + (Math.random() - 0.5) * 8;
+                
+                // 色のバリエーション（自然な石の色味）
+                const gray = 140 + Math.random() * 60;
+                const r = gray + (Math.random() * 20 - 10);
+                const g = gray + (Math.random() * 20 - 10);
+                const b = gray + (Math.random() * 20 - 10);
+                ctx.fillStyle = `rgb(${Math.floor(r)}, ${Math.floor(g)}, ${Math.floor(b)})`;
+                
+                // 角丸の石を描画
+                drawRoundedRect(ctx, sx, sy, w, h, 10);
+                ctx.fill();
+                
+                // ハイライトとシャドウで立体感を出す
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = 'rgba(255,255,255,0.15)'; // ハイライト
+                ctx.stroke();
             }
         }
         
         const tex = new THREE.CanvasTexture(canvas);
         tex.wrapS = THREE.RepeatWrapping;
         tex.wrapT = THREE.RepeatWrapping;
-        tex.repeat.set(2, 2); 
+        // 石を細かくしたのでリピート回数を減らす
+        tex.repeat.set(1, 1); 
         return tex;
+    }
+
+    // 角丸矩形描画ヘルパー
+    function drawRoundedRect(ctx, x, y, w, h, r) {
+        if (w < 2 * r) r = w / 2;
+        if (h < 2 * r) r = h / 2;
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
     }
 
     function initGame() {
@@ -866,7 +897,7 @@
         // テクスチャとマテリアルの初期化
         MATERIALS.cobblestone = new THREE.MeshStandardMaterial({ 
             map: createCobblestoneTexture(), 
-            roughness: 0.9,
+            roughness: 0.8, // 少しつやを出す
             color: 0xffffff
         });
         MATERIALS.grassLocked = new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 1.0 });
