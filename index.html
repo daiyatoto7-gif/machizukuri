@@ -294,6 +294,14 @@
         }
         @keyframes fadeInOut { 0% { opacity:0; top:90px; } 10% { opacity:1; top:80px; } 90% { opacity:1; top:80px; } 100% { opacity:0; top:70px; } }
 
+        /* アクションモードバー (移動モード用) */
+        #action-mode-bar {
+            display: none; position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.8); color: white; padding: 12px 25px;
+            border-radius: 30px; z-index: 100; align-items: center; gap: 15px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3); width: max-content;
+        }
+
         /* ロード画面 */
         #loading-screen {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -353,6 +361,12 @@
         <div class="close-btn" onclick="closePanel()">✕</div>
     </div>
     <div id="panel-content"></div>
+</div>
+
+<!-- 移動モード用のガイドバー -->
+<div id="action-mode-bar">
+    <span id="action-mode-text" style="font-weight:bold; font-size:0.95em;">移動元を選択してください</span>
+    <button onclick="cancelMoveMode()" style="background:#e74c3c; border:none; padding:6px 12px; border-radius:15px; color:white; font-weight:bold; cursor:pointer;">キャンセル</button>
 </div>
 
 <div id="modal-offline" class="modal">
@@ -670,6 +684,9 @@
     };
 
     let selectedTileIndex = null;
+    
+    // UI State for Move Mode
+    let moveMode = { active: false, sourceIndex: null };
 
     let scene, camera, renderer;
     let raycaster, mouse;
@@ -1591,7 +1608,7 @@
         requestAnimationFrame(animate3D);
         const time = Date.now() * 0.001; 
 
-        tileMeshes.forEach(t => {
+        tileMeshes.forEach((t, i) => {
             t.particles.update();
             
             if (t.buildingGroup.visible) {
@@ -1665,6 +1682,17 @@
 
             const x = (pos.x * widthHalf) + widthHalf;
             const y = -(pos.y * heightHalf) + heightHalf;
+
+            // 移動モード中のハイライト
+            if (moveMode.active) {
+                if (moveMode.sourceIndex === i) {
+                    t.overlayEl.innerHTML = `<div style="background:rgba(231, 76, 60, 0.9); color:white; padding:5px 10px; border-radius:15px; font-weight:bold; font-size:0.8em; box-shadow:0 0 10px rgba(231, 76, 60, 0.5);">移動元</div>`;
+                    t.overlayEl.style.display = 'flex';
+                } else if (!t.overlayEl.innerHTML && t.mesh.visible && gameState.tiles[i].unlocked) {
+                    // 何もない場所（移動先候補）にガイドを表示させたい場合
+                    // ここではシンプルにするため、ソース選択後は何もしない（クリックで反応させる）
+                }
+            }
 
             if (x < -100 || x > width + 100 || y < -100 || y > height + 100) {
                 t.overlayEl.style.display = 'none';
@@ -1764,14 +1792,20 @@
             }
             
             // 選択時のハイライト (地面を光らせる)
-            if (selectedTileIndex === i) {
+            let isHighlight = (selectedTileIndex === i) || (moveMode.active && moveMode.sourceIndex === i);
+
+            if (isHighlight) {
                 // マテリアルが共有されているので一時的にクローンして光らせる
                 // 注意: パフォーマンス最適化のためには別途SelectionBoxを使うのが良いが、簡易実装として
                 if (ground.material.uuid === MATERIALS.cobblestone.uuid || ground.material.uuid === MATERIALS.grassLocked.uuid) {
                     ground.material = ground.material.clone();
                 }
-                ground.material.emissive.setHex(0x3498db);
-                ground.material.emissiveIntensity = 0.3;
+                if (moveMode.active && moveMode.sourceIndex === i) {
+                    ground.material.emissive.setHex(0xe74c3c); // 赤く光らせる（移動元）
+                } else {
+                    ground.material.emissive.setHex(0x3498db); // 青く光らせる（通常選択）
+                }
+                ground.material.emissiveIntensity = 0.4;
             } else {
                 // 光っていない状態に戻す（共有マテリアルを再割り当て）
                 if (tile.unlocked && ground.material.uuid !== MATERIALS.cobblestone.uuid) {
@@ -1869,16 +1903,114 @@
 
             if (target && target.userData.index !== undefined) {
                 const idx = target.userData.index;
+                
+                // 移動モードの処理
+                if (moveMode.active) {
+                    handleMoveInput(idx);
+                    return;
+                }
+
                 const collected = collectResource(idx);
                 if (!collected) {
                       selectTile(idx);
                 }
             }
         } else {
-            closePanel();
+            // 背景クリックなどでパネルを閉じる（移動モード以外）
+            if (!moveMode.active) {
+                closePanel();
+            }
         }
     }
     
+    // --- Move Mode Logic ---
+    window.startMoveMode = function() {
+        closeModal('modal-menu');
+        closePanel();
+        moveMode.active = true;
+        moveMode.sourceIndex = null;
+        
+        document.getElementById('action-mode-bar').style.display = 'flex';
+        document.getElementById('action-mode-text').innerText = "移動する施設を選択してください";
+        
+        sync3DState(); // ハイライト解除など
+    };
+
+    window.cancelMoveMode = function() {
+        moveMode.active = false;
+        moveMode.sourceIndex = null;
+        document.getElementById('action-mode-bar').style.display = 'none';
+        sync3DState();
+    };
+
+    function handleMoveInput(index) {
+        const tile = gameState.tiles[index];
+        
+        // 未開拓地は対象外
+        if (!tile.unlocked) {
+            showToast("未開拓地は操作できません");
+            return;
+        }
+
+        if (moveMode.sourceIndex === null) {
+            // ソース選択（施設がある場所のみ）
+            if (!tile.type && !tile.finishTime) {
+                showToast("移動させる施設がありません");
+                return;
+            }
+            moveMode.sourceIndex = index;
+            document.getElementById('action-mode-text').innerText = "移動先を選択してください";
+            sync3DState(); // ハイライト更新
+        } else {
+            // ターゲット選択
+            if (moveMode.sourceIndex === index) {
+                // 同じ場所を選択 -> キャンセル
+                moveMode.sourceIndex = null;
+                document.getElementById('action-mode-text').innerText = "移動する施設を選択してください";
+                sync3DState();
+                return;
+            }
+            
+            // 移動実行 (Swap)
+            swapTiles(moveMode.sourceIndex, index);
+            
+            // モード終了
+            cancelMoveMode();
+            showToast("施設を移動しました！");
+        }
+    }
+
+    function swapTiles(idx1, idx2) {
+        const t1 = gameState.tiles[idx1];
+        const t2 = gameState.tiles[idx2];
+
+        // 土地(unlocked)以外の建物データを交換
+        const temp = {
+            type: t1.type,
+            level: t1.level,
+            finishTime: t1.finishTime,
+            stored: t1.stored,
+            lastCollectTime: t1.lastCollectTime
+        };
+
+        // t1 <- t2
+        t1.type = t2.type;
+        t1.level = t2.level;
+        t1.finishTime = t2.finishTime;
+        t1.stored = t2.stored;
+        t1.lastCollectTime = t2.lastCollectTime;
+
+        // t2 <- temp
+        t2.type = temp.type;
+        t2.level = temp.level;
+        t2.finishTime = temp.finishTime;
+        t2.stored = temp.stored;
+        t2.lastCollectTime = temp.lastCollectTime;
+
+        saveGame();
+        sync3DState();
+    }
+
     function moveCamera(dx, dy) {
         if (!camera) return;
         
@@ -1949,6 +2081,9 @@
     }
     
     window.collectResourceUI = function(index, e) {
+        // 移動モード中は資源回収UIを無効化（誤タップ防止）
+        if (moveMode.active) return;
+        
         e.stopPropagation();
         collectResource(index);
     };
@@ -2414,6 +2549,12 @@
             <div class="shop-item">
                 <button class="action-btn" onclick="openBuildingList()" style="width:100%; margin-bottom:10px; background-color:#3498db;">
                     📋 施設一覧
+                </button>
+            </div>
+
+            <div class="shop-item">
+                <button class="action-btn" onclick="startMoveMode()" style="width:100%; margin-bottom:10px; background-color:#f39c12;">
+                    🏗️ 施設を移動
                 </button>
             </div>
 
