@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Kingdom Builder 3D (Rank Balance Fix)</title>
+    <title>Kingdom Builder 3D (Visual Update)</title>
     
     <!-- デバッグ用スタイル -->
     <style>
@@ -400,13 +400,11 @@
     let appId;
     let offlineMode = false; // クラウドエラー時のフォールバックフラグ
 
-    // 環境判定：このプレビュー環境(Canvas)か、外部環境(GitHub Pages等)かを判定して設定を切り替え
+    // 環境判定
     if (typeof __firebase_config !== 'undefined') {
-        // Canvas環境
         firebaseConfig = JSON.parse(__firebase_config);
         appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
     } else {
-        // 外部環境 (GitHub Pages等): 元のハードコード設定を使用
         firebaseConfig = {
             apiKey: "AIzaSyBzJkeWGrzm5pFKAuX_Vkk-w1w4tsKHsDo",
             authDomain: "kingdom-builder-cdfb9.firebaseapp.com",
@@ -425,37 +423,30 @@
 
     let currentUser = null;
     let userDocRef = null;
-    let currentDocId = null; // 実際に読み書きするID（共有IDまたは自分のUID）
+    let currentDocId = null; 
 
     // --- Firebase Init ---
     async function initFirebase() {
         const loadingText = document.getElementById('loading-text');
         
         try {
-            // Canvas環境: カスタムトークンを使用 (推奨)
             if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                  await signInWithCustomToken(auth, __initial_auth_token);
             } else {
-                 // 外部環境またはトークンがない場合: 匿名認証
                  await signInAnonymously(auth);
             }
         } catch (error) {
             console.error("Auth failed:", error);
-            
-            // エラーの種類がリファラー制限の場合、オフラインモードで続行
             if(error.code === 'auth/requests-from-referer-blocked' || error.message.includes('referer')) {
                 console.warn("Domain restricted: Switching to Offline Mode.");
                 offlineMode = true;
                 loadingText.innerText = "Offline Mode (Cloud Disabled)";
-                setTimeout(loadGameFromCloud, 1000); // 直接ロードへ
+                setTimeout(loadGameFromCloud, 1000); 
                 return;
             }
-
-            // その他のエラーでのリトライ
             try {
                 await signInAnonymously(auth);
             } catch(e) {
-                // ここでもダメならオフラインモードへ
                 console.error("Retry Auth Failed, using offline", e);
                 offlineMode = true;
                 loadingText.innerText = "Offline Mode";
@@ -464,12 +455,10 @@
             }
         }
 
-        // 2. Auth Listener (オンライン時のみ発火)
         onAuthStateChanged(auth, async (user) => {
             if (user) {
                 currentUser = user;
                 
-                // 共有設定(ID連携)があるか確認
                 const sharedId = localStorage.getItem('kingdomBuilder_sharedId');
                 if (sharedId) {
                     currentDocId = sharedId;
@@ -478,7 +467,6 @@
                     currentDocId = user.uid;
                 }
 
-                // Rule: /artifacts/{appId}/users/{userId}/gameData/saveSlot1
                 userDocRef = doc(db, 'artifacts', appId, 'users', currentDocId, 'gameData', 'saveSlot1');
                 
                 loadingText.innerText = "Loading Kingdom...";
@@ -490,7 +478,6 @@
     // --- Cloud Load & Save Logic ---
     async function loadGameFromCloud() {
         try {
-            // オフラインモード または Cloud読込
             let data = null;
             let loadedFrom = "";
 
@@ -503,11 +490,9 @@
                     }
                 } catch(e) {
                     console.warn("Cloud read failed, falling back to local:", e);
-                    // Cloud読込失敗時もローカルへフォールバック
                 }
             }
 
-            // クラウドになければローカル(バックアップ)を確認
             if (!data) {
                 const backup = localStorage.getItem('kingdomBuilderSave');
                 if (backup) {
@@ -518,7 +503,6 @@
                 }
             }
 
-            // それでもなければ旧データをマイグレーション探索
             if (!data) {
                 const legacyKeys = ['kingdomBuilderSave', 'kb_save_data', 'gameState']; 
                 for (const key of legacyKeys) {
@@ -541,7 +525,6 @@
                 gameState = { ...gameState, ...data };
                 processOfflineProgress();
                 console.log(`Loaded game from: ${loadedFrom}`);
-                // 初回ロード成功時に即座に保存して整合性を保つ
                 saveGameToCloud(true);
             } else {
                 console.log("New User: Creating initial state.");
@@ -553,7 +536,6 @@
             showToast("データの読み込みに失敗しました");
         }
 
-        // ロード完了後、ゲームを開始
         initGame();
         
         const loader = document.getElementById('loading-screen');
@@ -567,13 +549,9 @@
         gameState.lastSaveTime = Date.now();
         
         try {
-            // シリアライズ
             const dataToSave = JSON.parse(JSON.stringify(gameState));
-            
-            // 1. ローカルストレージに常にバックアップ (オフライン時 & 次回高速ロード用)
             localStorage.setItem('kingdomBuilderSave', JSON.stringify(dataToSave));
 
-            // 2. オンラインかつ認証済みならクラウドへ保存
             if (!offlineMode && currentUser && userDocRef) {
                 await setDoc(userDocRef, dataToSave);
                 if (!silent) showToast("☁️ 保存しました");
@@ -582,7 +560,6 @@
             }
         } catch (e) {
             console.error("Save failed:", e);
-            // Cloud保存失敗時もローカルには保存されているので致命的ではない
             if (!silent && !offlineMode) showToast("⚠️ クラウド保存失敗(ローカルに保存)");
         }
     }
@@ -654,21 +631,17 @@
         blacksmith: { name: "鍛冶屋", icon: "⚔️", desc: "武具を作ります。お金と鉄を生産します。", prod: { money: 5, iron: 2 }, cost: { money: 800, food: 300, wood: 300, stone: 200, iron: 100 }, baseTime: 7000 }
     };
     
-    // 施設制限のためのキー配列と制限開始インデックス
     const BUILDING_KEYS = Object.keys(BUILDINGS);
-    const LIMIT_START_INDEX = BUILDING_KEYS.indexOf('market'); // market以降は制限対象
+    const LIMIT_START_INDEX = BUILDING_KEYS.indexOf('market'); 
 
-    // 特定の施設の数をカウント（マップ上 + インベントリ）
     function getBuildingCount(type) {
         const onMap = gameState.tiles.filter(t => t.type === type).length;
         const inInventory = gameState.inventory.filter(i => i.type === type).length;
         return onMap + inInventory;
     }
 
-    // 建設制限のチェック
     function checkBuildingLimit(type) {
         const typeIndex = BUILDING_KEYS.indexOf(type);
-        // 市場以降の施設、かつ4つ以上持っている場合はNG
         if (typeIndex >= LIMIT_START_INDEX && typeIndex !== -1) {
             if (getBuildingCount(type) >= 4) {
                 return false;
@@ -702,13 +675,55 @@
     let tileMeshes = []; 
     let pedestrians = []; 
     
-    // カメラ移動用変数
     let pointerDownPos = new THREE.Vector2();
     let lastPointerPos = new THREE.Vector2();
     let isDragging = false;
     let isPanning = false;
 
-    // Called after Firestore load
+    // 石畳テクスチャ生成
+    function createCobblestoneTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 512;
+        const ctx = canvas.getContext('2d');
+        
+        // ベースカラー
+        ctx.fillStyle = '#bdc3c7'; // 舗装の色
+        ctx.fillRect(0, 0, 512, 512);
+        
+        // 石模様
+        const rows = 4;
+        const cols = 4;
+        const w = 512/cols;
+        const h = 512/rows;
+        
+        ctx.strokeStyle = '#95a5a6'; // 目地の色
+        ctx.lineWidth = 4;
+        
+        for(let i=0; i<rows; i++){
+            for(let j=0; j<cols; j++){
+               const x = j*w;
+               const y = i*h;
+               // ランダムなオフセットとサイズで四角を描く
+               const pad = 6;
+               ctx.fillStyle = Math.random() > 0.5 ? '#ecf0f1' : '#dfe6e9';
+               
+               const rx = x + pad + Math.random()*2;
+               const ry = y + pad + Math.random()*2;
+               const rw = w - pad*2 - Math.random()*4;
+               const rh = h - pad*2 - Math.random()*4;
+               
+               ctx.fillRect(rx, ry, rw, rh);
+               ctx.strokeRect(x, y, w, h);
+            }
+        }
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(2, 2); 
+        return tex;
+    }
+
     function initGame() {
         log("Game initializing...");
 
@@ -717,7 +732,6 @@
             return;
         }
         
-        // 経験値テーブル変更に伴う既存ユーザーのマイグレーション
         migrateXPSystem();
 
         if (!gameState.maxBuilders) gameState.maxBuilders = CONFIG.initialMaxBuilders;
@@ -769,36 +783,23 @@
         log("Game loop started.");
     }
 
-    // XPバランス調整に伴うマイグレーション
     function migrateXPSystem() {
-        // すでに移行済みなら何もしない
         if (gameState.xpMigrationDone) return;
-
-        // ランク12未満のユーザーは影響を受けないのでフラグだけ立てる
         if (gameState.rank < 12) {
             gameState.xpMigrationDone = true;
             return; 
         }
 
         console.log("Migrating XP system for Rank 12+ user...");
-
-        // ランク12以上のユーザーの場合:
-        // 旧ロジックでの累積経験値を復元し、新ロジックで再計算する
         let totalXP = gameState.xp;
-        
-        // 旧計算ロジック (一時的に再現)
         const getLegacyXP = (r) => {
              const base = r * 500;
              if(r >= 10) return base * 4;
              return base;
         };
-
-        // これまでのランク分のXPを合計して総獲得XPを算出
         for (let r = 1; r < gameState.rank; r++) {
             totalXP += getLegacyXP(r);
         }
-
-        // 新ロジックでランクを再計算
         let newRank = 1;
         while(true) {
             const req = getNextRankXP(newRank);
@@ -809,14 +810,12 @@
                 break;
             }
         }
-
         if (newRank !== gameState.rank) {
             console.log(`Rank migrated: ${gameState.rank} -> ${newRank}`);
             showToast(`ランク調整: ${gameState.rank}→${newRank}`);
             gameState.rank = newRank;
             gameState.xp = totalXP;
         }
-
         gameState.xpMigrationDone = true;
         saveGame(true);
     }
@@ -863,6 +862,14 @@
         dirLight.shadow.mapSize.height = 1024;
         scene.add(dirLight);
 
+        // テクスチャとマテリアルの初期化
+        MATERIALS.cobblestone = new THREE.MeshStandardMaterial({ 
+            map: createCobblestoneTexture(), 
+            roughness: 0.9,
+            color: 0xffffff
+        });
+        MATERIALS.grassLocked = new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 1.0 });
+
         raycaster = new THREE.Raycaster();
         mouse = new THREE.Vector2();
         
@@ -883,6 +890,24 @@
         setTimeout(onWindowResize, 100);
     }
     
+    // マテリアル定義（テクスチャ生成後に使用）
+    const MATERIALS = {
+        roof: new THREE.MeshStandardMaterial({ color: 0xe74c3c, roughness: 0.8 }),
+        wall: new THREE.MeshStandardMaterial({ color: 0xf39c12, roughness: 0.9 }),
+        leaf: new THREE.MeshStandardMaterial({ color: 0x2ecc71, roughness: 1.0 }),
+        stone: new THREE.MeshStandardMaterial({ color: 0x7f8c8d, roughness: 0.6 }),
+        dark: new THREE.MeshStandardMaterial({ color: 0x34495e, roughness: 0.5 }),
+        tent: new THREE.MeshStandardMaterial({ color: 0x3498db, roughness: 0.9 }),
+        grass: new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 1.0 }),
+        wood: new THREE.MeshStandardMaterial({ color: 0x8B4513, roughness: 0.9 }),
+        window: new THREE.MeshStandardMaterial({ color: 0x87CEEB, emissive: 0x112233, roughness: 0.2 }),
+        dirt: new THREE.MeshStandardMaterial({ color: 0x5d4037, roughness: 1.0 }),
+        metal: new THREE.MeshStandardMaterial({ color: 0xbdc3c7, metalness: 0.8, roughness: 0.2 }),
+        gold: new THREE.MeshStandardMaterial({ color: 0xf1c40f, metalness: 0.6, roughness: 0.3 }),
+        water: new THREE.MeshStandardMaterial({ color: 0x3498db, transparent: true, opacity: 0.7 })
+        // cobblestone と grassLocked は init3D 内で追加
+    };
+
     function createTiles() {
         tileMeshes.forEach(t => {
             scene.remove(t.mesh);
@@ -891,11 +916,13 @@
         });
         tileMeshes = [];
 
+        // 土台は「見えないヒットボックス」に変更
         const geometry = new THREE.BoxGeometry(1.4, 0.5, 1.4);
-        const unlockedMat = new THREE.MeshStandardMaterial({ color: 0xecf0f1 });
+        const invisibleMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0 });
+        
         const groundGeo = new THREE.PlaneGeometry(2.0, 2.0);
-        const groundMatBase = new THREE.MeshStandardMaterial({ color: 0x555555 });
-
+        // groundMatは個別インスタンスとして生成
+        
         const offset = 2; 
         const size = gameState.gridSize;
         const start = -offset * (size - 1) / 2;
@@ -906,20 +933,23 @@
             const x = start + col * offset;
             const z = start + row * offset;
 
-            const ground = new THREE.Mesh(groundGeo, groundMatBase.clone());
+            // 地面（初期マテリアルは仮、sync3DStateで更新）
+            const groundMat = new THREE.MeshStandardMaterial({ color: 0x555555 });
+            const ground = new THREE.Mesh(groundGeo, groundMat);
             ground.rotation.x = -Math.PI / 2;
             ground.position.set(x, -0.01, z);
             ground.receiveShadow = true;
             scene.add(ground);
 
-            const mesh = new THREE.Mesh(geometry, unlockedMat.clone());
+            // 透明なヒット判定用ボックス
+            const mesh = new THREE.Mesh(geometry, invisibleMat.clone());
             mesh.position.set(x, 0, z);
-            mesh.receiveShadow = true;
             mesh.userData = { index: i, type: 'tile' };
             scene.add(mesh);
 
             const bGroup = new THREE.Group();
-            bGroup.position.set(0, 0.25, 0);
+            // 建物は地面(y=0)から直接建てる
+            bGroup.position.set(0, 0, 0);
             mesh.add(bGroup);
 
             const overlay = document.createElement('div');
@@ -1135,34 +1165,14 @@
         }
     }
 
-    // Material Caching
-    const MATERIALS = {
-        roof: new THREE.MeshStandardMaterial({ color: 0xe74c3c, roughness: 0.8 }),
-        wall: new THREE.MeshStandardMaterial({ color: 0xf39c12, roughness: 0.9 }),
-        leaf: new THREE.MeshStandardMaterial({ color: 0x2ecc71, roughness: 1.0 }),
-        stone: new THREE.MeshStandardMaterial({ color: 0x7f8c8d, roughness: 0.6 }),
-        dark: new THREE.MeshStandardMaterial({ color: 0x34495e, roughness: 0.5 }),
-        tent: new THREE.MeshStandardMaterial({ color: 0x3498db, roughness: 0.9 }),
-        grass: new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 1.0 }),
-        wood: new THREE.MeshStandardMaterial({ color: 0x8B4513, roughness: 0.9 }),
-        window: new THREE.MeshStandardMaterial({ color: 0x87CEEB, emissive: 0x112233, roughness: 0.2 }),
-        dirt: new THREE.MeshStandardMaterial({ color: 0x5d4037, roughness: 1.0 }),
-        metal: new THREE.MeshStandardMaterial({ color: 0xbdc3c7, metalness: 0.8, roughness: 0.2 }),
-        gold: new THREE.MeshStandardMaterial({ color: 0xf1c40f, metalness: 0.6, roughness: 0.3 }),
-        water: new THREE.MeshStandardMaterial({ color: 0x3498db, transparent: true, opacity: 0.7 })
-    };
-
     function createBuildingMesh(type, level) {
         const group = new THREE.Group();
-        // ベーススケールはあまり大きく変えず、要素を増やす方向で調整
-        // ただし、レベルが高いと少し大きく見せたいので緩やかにスケールアップ
+        // ベーススケール調整
         const scale = 1 + (level > 1 ? Math.log(level) * 0.1 : 0);
         group.scale.set(scale, scale, scale);
 
-        // Tier判定 (レベルに応じて外見を変える)
         const tier = level < 5 ? 1 : level < 10 ? 2 : 3;
 
-        // 共通パーツ生成ヘルパー
         const createBox = (w, h, d, mat, x, y, z, rotY=0) => {
             const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
             m.position.set(x, y, z);
@@ -1195,52 +1205,42 @@
                     const z = Math.cos(i*2.5)*0.5;
                     group.add(createCone(0.1, 0.3, MATERIALS.grass, x, 0.15, z, Math.random()));
                 }
-                // 岩や木 (決定論的配置: シードを使わず固定座標)
+                // 岩や木
                 group.add(createBox(0.3, 0.2, 0.3, MATERIALS.stone, 0.4, 0.1, 0.4, 0.5));
                 group.add(createCyl(0.05, 0.08, 0.4, MATERIALS.wood, -0.3, 0.2, -0.3)); // 幹
                 group.add(createCone(0.3, 0.6, MATERIALS.leaf, -0.3, 0.5, -0.3)); // 葉
                 break;
 
             case 'house':
-                // 家の土台
+                // 家の本体（地面から）
                 group.add(createBox(0.8, 0.6, 0.8, MATERIALS.wall, 0, 0.3, 0));
                 
                 if (tier >= 2) {
-                    // 2階部分または拡張
                     group.add(createBox(0.8, 0.5, 0.5, MATERIALS.wall, 0, 0.85, 0));
-                    // 屋根 (高くなる)
                     const roof = createCone(0.8, 0.6, MATERIALS.roof, 0, 1.4, 0, Math.PI/4);
                     roof.scale.z = 0.8;
                     group.add(roof);
-                    // 窓
                     group.add(createBox(0.2, 0.2, 0.05, MATERIALS.window, 0.2, 0.9, 0.26));
                     group.add(createBox(0.2, 0.2, 0.05, MATERIALS.window, -0.2, 0.9, 0.26));
                 } else {
-                    // 通常屋根
                     group.add(createCone(0.7, 0.5, MATERIALS.roof, 0, 0.85, 0, Math.PI/4));
                 }
 
-                // 共通: ドアと窓
                 group.add(createBox(0.25, 0.4, 0.05, MATERIALS.wood, 0, 0.2, 0.4)); // Door
                 group.add(createBox(0.2, 0.2, 0.05, MATERIALS.window, 0.2, 0.4, 0.41)); // Window
                 
-                // 煙突
                 const chimH = tier >= 2 ? 1.4 : 0.8;
                 group.add(createBox(0.15, 0.6, 0.15, MATERIALS.stone, 0.25, chimH, -0.1));
                 
-                // 小物: 柵 (Tier 3)
                 if (tier >= 3) {
                     group.add(createBox(0.05, 0.3, 0.05, MATERIALS.wood, 0.5, 0.15, 0.5));
                     group.add(createBox(0.05, 0.3, 0.05, MATERIALS.wood, 0.6, 0.15, 0.5));
                     group.add(createBox(0.05, 0.3, 0.05, MATERIALS.wood, -0.5, 0.15, 0.5));
-                    // 庭木
                     group.add(createCyl(0.05, 0.05, 0.3, MATERIALS.wood, -0.5, 0.15, 0.3));
                     group.add(createCone(0.2, 0.4, MATERIALS.leaf, -0.5, 0.4, 0.3));
                 }
 
-                // Anim: 煙突の煙
                 if (level > 0) {
-                    // パーティクル用マーカー (透明)
                     const smokeNode = new THREE.Object3D();
                     smokeNode.position.set(0.25, chimH + 0.3, -0.1);
                     smokeNode.userData = { anim: 'smoke' };
@@ -1249,10 +1249,9 @@
                 break;
 
             case 'farm':
-                // 土台
+                // 畑の土 (少し盛り上げる)
                 group.add(createBox(1.0, 0.1, 1.0, MATERIALS.dirt, 0, 0.05, 0));
                 
-                // 作物 (Tierで変わる)
                 const cropRows = tier >= 3 ? 3 : 2;
                 const cropCols = tier >= 3 ? 3 : 2;
                 
@@ -1260,26 +1259,21 @@
                     for(let j=0; j<cropCols; j++) {
                         const cx = (i - (cropRows-1)/2) * 0.3;
                         const cz = (j - (cropCols-1)/2) * 0.3;
-                        // 茎
                         const cropGroup = new THREE.Group();
                         cropGroup.position.set(cx, 0.1, cz);
                         
                         if (tier === 1) {
-                            // 小さな芽
                             cropGroup.add(createCone(0.05, 0.2, MATERIALS.leaf, 0, 0.1, 0));
                         } else {
-                            // 成長した小麦
                             cropGroup.add(createCyl(0.02, 0.02, 0.4, MATERIALS.gold, 0, 0.2, 0));
                             cropGroup.add(createBox(0.1, 0.1, 0.1, MATERIALS.gold, 0, 0.4, 0));
                         }
                         
-                        // 揺れアニメ用タグ
                         cropGroup.userData = { anim: 'sway', speed: 2.0 + Math.random(), offset: Math.random() * 10 };
                         group.add(cropGroup);
                     }
                 }
 
-                // Tier 2+: 案山子
                 if (tier >= 2) {
                     const scarecrow = new THREE.Group();
                     scarecrow.position.set(0.4, 0.1, 0.4);
@@ -1290,16 +1284,14 @@
                     group.add(scarecrow);
                 }
 
-                // Tier 3: 風車
                 if (tier >= 3) {
                     const windmillBase = createCyl(0.15, 0.2, 0.8, MATERIALS.wall, -0.4, 0.4, -0.4);
                     group.add(windmillBase);
                     const roof = createCone(0.25, 0.3, MATERIALS.roof, -0.4, 0.95, -0.4);
                     group.add(roof);
                     
-                    // 羽根
                     const blades = new THREE.Group();
-                    blades.position.set(-0.4, 0.9, -0.25); // 少し手前に出す
+                    blades.position.set(-0.4, 0.9, -0.25); 
                     blades.add(createBox(0.8, 0.05, 0.02, MATERIALS.white, 0, 0, 0));
                     blades.add(createBox(0.05, 0.8, 0.02, MATERIALS.white, 0, 0, 0));
                     blades.userData = { anim: 'rotateZ', speed: 0.02 };
@@ -1308,57 +1300,40 @@
                 break;
 
             case 'lumber':
-                // 小屋
                 group.add(createBox(0.4, 0.5, 0.4, MATERIALS.wood, -0.3, 0.25, -0.3));
-                group.add(createCone(0.4, 0.4, MATERIALS.leaf, -0.3, 0.7, -0.3)); // 苔むした屋根風
+                group.add(createCone(0.4, 0.4, MATERIALS.leaf, -0.3, 0.7, -0.3));
 
-                // 木 (Tierで増える)
                 group.add(createCyl(0.1, 0.15, 0.5, MATERIALS.wood, 0.3, 0.25, 0.3));
                 group.add(createCone(0.3, 0.6, MATERIALS.leaf, 0.3, 0.6, 0.3));
 
                 if (tier >= 2) {
-                    // 切り株
                     group.add(createCyl(0.12, 0.12, 0.15, MATERIALS.wood, 0.3, 0.075, -0.2));
-                    // 丸太置き場
                     group.add(createCyl(0.08, 0.08, 0.6, MATERIALS.wood, -0.2, 0.08, 0.3, Math.PI/2));
                     group.add(createCyl(0.08, 0.08, 0.6, MATERIALS.wood, -0.2, 0.08, 0.45, Math.PI/2));
                     group.add(createCyl(0.08, 0.08, 0.6, MATERIALS.wood, -0.2, 0.2, 0.375, Math.PI/2));
                 }
 
-                // Tier 3: 鋸（のこぎり）
                 if (tier >= 3) {
                     const sawBase = createBox(0.4, 0.2, 0.1, MATERIALS.wood, 0, 0.1, 0);
                     group.add(sawBase);
                     const blade = createBox(0.3, 0.01, 0.3, MATERIALS.metal, 0, 0.22, 0);
-                    // 鋸が前後に動くアニメーション
                     blade.userData = { anim: 'sawMove' };
                     group.add(blade);
                 }
                 break;
 
             case 'quarry':
-                // 岩山
                 group.add(createBox(0.5, 0.4, 0.5, MATERIALS.stone, -0.2, 0.2, -0.2));
                 group.add(createBox(0.4, 0.3, 0.4, MATERIALS.stone, 0.2, 0.15, 0.1));
                 
-                // Tier 2: クレーン
                 if (tier >= 2) {
                     const craneBase = createCyl(0.05, 0.05, 0.6, MATERIALS.wood, 0.3, 0.3, -0.3);
                     group.add(craneBase);
-                    const jib = createBox(0.5, 0.05, 0.05, MATERIALS.wood, 0.1, 0.6, -0.3);
-                    jib.userData = { anim: 'rotateY', speed: 0.01 }; // ゆっくり旋回
-                    group.add(jib);
-                    // 吊り荷 (動かない簡易版)
-                    // (Three.jsの階層構造でjibの子にすれば回るが、今回はGroupに追加しているので分離している。
-                    //  jib自体を回すためにGroupに入れる必要がある)
-                    //  修正: jibを独立したGroupにして回す
-                    group.remove(jib);
                     
                     const craneGroup = new THREE.Group();
                     craneGroup.position.set(0.3, 0.6, -0.3);
                     const arm = createBox(0.5, 0.05, 0.05, MATERIALS.wood, -0.25, 0, 0);
                     craneGroup.add(arm);
-                    // 吊り紐と石
                     const string = createCyl(0.01, 0.01, 0.4, MATERIALS.white, -0.45, -0.2, 0);
                     craneGroup.add(string);
                     const stoneBlock = createBox(0.15, 0.15, 0.15, MATERIALS.stone, -0.45, -0.45, 0);
@@ -1368,42 +1343,35 @@
                     group.add(craneGroup);
                 }
 
-                // Tier 3: トロッコ
                 if (tier >= 3) {
-                    // レール
                     group.add(createBox(0.8, 0.02, 0.15, MATERIALS.dark, 0, 0.02, 0.4));
-                    // トロッコ
                     const cart = new THREE.Group();
                     cart.position.set(0, 0.1, 0.4);
                     cart.add(createBox(0.2, 0.15, 0.2, MATERIALS.wood, 0, 0, 0));
-                    cart.add(createBox(0.15, 0.1, 0.15, MATERIALS.stone, 0, 0.05, 0)); // 中身
+                    cart.add(createBox(0.15, 0.1, 0.15, MATERIALS.stone, 0, 0.05, 0)); 
                     cart.userData = { anim: 'shuttleX', range: 0.3, speed: 0.02 };
                     group.add(cart);
                 }
                 break;
 
             case 'mine':
-                // 坑道入口
                 group.add(createBox(0.6, 0.6, 0.3, MATERIALS.dirt, 0, 0.3, -0.2));
                 group.add(createBox(0.4, 0.4, 0.1, MATERIALS.dark, 0, 0.2, -0.05)); // 穴
-                // 柱
                 group.add(createCyl(0.05, 0.05, 0.6, MATERIALS.wood, 0.25, 0.3, -0.05));
                 group.add(createCyl(0.05, 0.05, 0.6, MATERIALS.wood, -0.25, 0.3, -0.05));
                 group.add(createBox(0.6, 0.1, 0.1, MATERIALS.wood, 0, 0.55, -0.05));
 
                 if (tier >= 2) {
-                    // ランタン
                     const lantern = createBox(0.08, 0.12, 0.08, MATERIALS.gold, 0.32, 0.45, 0);
                     lantern.userData = { anim: 'blink', speed: 0.1 };
                     group.add(lantern);
                 }
 
                 if (tier >= 3) {
-                    // ドリルマシン
                     const drillGroup = new THREE.Group();
                     drillGroup.position.set(-0.2, 0.15, 0.3);
-                    drillGroup.add(createBox(0.3, 0.2, 0.3, MATERIALS.metal, 0, 0, 0)); // 本体
-                    const bit = createCone(0.1, 0.3, MATERIALS.dark, 0, 0, 0.25, -Math.PI/2); // ドリル刃
+                    drillGroup.add(createBox(0.3, 0.2, 0.3, MATERIALS.metal, 0, 0, 0)); 
+                    const bit = createCone(0.1, 0.3, MATERIALS.dark, 0, 0, 0.25, -Math.PI/2);
                     bit.userData = { anim: 'spinX', speed: 0.5 };
                     drillGroup.add(bit);
                     group.add(drillGroup);
@@ -1411,16 +1379,13 @@
                 break;
 
             case 'market':
-                // ストール (露店)
                 const createStall = (x, z, color) => {
                     const g = new THREE.Group();
                     g.position.set(x, 0, z);
                     g.add(createBox(0.4, 0.3, 0.3, MATERIALS.wood, 0, 0.15, 0)); // 台
-                    // 屋根
                     const r = createCyl(0, 0.3, 0.2, color, 0, 0.5, 0, 0, 4);
                     r.rotation.y = Math.PI/4;
                     g.add(r);
-                    // 柱
                     g.add(createCyl(0.02, 0.02, 0.4, MATERIALS.wood, 0.18, 0.3, 0.13));
                     g.add(createCyl(0.02, 0.02, 0.4, MATERIALS.wood, -0.18, 0.3, 0.13));
                     g.add(createCyl(0.02, 0.02, 0.4, MATERIALS.wood, 0.18, 0.3, -0.13));
@@ -1428,23 +1393,20 @@
                     return g;
                 };
 
-                group.add(createStall(0, 0, 0, MATERIALS.tent)); // メイン
+                group.add(createStall(0, 0, 0, MATERIALS.tent)); 
 
                 if (tier >= 2) {
-                    group.add(createStall(0.4, 0.3, MATERIALS.roof)); // 赤屋根
-                    // 木箱
+                    group.add(createStall(0.4, 0.3, MATERIALS.roof)); 
                     group.add(createBox(0.15, 0.15, 0.15, MATERIALS.wood, -0.3, 0.075, 0.3));
                     group.add(createBox(0.15, 0.15, 0.15, MATERIALS.wood, -0.4, 0.075, 0.2));
                 }
 
                 if (tier >= 3) {
-                    group.add(createStall(-0.4, -0.2, MATERIALS.grass)); // 緑屋根
-                    // 噴水
+                    group.add(createStall(-0.4, -0.2, MATERIALS.grass)); 
                     const fountain = new THREE.Group();
                     fountain.position.set(0, 0.1, 0.5);
                     fountain.add(createCyl(0.3, 0.2, 0.1, MATERIALS.stone, 0, 0, 0));
                     fountain.add(createCyl(0.1, 0.1, 0.3, MATERIALS.stone, 0, 0.15, 0));
-                    // 水 (アニメーションで上下)
                     const water = createBox(0.05, 0.05, 0.05, MATERIALS.water, 0, 0.35, 0);
                     water.userData = { anim: 'bounceY', speed: 0.1, range: 0.05 };
                     fountain.add(water);
@@ -1453,37 +1415,29 @@
                 break;
 
             case 'blacksmith':
-                // 工房
                 group.add(createBox(0.7, 0.5, 0.5, MATERIALS.dark, 0, 0.25, -0.1));
-                // 煙突
                 group.add(createBox(0.2, 0.8, 0.2, MATERIALS.stone, 0.3, 0.4, -0.1));
-                // 煙 (Anim)
                 const smokeB = new THREE.Object3D();
                 smokeB.position.set(0.3, 0.9, -0.1);
                 smokeB.userData = { anim: 'smoke' };
                 group.add(smokeB);
 
-                // 炉 (Tier 2)
                 if (tier >= 2) {
                     const furnace = createBox(0.3, 0.3, 0.3, MATERIALS.stone, -0.3, 0.15, 0.3);
                     group.add(furnace);
-                    // 火
                     const fire = createBox(0.15, 0.1, 0.15, MATERIALS.gold, -0.3, 0.2, 0.35);
                     fire.userData = { anim: 'blink', speed: 0.2 };
                     group.add(fire);
                 }
 
-                // 金床とハンマー (Tier 3)
                 if (tier >= 3) {
                     const anvil = createBox(0.2, 0.15, 0.1, MATERIALS.metal, 0.1, 0.075, 0.3);
                     group.add(anvil);
                     
-                    // ハンマー
                     const hammerGroup = new THREE.Group();
                     hammerGroup.position.set(0.25, 0.25, 0.3);
-                    hammerGroup.add(createBox(0.05, 0.2, 0.05, MATERIALS.wood, 0, 0, 0)); // 柄
-                    hammerGroup.add(createBox(0.1, 0.05, 0.05, MATERIALS.metal, 0, 0.1, 0)); // 頭
-                    // 叩く動作
+                    hammerGroup.add(createBox(0.05, 0.2, 0.05, MATERIALS.wood, 0, 0, 0)); 
+                    hammerGroup.add(createBox(0.1, 0.05, 0.05, MATERIALS.metal, 0, 0.1, 0)); 
                     hammerGroup.userData = { anim: 'hammer', speed: 0.1 };
                     hammerGroup.rotation.z = Math.PI / 4;
                     group.add(hammerGroup);
@@ -1495,12 +1449,11 @@
 
     function animate3D() {
         requestAnimationFrame(animate3D);
-        const time = Date.now() * 0.001; // seconds
+        const time = Date.now() * 0.001; 
 
         tileMeshes.forEach(t => {
             t.particles.update();
             
-            // 建物アニメーション
             if (t.buildingGroup.visible) {
                 t.buildingGroup.traverse((obj) => {
                     if (obj.userData && obj.userData.anim) {
@@ -1531,19 +1484,11 @@
                                 obj.position.z = Math.sin(time * 5) * 0.15;
                                 break;
                             case 'hammer':
-                                // 叩く動作: 0~-PI/2 の間を行き来するが、叩く瞬間は速く
                                 const cycle = (time * 3) % Math.PI;
                                 obj.rotation.z = Math.PI/4 + Math.sin(cycle) * Math.PI/4;
                                 break;
                             case 'smoke':
-                                // 簡易パーティクル (既存のParticleSystemは建設用なので、ここでは定常煙用)
-                                // 本来は専用のパーティクルシステムが必要だが、
-                                // 今回は負荷軽減のため、見えないオブジェクトの位置からParticleSystemをたまにトリガーする
                                 if (Math.random() < 0.05) {
-                                    // 既存のParticleSystemを流用して煙を出す（色は白く上書きできないので建設エフェクトと同じになるが、
-                                    // 雰囲気は出る）
-                                    // もっと良くするには ParticleSystem クラスを改造して色を受け取れるようにする
-                                    // ここでは簡易的に実装
                                 }
                                 break;
                         }
@@ -1569,11 +1514,11 @@
         tileMeshes.forEach((t, i) => {
             const pos = t.mesh.position.clone();
             
-            // 修正: 未開拓地の場合はアイコン位置を低くする
+            // アイコン高さ調整（土台削除に伴い少し下げる）
             if (gameState.tiles[i] && !gameState.tiles[i].unlocked) {
                 pos.y += 0.5;
             } else {
-                pos.y += 1.5; 
+                pos.y += 1.0; 
             }
 
             pos.project(camera);
@@ -1596,14 +1541,13 @@
         
         gameState.tiles.forEach((tile, i) => {
             const tObj = tileMeshes[i];
-            const mesh = tObj.mesh;
+            const mesh = tObj.mesh; // 透明ヒットボックス
             const overlay = tObj.overlayEl;
             const ground = tObj.groundMesh;
 
             if (!tile.unlocked) {
                 // 未開拓地
-                ground.material.color.setHex(0x27ae60);
-                mesh.material.color.setHex(0x2ecc71);
+                ground.material = MATERIALS.grassLocked;
                 tObj.buildingGroup.visible = true; 
                 tObj.particles.active = false;
                 
@@ -1623,73 +1567,78 @@
                 } else {
                     overlay.innerHTML = "";
                 }
-                return;
             } else {
-                // 開拓地
-                ground.material.color.setHex(0x555555);
-                mesh.material.color.setHex(0xecf0f1);
-            }
-            
-            if (selectedTileIndex === i) {
-                mesh.material.emissive.setHex(0x3498db);
-                mesh.material.emissiveIntensity = 0.3;
-            } else {
-                mesh.material.emissive.setHex(0x000000);
-            }
-
-            if (tile.type) {
-                tObj.buildingGroup.visible = true;
+                // 開拓地（石畳）
+                ground.material = MATERIALS.cobblestone;
                 
-                // レベルによってTierが変わるため、stateKeyにlevelを含める（変更なし）
-                // ただしTierが変わらないレベルアップでも再生成されてしまうが、
-                // 一瞬なので許容範囲。最適化するなら Math.floor(level/5) などをキーにする
-                const stateKey = `${tile.type}_${tile.level}`;
-                if (tObj.currentType !== stateKey) {
-                    while(tObj.buildingGroup.children.length > 0){ 
-                        tObj.buildingGroup.remove(tObj.buildingGroup.children[0]); 
+                if (tile.type) {
+                    tObj.buildingGroup.visible = true;
+                    const stateKey = `${tile.type}_${tile.level}`;
+                    if (tObj.currentType !== stateKey) {
+                        while(tObj.buildingGroup.children.length > 0){ 
+                            tObj.buildingGroup.remove(tObj.buildingGroup.children[0]); 
+                        }
+                        const newModel = createBuildingMesh(tile.type, tile.level);
+                        tObj.buildingGroup.add(newModel);
+                        tObj.currentType = stateKey;
                     }
-                    const newModel = createBuildingMesh(tile.type, tile.level);
-                    tObj.buildingGroup.add(newModel);
-                    tObj.currentType = stateKey;
-                }
-                
-                if (tile.finishTime) {
-                    tObj.particles.active = true;
-                    const remaining = Math.max(0, (tile.finishTime - Date.now()));
-                    const total = getBuildTime(tile.type, tile.level); 
-                    const percent = Math.min(100, Math.max(0, 100 - (remaining / total * 100)));
                     
-                    overlay.innerHTML = `
-                        <div class="tile-timer">${formatTimeShort(remaining/1000)}</div>
-                        <div class="progress-bar-container"><div class="progress-fill" style="width:${percent}%"></div></div>
-                    `;
-                } else {
-                    tObj.particles.active = false;
-                    
-                    let content = "";
-                    let hasResource = false;
-                    let maxRes = ""; let maxVal = 0;
-                    const canCollect = (Date.now() - (tile.lastCollectTime || 0)) >= CONFIG.collectCooldown;
+                    if (tile.finishTime) {
+                        tObj.particles.active = true;
+                        const remaining = Math.max(0, (tile.finishTime - Date.now()));
+                        const total = getBuildTime(tile.type, tile.level); 
+                        const percent = Math.min(100, Math.max(0, 100 - (remaining / total * 100)));
+                        
+                        overlay.innerHTML = `
+                            <div class="tile-timer">${formatTimeShort(remaining/1000)}</div>
+                            <div class="progress-bar-container"><div class="progress-fill" style="width:${percent}%"></div></div>
+                        `;
+                    } else {
+                        tObj.particles.active = false;
+                        
+                        let content = "";
+                        let hasResource = false;
+                        let maxRes = ""; let maxVal = 0;
+                        const canCollect = (Date.now() - (tile.lastCollectTime || 0)) >= CONFIG.collectCooldown;
 
-                    if(tile.stored && canCollect) {
-                        for(let r in tile.stored) {
-                            if(tile.stored[r] >= 1) {
-                                hasResource = true;
-                                if(tile.stored[r] > maxVal) { maxVal = tile.stored[r]; maxRes = r; }
+                        if(tile.stored && canCollect) {
+                            for(let r in tile.stored) {
+                                if(tile.stored[r] >= 1) {
+                                    hasResource = true;
+                                    if(tile.stored[r] > maxVal) { maxVal = tile.stored[r]; maxRes = r; }
+                                }
                             }
                         }
+                        if (hasResource) {
+                            const icon = maxRes=='money'?'💰':maxRes=='food'?'🌾':maxRes=='wood'?'🌲':maxRes=='stone'?'🪨':'🔩';
+                            content = `<div class="harvest-bubble" onclick="collectResourceUI(${i}, event)">${icon}</div>`;
+                        }
+                        overlay.innerHTML = content;
                     }
-                    if (hasResource) {
-                        const icon = maxRes=='money'?'💰':maxRes=='food'?'🌾':maxRes=='wood'?'🌲':maxRes=='stone'?'🪨':'🔩';
-                        content = `<div class="harvest-bubble" onclick="collectResourceUI(${i}, event)">${icon}</div>`;
-                    }
-                    overlay.innerHTML = content;
+                } else {
+                    tObj.buildingGroup.visible = false;
+                    tObj.particles.active = false;
+                    tObj.currentType = null;
+                    overlay.innerHTML = "";
                 }
+            }
+            
+            // 選択時のハイライト (地面を光らせる)
+            if (selectedTileIndex === i) {
+                // マテリアルが共有されているので一時的にクローンして光らせる
+                // 注意: パフォーマンス最適化のためには別途SelectionBoxを使うのが良いが、簡易実装として
+                if (ground.material.uuid === MATERIALS.cobblestone.uuid || ground.material.uuid === MATERIALS.grassLocked.uuid) {
+                    ground.material = ground.material.clone();
+                }
+                ground.material.emissive.setHex(0x3498db);
+                ground.material.emissiveIntensity = 0.3;
             } else {
-                tObj.buildingGroup.visible = false;
-                tObj.particles.active = false;
-                tObj.currentType = null;
-                overlay.innerHTML = "";
+                // 光っていない状態に戻す（共有マテリアルを再割り当て）
+                if (tile.unlocked && ground.material.uuid !== MATERIALS.cobblestone.uuid) {
+                     ground.material = MATERIALS.cobblestone;
+                } else if (!tile.unlocked && ground.material.uuid !== MATERIALS.grassLocked.uuid) {
+                     ground.material = MATERIALS.grassLocked;
+                }
             }
         });
     }
@@ -1734,28 +1683,23 @@
 
     function onPointerDown(event) {
         pointerDownPos.set(event.clientX, event.clientY);
-        lastPointerPos.set(event.clientX, event.clientY); // パンニング用
+        lastPointerPos.set(event.clientX, event.clientY); 
         isDragging = false;
         
-        // 左クリックまたはタッチの場合のみ移動開始
         if (event.button === 0 || event.pointerType === 'touch') {
             isPanning = true;
         }
     }
 
     function onPointerMove(event) {
-        // ドラッグ判定（クリックと区別するため）
         if (!isDragging && (Math.abs(event.clientX - pointerDownPos.x) > 5 || Math.abs(event.clientY - pointerDownPos.y) > 5)) {
             isDragging = true;
         }
-
-        // パンニング処理
         if (isPanning) {
             const deltaX = event.clientX - lastPointerPos.x;
             const deltaY = event.clientY - lastPointerPos.y;
             lastPointerPos.set(event.clientX, event.clientY);
 
-            // ズーム中（2本指）は移動させない
             if (touchStartDist > 0) return; 
 
             moveCamera(deltaX, deltaY);
@@ -1774,14 +1718,11 @@
 
         raycaster.setFromCamera(mouse, camera);
         
-        // ヒット判定対象をタイルのメッシュ（とっその子要素）に限定
-        // これにより、歩行者や地面の裏側などをクリックしてしまうのを防ぐ
         const targetObjects = tileMeshes.map(t => t.mesh);
         const intersects = raycaster.intersectObjects(targetObjects, true);
 
         if (intersects.length > 0) {
             let target = intersects[0].object;
-            // 親を遡ってタイルルート(userData.indexを持つ)を探す
             while(target && target.userData.index === undefined && target.parent) {
                 target = target.parent;
             }
@@ -1798,25 +1739,20 @@
         }
     }
     
-    // カメラ移動関数
     function moveCamera(dx, dy) {
         if (!camera) return;
         
-        // ズームレベルに応じて移動速度を調整
         const speed = 0.05 / camera.zoom; 
 
         const vec = new THREE.Vector3();
         const quat = camera.quaternion.clone();
         
-        // 画面右方向（X軸）
         const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quat);
         right.y = 0; right.normalize();
         
-        // 画面上方向（Y軸）
         const up = new THREE.Vector3(0, 1, 0).applyQuaternion(quat);
         up.y = 0; up.normalize();
 
-        // カメラ位置更新 (逆方向に動かすと地面をつかんで動かす感覚になる)
         camera.position.addScaledVector(right, -dx * speed);
         camera.position.addScaledVector(up, dy * speed);
     }
@@ -1841,7 +1777,7 @@
 
     function onTouchStart(event) {
         if (event.touches.length === 2) {
-            isPanning = false; // ズーム開始時はパンニング停止
+            isPanning = false; 
             const dx = event.touches[0].pageX - event.touches[1].pageX;
             const dy = event.touches[0].pageY - event.touches[1].pageY;
             touchStartDist = Math.sqrt(dx * dx + dy * dy);
@@ -1850,7 +1786,6 @@
     }
 
     function onTouchMove(event) {
-        // キャンバス上でのデフォルトスクロール防止
         if(event.target === renderer.domElement) {
              event.preventDefault();
         }
@@ -1895,7 +1830,6 @@
     
     function getNextRankXP(r){ 
         const base = r * 500;
-        // ランク12以上の場合、従来の3倍 (base * 4 * 3)
         if(r >= 12) return base * 4 * 3;
         if(r >= 10) return base * 4;
         return base; 
@@ -1905,7 +1839,7 @@
     
     function getCost(t,l){ 
         let m=Math.pow(1.6,l) * 1.5; 
-        if(l >= 10) m *= 10; // Level 11+ Cost Increase
+        if(l >= 10) m *= 10; 
         const r={}; 
         for(let k in BUILDINGS[t].cost) r[k]=Math.floor(BUILDINGS[t].cost[k]*m); 
         return r; 
@@ -1914,12 +1848,7 @@
     function getStorageCapacity(t,l){ const b=BUILDINGS[t], s=CONFIG.storageHours*3600, c={}; for(let r in b.prod) if(b.prod[r]>0) c[r]=b.prod[r]*l*Math.pow(1.05,l-1)*s; return c; }
     
     function getExpandCost(r){ 
-        // 修正: 実際のタイル数(unlockedCount)ではなく、
-        // 「そのランクで本来到達しているはずの進行度」を基準にコストを計算する。
-        // これにより、ランク12で拡張する際の費用を「元のコードのランク12での費用」と一致させる。
         const reqRank = getRequiredRankForExpansion();
-        
-        // 元の仕様では Rank = Count - 2 なので、Count = Rank + 2 となる
         const virtualUnlockedCount = reqRank + 2;
 
         let b = 500 * Math.pow(1.5, virtualUnlockedCount - 4); 
@@ -1934,7 +1863,6 @@
             iron: 0
         };
         
-        // ランク12以上の場合、さらにコストを増加
         if (reqRank >= 12) {
             cost.money *= 20;
             cost.food *= 20;
@@ -1947,17 +1875,11 @@
     
     function getRequiredRankForExpansion(){ 
         const unlockedCount = gameState.tiles.filter(t=>t.unlocked).length;
-        
-        // 元の計算式: 基本的には タイル数 - 2 が必要ランク
         const baseReq = Math.max(2, unlockedCount - 2); 
 
-        // ランク10までは今まで通り (1ランク1拡張)
         if (baseReq <= 10) {
             return baseReq;
         } else {
-            // ランク10以降はペースを落とす (2ランク1拡張)
-            // baseReqが11 (本来ランク11で解放) の場合 -> ランク12で解放にする
-            // 計算式: 10 + (超過分 * 2)
             return 10 + (baseReq - 10) * 2;
         }
     }
@@ -2010,7 +1932,6 @@
         return false;
     }
     
-    // 世界拡張チェック
     function checkAndExpandWorld() {
         const allUnlocked = gameState.tiles.every(t => t.unlocked);
         if (allUnlocked) {
@@ -2023,17 +1944,14 @@
         const newSize = oldSize + 1;
         const newTiles = [];
         
-        // 新しいグリッドサイズに合わせてデータを再構築
         for(let i=0; i<newSize*newSize; i++) {
             const row = Math.floor(i / newSize);
             const col = i % newSize;
             
-            // 既存エリアの範囲内であれば旧データをコピー
             if (row < oldSize && col < oldSize) {
                 const oldIdx = row * oldSize + col;
                 newTiles.push(gameState.tiles[oldIdx]);
             } else {
-                // 新規エリア
                 newTiles.push({
                     type: null, level: 0, finishTime: null,
                     unlocked: false, 
@@ -2047,7 +1965,6 @@
         gameState.gridSize = newSize;
         
         createTiles();
-        updateMenuAnchor();
         showToast(`🎉 世界が広がりました！ (${newSize}x${newSize})`);
         
         initPedestrians();
@@ -2097,8 +2014,6 @@
                 gameState.inventory.forEach((item, idx) => {
                     const b = BUILDINGS[item.type];
                     const timeSec = getBuildTime(item.type, item.level - 1) / 1000;
-                    
-                    // 制限チェック
                     const canRestore = checkBuildingLimit(item.type);
                     const disabledAttr = canRestore ? '' : 'disabled';
                     const warnText = canRestore ? '' : '<span style="color:red; font-size:0.8em;">(上限到達)</span>';
@@ -2122,7 +2037,6 @@
                 const afford = checkAfford(c);
                 let cs = []; for(let r in c) if(c[r]>0) cs.push((r=='money'?'💰':r=='food'?'🌾':r=='wood'?'🌲':r=='stone'?'🪨':'🔩')+c[r].toLocaleString());
                 
-                // 制限チェック
                 const canBuild = checkBuildingLimit(k);
                 const disabledAttr = (afford && canBuild) ? '' : 'disabled';
                 const limitText = canBuild ? '' : '<br><span style="color:red; font-size:0.8em;">⚠️ 上限(4つ)に達しています</span>';
@@ -2164,7 +2078,6 @@
                 prodDiff += `<div>${icon} ${currVal.toFixed(1)}/s <span style="color:#2ecc71; font-weight:bold;">➞ ${nextVal.toFixed(1)}/s</span></div>`;
             }
 
-            // Cancel Button Logic
             const c = getCost(tile.type, tile.level);
             let refund = [];
             for(let r in c) if(c[r]>0) refund.push(`${(r=='money'?'💰':r=='food'?'🌾':r=='wood'?'🌲':r=='stone'?'🪨':'🔩')}${Math.floor(c[r]*0.5).toLocaleString()}`);
@@ -2260,7 +2173,6 @@
         const t = gameState.tiles[selectedTileIndex];
         const lv = t.type===type ? t.level : 0;
         
-        // 新規建設の場合のみ数制限チェック
         if(lv === 0 && !checkBuildingLimit(type)) {
             showToast("⚠️ この施設はこれ以上建設できません");
             return;
@@ -2311,7 +2223,6 @@
 
         const item = gameState.inventory[invIndex];
         
-        // 復元時も数制限チェック
         if (!checkBuildingLimit(item.type)) {
             showToast("⚠️ この施設はこれ以上配置できません");
             return;
@@ -2340,7 +2251,6 @@
             gameState.tiles[selectedTileIndex].unlocked = true;
             saveGame();
             
-            // 拡張後のチェック
             checkAndExpandWorld();
             
             sync3DState();
@@ -2356,7 +2266,6 @@
         const canBuyBuilder = gameState.resources.money >= builderCost;
         const currentUid = currentUser ? currentUser.uid : "未接続(オフライン)";
         
-        // 共有ID設定があればそちらを表示
         const sharedUid = localStorage.getItem('kingdomBuilder_sharedId');
         const displayUid = sharedUid ? `${sharedUid} (連携中)` : currentUid;
 
@@ -2480,8 +2389,6 @@
         if(gameState.inventory.length === 0) {
             html += '<p style="color:#999; font-size:0.9em;">保管庫は空です</p>';
         } else {
-            // 表示用にソートしたコピーを作成（インデックスを保持しないとリストアでバグる可能性があるため、表示のみ）
-            // 注: 今回の実装ではインベントリ一覧に操作ボタンがないため、表示順序を変えても問題ない
             let sortedInv = [...gameState.inventory];
             sortedInv.sort(sortFn);
 
@@ -2507,34 +2414,13 @@
         closeModal('modal-building-list');
         selectTile(index);
         
-        // カメラ移動
         const tObj = tileMeshes[index];
         if(tObj && camera) {
             const targetX = tObj.mesh.position.x;
             const targetZ = tObj.mesh.position.z;
             
-            // 現在のY, Zoom, Rotationを維持しつつX,Zだけ移動
-            // OrthographicCameraなので、X,Z移動だけでOK（setCameraZoom等は維持）
-            // アニメーションなしで即移動させる
-            const offset = 20; // 初期位置のオフセット (20, 20, 20) を考慮
-            // カメラは (20, 20, 20) から (0,0,0) を見ている。
-            // ターゲットを画面中央にするには、カメラ位置をターゲット座標分ずらせばよい？
-            // OrthographicCameraでのパンニングは camera.position を動かすことで実現している。
-            // moveCamera関数は相対移動だが、ここでは絶対位置へ行きたい。
-            
-            // 現在のカメラ位置から、LookAt中心（と仮定される点）へのオフセットを維持して移動したいが、
-            // 簡易的に、タイルの真上にカメラを持ってくるような移動をする。
-            // 初期カメラ: pos(20,20,20), lookAt(0,0,0) -> 方向ベクトル(1,1,1)
-            
-            // 既存のパンニングロジックに合わせるため、カメラ位置を直接操作
-            // XとZをターゲットに合わせて移動
-            // ただし斜め視点なので、単純に x=targetX ではずれる。
-            // 既存のmoveCameraの逆算は複雑なので、パンニング位置変数をリセットして再計算などが理想だが...
-            
-            // シンプルに: カメラのX,Zを、ターゲットのX,Zにオフセットを加えたものにする
             camera.position.x = targetX + 20;
             camera.position.z = targetZ + 20;
-            // Yは変えない
             camera.updateProjectionMatrix();
         }
     };
@@ -2598,7 +2484,6 @@
         }
     }
 
-    // Process Offline Income after Cloud Load
     function processOfflineProgress() {
         try {
             const now = Date.now();
