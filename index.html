@@ -1347,14 +1347,42 @@
         function createConstructionSite() {
             const group = new THREE.Group();
 
-            // グレーシートで囲う (上部は不要、少し広げる: 0.95*1.5=1.425 -> 1.45, 0.7*1.5=1.05)
-            // CylinderGeometry(radiusTop, radiusBottom, height, radialSegments, heightSegments, openEnded)
-            // 4角形筒(openEnded=true)で壁だけ作る。サイズを1.5倍に広げる
-            const sheetGeo = new THREE.CylinderGeometry(1.45, 1.45, 1.05, 4, 1, true);
-            const sheet = new THREE.Mesh(sheetGeo, MATERIALS.graySheet);
-            sheet.rotation.y = Math.PI / 4; // 軸に合わせる
-            sheet.position.y = 0.5; // 高さ調整
-            group.add(sheet);
+            // 足場(Scaffolding)の構築
+            // 4本の鉄骨支柱と、その間のグレーの幕
+            const width = 2.4; // 全体の幅 (1.6 * sqrt(2) * 2 ≒ 4.5 だが、Boxとして考える)
+            // 半径1.6程度の位置に柱を置く。正方形配置なら、x,z = +/- 1.13程度
+            const dist = 1.2;
+            const height = 1.2;
+
+            // 支柱 (鉄)
+            const poleGeo = new THREE.CylinderGeometry(0.05, 0.05, height, 8);
+            const poles = [
+                { x: dist, z: dist },
+                { x: -dist, z: dist },
+                { x: dist, z: -dist },
+                { x: -dist, z: -dist }
+            ];
+            poles.forEach(p => {
+                const pole = new THREE.Mesh(poleGeo, MATERIALS.metal);
+                pole.position.set(p.x, height / 2, p.z);
+                group.add(pole);
+            });
+
+            // 幕 (グレーの布) - 支柱の間に張る
+            // 4枚の壁を作る
+            const sheetGeo = new THREE.PlaneGeometry(dist * 2, height * 0.9);
+            const sides = [
+                { x: 0, z: dist, ry: 0 },
+                { x: 0, z: -dist, ry: Math.PI },
+                { x: dist, z: 0, ry: Math.PI / 2 },
+                { x: -dist, z: 0, ry: -Math.PI / 2 }
+            ];
+            sides.forEach(s => {
+                const sheet = new THREE.Mesh(sheetGeo, MATERIALS.graySheet);
+                sheet.position.set(s.x, height / 2, s.z);
+                sheet.rotation.y = s.ry;
+                group.add(sheet);
+            });
 
             // 作業員
             const worker = new THREE.Group();
