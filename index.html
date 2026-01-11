@@ -991,27 +991,27 @@
             market: { name: "市場", icon: "⚖️", desc: "交易を行います。大量のお金を生産します。", prod: { money: 10 }, cost: { money: 500, food: 200, wood: 200, stone: 50 }, baseTime: 6000 },
             blacksmith: { name: "鍛冶屋", icon: "⚔️", desc: "武具を作ります。お金と鉄を生産します。", prod: { money: 5, iron: 2 }, cost: { money: 800, food: 300, wood: 300, stone: 200, iron: 100 }, baseTime: 7000 },
 
-            // 新規追加施設 (コストは民家Lv12相当: 価値概算5000~6000程度)
+            // 新規追加施設 (コストは民家Lv12相当 x 10倍)
             well: {
                 name: "井戸", icon: "💧",
                 desc: "【農業支援】隣接する「畑」の生産効率を1.5倍にします。畑の中心に配置しましょう。",
                 prod: {}, // 生産なし
-                cost: { money: 3000, food: 1000, wood: 1000, stone: 500, iron: 200 },
-                baseTime: 10000
+                cost: { money: 30000, food: 10000, wood: 10000, stone: 5000, iron: 2000 },
+                baseTime: 100000
             },
             inn: {
                 name: "宿屋", icon: "🏨",
                 desc: "【商業ハブ】「市場」と「民家」の両方に隣接すると稼働し、多額のお金を生産します。",
-                prod: { money: 60 }, // 条件付き高生産
-                cost: { money: 3000, food: 1000, wood: 1000, stone: 500, iron: 200 },
-                baseTime: 12000
+                prod: { money: 60 }, // 条件付き高生産 (※生産量はそのまま)
+                cost: { money: 30000, food: 10000, wood: 10000, stone: 5000, iron: 2000 },
+                baseTime: 120000
             },
             clocktower: {
                 name: "時計塔", icon: "🕰️",
                 desc: "【全体加速】街のシンボル。全施設の生産速度を2%加速します(重複可)。",
                 prod: {}, // 直接生産なし(全体バフ)
-                cost: { money: 10000, food: 5000, wood: 5000, stone: 2000, iron: 1000 }, // さらに高コスト
-                baseTime: 20000
+                cost: { money: 100000, food: 50000, wood: 50000, stone: 20000, iron: 10000 },
+                baseTime: 200000
             }
         };
 
