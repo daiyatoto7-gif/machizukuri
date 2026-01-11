@@ -994,7 +994,7 @@
             // 新規追加施設 (コストは民家Lv12相当 x 10倍)
             well: {
                 name: "井戸", icon: "💧",
-                desc: "【農業支援】隣接する「畑」の生産効率を1.5倍にします。畑の中心に配置しましょう。",
+                desc: "【農業支援】隣接する「畑」の生産効率をアップさせます(Lv1: 1.3倍)。レベルアップで効果が向上します。",
                 prod: {}, // 生産なし
                 cost: { money: 30000, food: 10000, wood: 10000, stone: 5000, iron: 2000 },
                 baseTime: 100000
@@ -2297,8 +2297,18 @@
                         // 1. 井戸のバフ (畑の周囲に井戸があるか)
                         if (tile.type === 'farm') {
                             const adj = getAdjacentTiles(i);
-                            const hasWell = adj.some(t => t && t.type === 'well' && t.level > 0 && !t.finishTime);
-                            if (hasWell) multiplier *= 1.5;
+                            const maxWellLevel = adj.reduce((max, t) => {
+                                if (t && t.type === 'well' && t.level > 0 && !t.finishTime) {
+                                    return Math.max(max, t.level);
+                                }
+                                return max;
+                            }, 0);
+
+                            if (maxWellLevel > 0) {
+                                // Lv1: 1.3倍, +0.02/Lv
+                                const bonus = 0.3 + (maxWellLevel - 1) * 0.02;
+                                multiplier *= (1 + bonus);
+                            }
                         }
 
                         // 2. 宿屋の稼働条件 (市場と民家が隣接)
