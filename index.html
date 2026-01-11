@@ -2634,6 +2634,25 @@
             sync3DState();
         }
 
+        // コスト表示用ヘルパー（不足分を赤字にする）
+        function formatCostWithColor(cost) {
+            let html = [];
+            for (let r in cost) {
+                if (cost[r] > 0) {
+                    const val = cost[r];
+                    const has = gameState.resources[r] || 0;
+                    const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : '🔩');
+
+                    if (has < val) {
+                        html.push(`<span style="color:red; font-weight:bold;">${icon}${val.toLocaleString()}</span>`);
+                    } else {
+                        html.push(`${icon}${val.toLocaleString()}`);
+                    }
+                }
+            }
+            return html.join(' ');
+        }
+
         function moveCamera(dx, dy) {
             if (!camera) return;
 
@@ -2894,7 +2913,7 @@
                     <p><strong>未開拓の土地</strong></p>
                     <div style="background:#eee; padding:10px; border-radius:5px; text-align:left; font-size:0.9em;">
                         条件: ランク${req} (${ok ? '✅' : '❌'})<br>
-                        費用: 💰${cost.money.toLocaleString()} 🌾${cost.food.toLocaleString()} 🌲${cost.wood.toLocaleString()} 🪨${cost.stone.toLocaleString()}
+                        費用: ${formatCostWithColor(cost)}
                     </div>
                     <button class="action-btn" onclick="actExpand()" ${ok && afford ? '' : 'disabled'}>拡張</button>
                     ${!ok ? '<p style="color:red;font-size:0.8em">ランク不足</p>' : ''}
@@ -2934,7 +2953,8 @@
                     const b = BUILDINGS[k];
                     const c = getCost(k, 0);
                     const afford = checkAfford(c);
-                    let cs = []; for (let r in c) if (c[r] > 0) cs.push((r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : '🔩') + c[r].toLocaleString());
+                    // Use helper for color check
+                    const costStr = formatCostWithColor(c);
 
                     const canBuild = checkBuildingLimit(k);
                     const disabledAttr = (afford && canBuild) ? '' : 'disabled';
@@ -2949,7 +2969,7 @@
                         <div class="building-info">
                             <strong>${b.icon} ${b.name}</strong>
                             <p style="font-size:0.8em; color:#666; margin:2px 0;">${b.desc}</p>
-                            <span class="res-cost">${cs.join(' ')}</span>
+                            <span class="res-cost">${costStr}</span>
                             <span class="res-cost">⏳${formatTime(getBuildTime(k, 0) / 1000)}</span>
                             ${limitText}
                         </div>
@@ -3002,7 +3022,8 @@
                 const c = getCost(tile.type, tile.level);
                 const afford = checkAfford(c);
                 const caps = getStorageCapacity(tile.type, tile.level);
-                let cs = []; for (let r in c) if (c[r] > 0) cs.push((r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : '🔩') + c[r].toLocaleString());
+                // Use helper for upgrade cost
+                const costStr = formatCostWithColor(c);
 
                 let prodInfo = ""; let storeInfo = "";
                 for (let r in b.prod) if (b.prod[r] > 0) {
@@ -3024,7 +3045,7 @@
                         <strong>貯蔵庫:</strong><br>${storeInfo}
                     </div>
                     <div style="text-align:left; font-size:0.9em; margin-bottom:5px;">
-                         <strong>LvUP費用:</strong> ${cs.join(' ')}<br>
+                         <strong>LvUP費用:</strong> ${costStr}<br>
                          <strong>時間:</strong> ${formatTime(getBuildTime(tile.type, tile.level) / 1000)}
                     </div>
                     ${buildersBusy ? '<p style="color:red; font-size:0.9em;">⚠️ 工事枠がいっぱいです</p>' : ''}
@@ -3288,13 +3309,7 @@
                 }
             }
 
-            const cost = [];
-            for (let r in b.cost) {
-                if (b.cost[r] > 0) {
-                    const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : '🔩');
-                    cost.push(`<div>${icon} ${b.cost[r].toLocaleString()}</div>`);
-                }
-            }
+            const costStr = formatCostWithColor(b.cost);
 
             const typeIndex = BUILDING_KEYS.indexOf(type);
             const isStandardLimited = (typeIndex >= LIMIT_START_INDEX && typeIndex !== -1);
@@ -3334,7 +3349,7 @@
                     <div class="stat-card">
                         <span class="stat-label">建設コスト</span>
                         <div class="stat-content">
-                            ${cost.length ? cost.join('') : '無料'}
+                            ${costStr || '無料'}
                         </div>
                     </div>
                     <div class="stat-card">
