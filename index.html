@@ -1343,12 +1343,13 @@
         function createConstructionSite() {
             const group = new THREE.Group();
 
-            // 工事用シートで囲う
-            const sheetGeo = new THREE.BoxGeometry(1.1, 0.6, 1.1);
-            // 上面はなくして、側面だけ囲うイメージ（または単なる箱）
-            // 簡易的に箱で、少し透明にするか、隙間を開ける
+            // グレーシートで囲う (上部は不要、少し広げる)
+            // CylinderGeometry(radiusTop, radiusBottom, height, radialSegments, heightSegments, openEnded)
+            // 4角形筒(openEnded=true)で壁だけ作る。サイズを1.3程度に広げる(半径約0.95)
+            const sheetGeo = new THREE.CylinderGeometry(0.95, 0.95, 0.7, 4, 1, true);
             const sheet = new THREE.Mesh(sheetGeo, MATERIALS.graySheet);
-            sheet.position.y = 0.3;
+            sheet.rotation.y = Math.PI / 4; // 軸に合わせる
+            sheet.position.y = 0.35;
             group.add(sheet);
 
             // 作業員
