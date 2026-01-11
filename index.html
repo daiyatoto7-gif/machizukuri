@@ -697,9 +697,13 @@
 
     <!-- 移動モード用のガイドバー -->
     <div id="action-mode-bar">
-        <span id="action-mode-text" style="font-weight:bold; font-size:0.95em;">移動元を選択してください</span>
-        <button onclick="cancelMoveMode()"
-            style="background:#e74c3c; border:none; padding:6px 12px; border-radius:15px; color:white; font-weight:bold; cursor:pointer;">キャンセル</button>
+        <span id="action-mode-text">移動する施設を選択してください</span>
+        <div style="display:flex; gap:10px;">
+            <button id="action-rotate-btn" class="action-btn" onclick="actRotate()"
+                style="background-color:#3498db; display:none; padding:5px 15px;">🔄 回転</button>
+            <button class="action-btn" onclick="cancelMoveMode()"
+                style="background-color:#e74c3c; padding:5px 15px;">終了</button>
+        </div>
     </div>
 
     <div id="modal-offline" class="modal">
@@ -2261,6 +2265,13 @@
                             tObj.currentType = stateKey;
                         }
 
+                        // 回転の適用 (0, 1, 2, 3 -> 0, -90, -180, -270)
+                        if (tile.rotation) {
+                            tObj.buildingGroup.rotation.y = -Math.PI / 2 * tile.rotation;
+                        } else {
+                            tObj.buildingGroup.rotation.y = 0;
+                        }
+
                         if (tile.finishTime) {
                             tObj.particles.active = true;
                             const remaining = Math.max(0, (tile.finishTime - Date.now()));
@@ -2493,10 +2504,19 @@
             sync3DState(); // ハイライト解除など
         };
 
+        window.actRotate = function () {
+            if (moveMode.sourceIndex === null) return;
+            const tile = gameState.tiles[moveMode.sourceIndex];
+            if (!tile.rotation) tile.rotation = 0;
+            tile.rotation = (tile.rotation + 1) % 4;
+            sync3DState();
+        };
+
         window.cancelMoveMode = function () {
             moveMode.active = false;
             moveMode.sourceIndex = null;
             document.getElementById('action-mode-bar').style.display = 'none';
+            document.getElementById('action-rotate-btn').style.display = 'none'; // Hide rotate button
             sync3DState();
         };
 
@@ -2517,13 +2537,25 @@
                 }
                 moveMode.sourceIndex = index;
                 document.getElementById('action-mode-text').innerText = "移動先を選択してください";
+                document.getElementById('action-rotate-btn').style.display = 'block'; // Show rotate button
                 sync3DState(); // ハイライト更新
             } else {
                 // ターゲット選択
                 if (moveMode.sourceIndex === index) {
-                    // 同じ場所を選択 -> キャンセル
+                    // 同じ場所を選択 -> キャンセル（選択解除）
                     moveMode.sourceIndex = null;
                     document.getElementById('action-mode-text').innerText = "移動する施設を選択してください";
+                    document.getElementById('action-rotate-btn').style.display = 'none'; // Hide rotate button
+                    sync3DState();
+                    return;
+                }
+
+                // ターゲット選択
+                if (moveMode.sourceIndex === index) {
+                    // 同じ場所を選択 -> キャンセル（選択解除）
+                    moveMode.sourceIndex = null;
+                    document.getElementById('action-mode-text').innerText = "移動する施設を選択してください";
+                    document.getElementById('action-rotate-btn').style.display = 'none'; // Hide rotate button
                     sync3DState();
                     return;
                 }
@@ -2547,7 +2579,8 @@
                 level: t1.level,
                 finishTime: t1.finishTime,
                 stored: t1.stored,
-                lastCollectTime: t1.lastCollectTime
+                lastCollectTime: t1.lastCollectTime,
+                rotation: t1.rotation || 0
             };
 
             // t1 <- t2
@@ -2556,6 +2589,7 @@
             t1.finishTime = t2.finishTime;
             t1.stored = t2.stored;
             t1.lastCollectTime = t2.lastCollectTime;
+            t1.rotation = t2.rotation || 0;
 
             // t2 <- temp
             t2.type = temp.type;
@@ -2563,6 +2597,7 @@
             t2.finishTime = temp.finishTime;
             t2.stored = temp.stored;
             t2.lastCollectTime = temp.lastCollectTime;
+            t2.rotation = temp.rotation;
 
             saveGame();
             sync3DState();
