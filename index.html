@@ -1334,9 +1334,54 @@
             dirt: new THREE.MeshStandardMaterial({ color: 0x5d4037, roughness: 1.0 }),
             metal: new THREE.MeshStandardMaterial({ color: 0xbdc3c7, metalness: 0.8, roughness: 0.2 }),
             gold: new THREE.MeshStandardMaterial({ color: 0xf1c40f, metalness: 0.6, roughness: 0.3 }),
-            water: new THREE.MeshStandardMaterial({ color: 0x3498db, transparent: true, opacity: 0.7 })
+            water: new THREE.MeshStandardMaterial({ color: 0x3498db, transparent: true, opacity: 0.7 }),
+            graySheet: new THREE.MeshStandardMaterial({ color: 0x95a5a6, roughness: 0.9, side: THREE.DoubleSide })
             // cobblestone と grassLocked は init3D 内で追加
         };
+
+        // 工事現場（シート＋作業員）作成
+        function createConstructionSite() {
+            const group = new THREE.Group();
+
+            // 工事用シートで囲う
+            const sheetGeo = new THREE.BoxGeometry(1.1, 0.6, 1.1);
+            // 上面はなくして、側面だけ囲うイメージ（または単なる箱）
+            // 簡易的に箱で、少し透明にするか、隙間を開ける
+            const sheet = new THREE.Mesh(sheetGeo, MATERIALS.graySheet);
+            sheet.position.y = 0.3;
+            group.add(sheet);
+
+            // 作業員
+            const worker = new THREE.Group();
+            worker.position.set(0, 0, 0.6); // 手前に配置
+
+            // 体
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.25, 8), new THREE.MeshStandardMaterial({ color: 0xecf0f1 }));
+            body.position.y = 0.125;
+            worker.add(body);
+
+            // 頭
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), new THREE.MeshStandardMaterial({ color: 0xf1c40f })); // ヘルメット黄色
+            head.position.y = 0.3;
+            worker.add(head);
+
+            // ハンマー
+            const hammer = new THREE.Group();
+            hammer.position.set(0.1, 0.2, 0.1);
+            const handle = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.15, 0.02), MATERIALS.wood);
+            handle.position.y = 0.075;
+            hammer.add(handle);
+            const headH = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.05, 0.05), MATERIALS.metal);
+            headH.position.set(0, 0.15, 0);
+            hammer.add(headH);
+
+            hammer.rotation.z = -Math.PI / 4;
+            hammer.userData = { anim: 'hammerWork', speed: 0.2 };
+            worker.add(hammer);
+
+            group.add(worker);
+            return group;
+        }
 
         // 周囲の環境（山や森）を生成する関数
         function createSurroundingEnvironment() {
@@ -2097,6 +2142,9 @@
                                     if (Math.random() < 0.05) {
                                     }
                                     break;
+                                case 'hammerWork':
+                                    obj.rotation.z = -Math.PI / 4 + Math.abs(Math.sin(time * 10)) * 1.5;
+                                    break;
                             }
                         }
                     });
@@ -2190,13 +2238,25 @@
 
                     if (tile.type) {
                         tObj.buildingGroup.visible = true;
-                        const stateKey = `${tile.type}_${tile.level}`;
+                        const isBuilding = !!tile.finishTime;
+                        const stateKey = `${tile.type}_${tile.level}_${isBuilding ? 'b' : ''}`;
                         if (tObj.currentType !== stateKey) {
                             while (tObj.buildingGroup.children.length > 0) {
                                 tObj.buildingGroup.remove(tObj.buildingGroup.children[0]);
                             }
-                            const newModel = createBuildingMesh(tile.type, tile.level);
-                            tObj.buildingGroup.add(newModel);
+
+                            // Lv0(新規)なら建物なし、Lv1以上ならそのレベルの建物を表示
+                            if (tile.level > 0) {
+                                const newModel = createBuildingMesh(tile.type, tile.level);
+                                tObj.buildingGroup.add(newModel);
+                            }
+
+                            // 工事中ならシートと作業員を追加
+                            if (isBuilding) {
+                                const construction = createConstructionSite();
+                                tObj.buildingGroup.add(construction);
+                            }
+
                             tObj.currentType = stateKey;
                         }
 
