@@ -1008,7 +1008,7 @@
             },
             clocktower: {
                 name: "時計塔", icon: "🕰️",
-                desc: "【全体加速】街のシンボル。全施設の生産速度を2%加速します(重複可)。",
+                desc: "【全体加速】街のシンボル。全施設の生産速度を2%加速します(LvUPで+0.1%)。",
                 prod: {}, // 直接生産なし(全体バフ)
                 cost: { money: 100000, food: 50000, wood: 50000, stone: 20000, iron: 10000 },
                 baseTime: 200000
@@ -2272,10 +2272,12 @@
 
             // グローバルバフの計算 (時計塔)
             let globalSpeedMultiplier = 1.0;
-            const clockTowers = gameState.tiles.filter(t => t.type === 'clocktower' && !t.finishTime && t.level > 0).length;
-            if (clockTowers > 0) {
-                globalSpeedMultiplier += clockTowers * 0.02; // 1つにつき2%加速
-            }
+            const clockTowers = gameState.tiles.filter(t => t.type === 'clocktower' && !t.finishTime && t.level > 0);
+            clockTowers.forEach(t => {
+                // Lv1: 2%, LvUP: +0.1%
+                const bonus = 0.02 + (t.level - 1) * 0.001;
+                globalSpeedMultiplier += bonus;
+            });
 
             gameState.tiles.forEach((tile, i) => {
                 if (tile.unlocked) {
