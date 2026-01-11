@@ -2725,7 +2725,11 @@
 
                     const canBuild = checkBuildingLimit(k);
                     const disabledAttr = (afford && canBuild) ? '' : 'disabled';
-                    const limitText = canBuild ? '' : '<br><span style="color:red; font-size:0.8em;">⚠️ 上限(4つ)に達しています</span>';
+
+                    let limitNum = 4;
+                    if (['well', 'inn', 'clocktower'].includes(k)) limitNum = 2;
+
+                    const limitText = canBuild ? '' : `<br><span style="color:red; font-size:0.8em;">⚠️ 上限(${limitNum}つ)に達しています</span>`;
 
                     html += `
                     <div class="building-item">
@@ -3080,7 +3084,12 @@
             }
 
             const typeIndex = BUILDING_KEYS.indexOf(type);
-            const isLimited = (typeIndex >= LIMIT_START_INDEX && typeIndex !== -1);
+            const isStandardLimited = (typeIndex >= LIMIT_START_INDEX && typeIndex !== -1);
+            const isSpecialLimited = ['well', 'inn', 'clocktower'].includes(type);
+
+            let limitStr = '無制限 (土地依存)';
+            if (isSpecialLimited) limitStr = '2つまで';
+            else if (isStandardLimited) limitStr = '4つまで';
 
             content.innerHTML = `
                 <button class="back-btn" onclick="openCatalog()">
@@ -3124,7 +3133,7 @@
                     <div class="stat-card">
                         <span class="stat-label">最大設置数</span>
                         <div class="stat-content">
-                            ${isLimited ? '4つまで' : '無制限 (土地依存)'}
+                            ${limitStr}
                         </div>
                     </div>
                 </div>
