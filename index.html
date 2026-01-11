@@ -1352,7 +1352,8 @@
             const width = 2.4; // 全体の幅 (1.6 * sqrt(2) * 2 ≒ 4.5 だが、Boxとして考える)
             // 半径1.6程度の位置に柱を置く。正方形配置なら、x,z = +/- 1.13程度
             const dist = 1.2;
-            const height = 1.2;
+            // 高さを30%低くする (1.2 -> 0.84 ≒ 0.85)
+            const height = 0.85;
 
             // 支柱 (鉄)
             const poleGeo = new THREE.CylinderGeometry(0.05, 0.05, height, 8);
@@ -1386,7 +1387,7 @@
 
             // 作業員
             const worker = new THREE.Group();
-            worker.position.set(0, 0, 0.6); // 手前に配置
+            worker.position.set(0, 0, 0); // 中央に配置してシートの内側に入れる
 
             // 体
             const body = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.25, 8), new THREE.MeshStandardMaterial({ color: 0xecf0f1 }));
