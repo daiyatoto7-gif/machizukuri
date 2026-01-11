@@ -989,7 +989,30 @@
             quarry: { name: "採石場", icon: "🪨", desc: "石を切り出します。石材を生産します。", prod: { stone: 1 }, cost: { money: 100, food: 50, wood: 50 }, baseTime: 4000 },
             mine: { name: "鉱山", icon: "🔩", desc: "地下資源を掘ります。鉄を生産します。", prod: { iron: 1 }, cost: { money: 200, food: 100, wood: 100, stone: 50 }, baseTime: 5000 },
             market: { name: "市場", icon: "⚖️", desc: "交易を行います。大量のお金を生産します。", prod: { money: 10 }, cost: { money: 500, food: 200, wood: 200, stone: 50 }, baseTime: 6000 },
-            blacksmith: { name: "鍛冶屋", icon: "⚔️", desc: "武具を作ります。お金と鉄を生産します。", prod: { money: 5, iron: 2 }, cost: { money: 800, food: 300, wood: 300, stone: 200, iron: 100 }, baseTime: 7000 }
+            blacksmith: { name: "鍛冶屋", icon: "⚔️", desc: "武具を作ります。お金と鉄を生産します。", prod: { money: 5, iron: 2 }, cost: { money: 800, food: 300, wood: 300, stone: 200, iron: 100 }, baseTime: 7000 },
+
+            // 新規追加施設 (コストは民家Lv12相当: 価値概算5000~6000程度)
+            well: {
+                name: "井戸", icon: "💧",
+                desc: "【農業支援】隣接する「畑」の生産効率を1.5倍にします。畑の中心に配置しましょう。",
+                prod: {}, // 生産なし
+                cost: { money: 3000, food: 1000, wood: 1000, stone: 500, iron: 200 },
+                baseTime: 10000
+            },
+            inn: {
+                name: "宿屋", icon: "🏨",
+                desc: "【商業ハブ】「市場」と「民家」の両方に隣接すると稼働し、多額のお金を生産します。",
+                prod: { money: 60 }, // 条件付き高生産
+                cost: { money: 3000, food: 1000, wood: 1000, stone: 500, iron: 200 },
+                baseTime: 12000
+            },
+            clocktower: {
+                name: "時計塔", icon: "🕰️",
+                desc: "【全体加速】街のシンボル。全施設の生産速度を2%加速します(重複可)。",
+                prod: {}, // 直接生産なし(全体バフ)
+                cost: { money: 10000, food: 5000, wood: 5000, stone: 2000, iron: 1000 }, // さらに高コスト
+                baseTime: 20000
+            }
         };
 
         const BUILDING_KEYS = Object.keys(BUILDINGS);
@@ -1002,8 +1025,14 @@
         }
 
         function checkBuildingLimit(type) {
+            // 特別制限: 井戸・宿屋・時計塔は2つまで
+            if (['well', 'inn', 'clocktower'].includes(type)) {
+                if (getBuildingCount(type) >= 2) return false;
+            }
+
             const typeIndex = BUILDING_KEYS.indexOf(type);
             if (typeIndex >= LIMIT_START_INDEX && typeIndex !== -1) {
+                // その他の上級施設は4つまで
                 if (getBuildingCount(type) >= 4) {
                     return false;
                 }
@@ -2167,7 +2196,14 @@
             const now = Date.now();
             let dirty = false;
 
-            gameState.tiles.forEach(tile => {
+            // グローバルバフの計算 (時計塔)
+            let globalSpeedMultiplier = 1.0;
+            const clockTowers = gameState.tiles.filter(t => t.type === 'clocktower' && !t.finishTime && t.level > 0).length;
+            if (clockTowers > 0) {
+                globalSpeedMultiplier += clockTowers * 0.02; // 1つにつき2%加速
+            }
+
+            gameState.tiles.forEach((tile, i) => {
                 if (tile.unlocked) {
                     if (tile.finishTime && now >= tile.finishTime) {
                         tile.level++;
@@ -2180,10 +2216,38 @@
 
                     if (tile.type && tile.level > 0 && !tile.finishTime) {
                         const b = BUILDINGS[tile.type];
+                        // 生産力の計算
+                        // ベース計算
+                        let multiplier = globalSpeedMultiplier;
+
+                        // 1. 井戸のバフ (畑の周囲に井戸があるか)
+                        if (tile.type === 'farm') {
+                            const adj = getAdjacentTiles(i);
+                            const hasWell = adj.some(t => t && t.type === 'well' && t.level > 0 && !t.finishTime);
+                            if (hasWell) multiplier *= 1.5;
+                        }
+
+                        // 2. 宿屋の稼働条件 (市場と民家が隣接)
+                        if (tile.type === 'inn') {
+                            const adj = getAdjacentTiles(i);
+                            const hasMarket = adj.some(t => t && t.type === 'market');
+                            const hasHouse = adj.some(t => t && t.type === 'house');
+                            if (!hasMarket || !hasHouse) {
+                                multiplier = 0; // 条件を満たさないと稼働しない
+                            }
+                        }
+
                         const caps = getStorageCapacity(tile.type, tile.level);
                         for (let r in b.prod) {
                             if (b.prod[r] > 0) {
-                                const amount = (b.prod[r] * tile.level * Math.pow(1.05, tile.level - 1));
+                                // multiplierを適用
+                                const rawAmount = b.prod[r] * tile.level * Math.pow(1.05, tile.level - 1);
+                                const amount = rawAmount * multiplier; // per second
+
+                                // 保存用に amount を秒換算ではなく、フレーム(loop)換算するならここで割る必要はないが
+                                // 元のロジック: if(now % 1000 < 100) で呼ばれるわけではない。setInterval 1000ms で呼ばれる。
+                                // なので amount は 1秒あたりの生産量そのままでOK。
+
                                 if (!tile.stored[r]) tile.stored[r] = 0;
                                 if (tile.stored[r] < caps[r]) {
                                     tile.stored[r] = Math.min(caps[r], tile.stored[r] + amount);
@@ -2860,38 +2924,48 @@
             t.stored = {};
 
             saveGame();
-            sync3DState();
-            updatePanelUI();
-            updateHeader();
-        };
+            function getAdjacentTiles(index) {
+                const size = gameState.gridSize;
+                const row = Math.floor(index / size);
+                const col = index % size;
+                const adj = [];
 
-        window.actExpand = function () {
-            if (selectedTileIndex === null) return;
-            const c = getExpandCost(gameState.rank);
-            if (checkAfford(c)) {
-                payCost(c);
-                gameState.tiles[selectedTileIndex].unlocked = true;
-                saveGame();
+                // 上下左右
+                if (row > 0) adj.push(gameState.tiles[(row - 1) * size + col]);
+                if (row < size - 1) adj.push(gameState.tiles[(row + 1) * size + col]);
+                if (col > 0) adj.push(gameState.tiles[row * size + col - 1]);
+                if (col < size - 1) adj.push(gameState.tiles[row * size + col + 1]);
 
-                checkAndExpandWorld();
-
-                sync3DState();
-                updatePanelUI();
+                return adj;
             }
-        }
 
-        window.openMenu = function () {
-            const modal = document.getElementById('modal-menu');
-            const content = document.getElementById('menu-content');
+            window.actExpand = function () {
+                if (selectedTileIndex === null) return;
+                const c = getExpandCost(gameState.rank);
+                if (checkAfford(c)) {
+                    payCost(c);
+                    gameState.tiles[selectedTileIndex].unlocked = true;
+                    saveGame();
 
-            const builderCost = getBuilderCost();
-            const canBuyBuilder = gameState.resources.money >= builderCost;
-            const currentUid = currentUser ? currentUser.uid : "未接続(オフライン)";
+                    checkAndExpandWorld();
 
-            const sharedUid = localStorage.getItem('kingdomBuilder_sharedId');
-            const displayUid = sharedUid ? `${sharedUid} (連携中)` : currentUid;
+                    sync3DState();
+                    updatePanelUI();
+                }
+            }
 
-            content.innerHTML = `
+            window.openMenu = function () {
+                const modal = document.getElementById('modal-menu');
+                const content = document.getElementById('menu-content');
+
+                const builderCost = getBuilderCost();
+                const canBuyBuilder = gameState.resources.money >= builderCost;
+                const currentUid = currentUser ? currentUser.uid : "未接続(オフライン)";
+
+                const sharedUid = localStorage.getItem('kingdomBuilder_sharedId');
+                const displayUid = sharedUid ? `${sharedUid} (連携中)` : currentUid;
+
+                content.innerHTML = `
             <div class="shop-item">
                 <button class="action-btn" onclick="openBuildingList()" style="width:100%; margin-bottom:10px; background-color:#3498db;">
                     📋 施設一覧 (所有)
@@ -2948,62 +3022,62 @@
             </div>
         `;
 
-            modal.style.display = 'flex';
-        };
+                modal.style.display = 'flex';
+            };
 
 
-        window.openCatalog = function () {
-            closeModal('modal-menu');
-            const modal = document.getElementById('modal-catalog');
-            const content = document.getElementById('catalog-content');
+            window.openCatalog = function () {
+                closeModal('modal-menu');
+                const modal = document.getElementById('modal-catalog');
+                const content = document.getElementById('catalog-content');
 
-            let html = '<div class="catalog-grid">';
+                let html = '<div class="catalog-grid">';
 
-            for (let k in BUILDINGS) {
-                const b = BUILDINGS[k];
-                html += `
+                for (let k in BUILDINGS) {
+                    const b = BUILDINGS[k];
+                    html += `
                     <div class="catalog-item" onclick="showCatalogDetail('${k}')">
                         <div class="catalog-icon">${b.icon}</div>
                         <div class="catalog-name">${b.name}</div>
                     </div>
                 `;
-            }
+                }
 
-            html += '</div>';
-            html += `
+                html += '</div>';
+                html += `
                 <div style="margin-top:15px; padding:10px; background:white; border-radius:8px; font-size:0.9em; color:#7f8c8d; text-align:center; border:1px dashed #ccc;">
                     施設アイコンをタップすると<br>詳細説明を確認できます
                 </div>
             `;
 
-            content.innerHTML = html;
-            modal.style.display = 'flex';
-        };
+                content.innerHTML = html;
+                modal.style.display = 'flex';
+            };
 
-        window.showCatalogDetail = function (type) {
-            const b = BUILDINGS[type];
-            const content = document.getElementById('catalog-content');
+            window.showCatalogDetail = function (type) {
+                const b = BUILDINGS[type];
+                const content = document.getElementById('catalog-content');
 
-            const prod = [];
-            for (let r in b.prod) {
-                if (b.prod[r] > 0) {
-                    const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : '🔩');
-                    prod.push(`<div>${icon} ${b.prod[r]}/s (Lv.1)</div>`);
+                const prod = [];
+                for (let r in b.prod) {
+                    if (b.prod[r] > 0) {
+                        const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : '🔩');
+                        prod.push(`<div>${icon} ${b.prod[r]}/s (Lv.1)</div>`);
+                    }
                 }
-            }
 
-            const cost = [];
-            for (let r in b.cost) {
-                if (b.cost[r] > 0) {
-                    const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : '🔩');
-                    cost.push(`<div>${icon} ${b.cost[r].toLocaleString()}</div>`);
+                const cost = [];
+                for (let r in b.cost) {
+                    if (b.cost[r] > 0) {
+                        const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : '🔩');
+                        cost.push(`<div>${icon} ${b.cost[r].toLocaleString()}</div>`);
+                    }
                 }
-            }
 
-            const typeIndex = BUILDING_KEYS.indexOf(type);
-            const isLimited = (typeIndex >= LIMIT_START_INDEX && typeIndex !== -1);
+                const typeIndex = BUILDING_KEYS.indexOf(type);
+                const isLimited = (typeIndex >= LIMIT_START_INDEX && typeIndex !== -1);
 
-            content.innerHTML = `
+                content.innerHTML = `
                 <button class="back-btn" onclick="openCatalog()">
                     <span>◀</span> 一覧に戻る
                 </button>
@@ -3050,61 +3124,61 @@
                     </div>
                 </div>
             `;
-        };
-
-        window.openBuildingList = function () {
-            closeModal('modal-menu');
-            const modal = document.getElementById('modal-building-list');
-            const content = document.getElementById('building-list-content');
-
-            let html = '<div style="font-weight:bold; margin-bottom:5px; color:#2c3e50;">🌍 マップ上の施設</div>';
-
-            let mapBuildings = [];
-            gameState.tiles.forEach((t, i) => {
-                if (t.type) {
-                    mapBuildings.push({ tile: t, index: i });
-                }
-            });
-
-            const getResScore = (type) => {
-                const b = BUILDINGS[type];
-                if (b.prod.money) return 1;
-                if (b.prod.food) return 2;
-                if (b.prod.wood) return 3;
-                if (b.prod.stone) return 4;
-                if (b.prod.iron) return 5;
-                return 6;
-            };
-            const sortFn = (a, b) => {
-                const typeA = a.tile ? a.tile.type : a.type;
-                const lvlA = a.tile ? a.tile.level : a.level;
-                const typeB = b.tile ? b.tile.type : b.type;
-                const lvlB = b.tile ? b.tile.level : b.level;
-
-                const sA = getResScore(typeA);
-                const sB = getResScore(typeB);
-
-                if (sA !== sB) return sA - sB;
-                return lvlB - lvlA;
             };
 
-            mapBuildings.sort(sortFn);
+            window.openBuildingList = function () {
+                closeModal('modal-menu');
+                const modal = document.getElementById('modal-building-list');
+                const content = document.getElementById('building-list-content');
 
-            if (mapBuildings.length === 0) {
-                html += '<p style="color:#999; font-size:0.9em;">施設はありません</p>';
-            } else {
-                mapBuildings.forEach(item => {
-                    const b = BUILDINGS[item.tile.type];
-                    const level = item.tile.level;
+                let html = '<div style="font-weight:bold; margin-bottom:5px; color:#2c3e50;">🌍 マップ上の施設</div>';
 
-                    let prodStr = "";
-                    for (let r in b.prod) if (b.prod[r] > 0) {
-                        const val = b.prod[r] * level * Math.pow(1.05, level - 1);
-                        const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : '🔩');
-                        prodStr += `${icon}${val.toFixed(1)}/s `;
+                let mapBuildings = [];
+                gameState.tiles.forEach((t, i) => {
+                    if (t.type) {
+                        mapBuildings.push({ tile: t, index: i });
                     }
+                });
 
-                    html += `
+                const getResScore = (type) => {
+                    const b = BUILDINGS[type];
+                    if (b.prod.money) return 1;
+                    if (b.prod.food) return 2;
+                    if (b.prod.wood) return 3;
+                    if (b.prod.stone) return 4;
+                    if (b.prod.iron) return 5;
+                    return 6;
+                };
+                const sortFn = (a, b) => {
+                    const typeA = a.tile ? a.tile.type : a.type;
+                    const lvlA = a.tile ? a.tile.level : a.level;
+                    const typeB = b.tile ? b.tile.type : b.type;
+                    const lvlB = b.tile ? b.tile.level : b.level;
+
+                    const sA = getResScore(typeA);
+                    const sB = getResScore(typeB);
+
+                    if (sA !== sB) return sA - sB;
+                    return lvlB - lvlA;
+                };
+
+                mapBuildings.sort(sortFn);
+
+                if (mapBuildings.length === 0) {
+                    html += '<p style="color:#999; font-size:0.9em;">施設はありません</p>';
+                } else {
+                    mapBuildings.forEach(item => {
+                        const b = BUILDINGS[item.tile.type];
+                        const level = item.tile.level;
+
+                        let prodStr = "";
+                        for (let r in b.prod) if (b.prod[r] > 0) {
+                            const val = b.prod[r] * level * Math.pow(1.05, level - 1);
+                            const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : '🔩');
+                            prodStr += `${icon}${val.toFixed(1)}/s `;
+                        }
+
+                        html += `
                     <div class="building-item" style="background:white; margin-bottom:5px;">
                         <div class="building-info">
                             <strong>${b.icon} ${b.name} (Lv.${level})</strong>
@@ -3113,20 +3187,20 @@
                         <button onclick="focusTile(${item.index})" style="padding:5px 10px; font-size:0.8em;">詳細</button>
                     </div>
                 `;
-                });
-            }
+                    });
+                }
 
-            html += '<div style="font-weight:bold; margin-top:15px; margin-bottom:5px; color:#7f8c8d; border-top:1px dashed #ccc; padding-top:10px;">📦 保管庫の施設</div>';
+                html += '<div style="font-weight:bold; margin-top:15px; margin-bottom:5px; color:#7f8c8d; border-top:1px dashed #ccc; padding-top:10px;">📦 保管庫の施設</div>';
 
-            if (gameState.inventory.length === 0) {
-                html += '<p style="color:#999; font-size:0.9em;">保管庫は空です</p>';
-            } else {
-                let sortedInv = [...gameState.inventory];
-                sortedInv.sort(sortFn);
+                if (gameState.inventory.length === 0) {
+                    html += '<p style="color:#999; font-size:0.9em;">保管庫は空です</p>';
+                } else {
+                    let sortedInv = [...gameState.inventory];
+                    sortedInv.sort(sortFn);
 
-                sortedInv.forEach(item => {
-                    const b = BUILDINGS[item.type];
-                    html += `
+                    sortedInv.forEach(item => {
+                        const b = BUILDINGS[item.type];
+                        html += `
                     <div class="building-item" style="background:#f5f5f5; color:#666;">
                         <div class="building-info">
                             <strong>${b.icon} ${b.name} (Lv.${item.level})</strong>
@@ -3135,115 +3209,115 @@
                         <span style="font-size:0.8em; background:#eee; padding:3px 6px; border-radius:4px;">保管中</span>
                     </div>
                 `;
-                });
-            }
-
-            content.innerHTML = html;
-            modal.style.display = 'flex';
-        };
-
-        window.focusTile = function (index) {
-            closeModal('modal-building-list');
-            selectTile(index);
-
-            const tObj = tileMeshes[index];
-            if (tObj && camera) {
-                const targetX = tObj.mesh.position.x;
-                const targetZ = tObj.mesh.position.z;
-
-                camera.position.x = targetX + 20;
-                camera.position.z = targetZ + 20;
-                camera.updateProjectionMatrix();
-            }
-        };
-
-        window.actLinkID = function () {
-            const input = document.getElementById('restore-uid-input');
-            const targetUid = input.value.trim();
-            if (!targetUid) return showToast("⚠️ IDを入力してください");
-
-            if (!confirm("⚠️ ID連携モード\n\n入力したIDのデータを『共有』してプレイします。\n複数の端末で同じデータを同期できます。\n(※Firebaseのルール設定が必要です)\n\n切り替えますか？")) return;
-
-            localStorage.setItem('kingdomBuilder_sharedId', targetUid);
-            location.reload();
-        };
-
-        window.actUnlinkID = function () {
-            if (!confirm("連携を解除し、本来の自分のIDに戻りますか？")) return;
-            localStorage.removeItem('kingdomBuilder_sharedId');
-            location.reload();
-        }
-
-        window.actBuyBuilder = function () {
-            const cost = getBuilderCost();
-            if (gameState.resources.money >= cost) {
-                gameState.resources.money -= cost;
-                gameState.maxBuilders++;
-                saveGame();
-                updateHeader();
-                openMenu();
-            }
-        };
-
-        function updateHeader() {
-            for (let k in gameState.resources) document.getElementById('display-' + k).innerText = Math.floor(gameState.resources[k]).toLocaleString();
-            document.getElementById('display-rank').innerText = gameState.rank;
-            document.getElementById('display-next-xp').innerText = (getNextRankXP(gameState.rank) - gameState.xp).toLocaleString();
-            document.getElementById('display-xp-bar').style.width = Math.min(100, (gameState.xp / getNextRankXP(gameState.rank)) * 100) + '%';
-
-            const active = getActiveBuilders();
-            const max = gameState.maxBuilders;
-            const builderEl = document.getElementById('display-builders');
-            builderEl.innerText = `${active}/${max}`;
-            builderEl.style.color = active >= max ? 'red' : '#2c3e50';
-        }
-
-        function onWindowResize() {
-            const c = document.getElementById('game-container');
-            if (!c) return;
-            const width = c.clientWidth || window.innerWidth;
-            const height = c.clientHeight || window.innerHeight;
-            const aspect = width / height;
-            const d = 10;
-
-            if (camera && renderer) {
-                camera.left = -d * aspect;
-                camera.right = d * aspect;
-                camera.top = d;
-                camera.bottom = -d;
-                camera.updateProjectionMatrix();
-                renderer.setSize(width, height);
-            }
-        }
-
-        function processOfflineProgress() {
-            try {
-                const now = Date.now();
-                const sec = (now - gameState.lastSaveTime) / 1000;
-                if (sec > 10) {
-                    let rep = ""; let built = 0; let earn = {};
-                    gameState.tiles.forEach(t => {
-                        if (t.finishTime && t.finishTime <= now) { t.level++; t.finishTime = null; built++; gameState.xp += Math.floor(getBuildTime(t.type, t.level - 1) / 1000); }
-                        if (t.type && t.level > 0 && !t.finishTime) {
-                            const b = BUILDINGS[t.type]; const caps = getStorageCapacity(t.type, t.level);
-                            for (let r in b.prod) if (b.prod[r] > 0) {
-                                if (!earn[r]) earn[r] = 0;
-                                const add = Math.min(caps[r] - (t.stored[r] || 0), b.prod[r] * t.level * Math.pow(1.05, t.level - 1) * sec);
-                                if (add > 0) { t.stored[r] = (t.stored[r] || 0) + add; earn[r] += add; }
-                            }
-                        }
                     });
-                    if (built > 0) rep += `<div>🏗️ ${built}件完了</div>`;
-                    for (let r in earn) if (earn[r] > 1) rep += `<div>+${Math.floor(earn[r]).toLocaleString()} ${r}</div>`;
-                    if (rep) { document.getElementById('offline-report').innerHTML = rep; document.getElementById('modal-offline').style.display = 'flex'; }
                 }
-                gameState.lastSaveTime = now;
-            } catch (e) {
-                console.error(e);
-            }
-        }
 
-        window.closeModal = function (id) { document.getElementById(id).style.display = 'none'; }
+                content.innerHTML = html;
+                modal.style.display = 'flex';
+            };
+
+            window.focusTile = function (index) {
+                closeModal('modal-building-list');
+                selectTile(index);
+
+                const tObj = tileMeshes[index];
+                if (tObj && camera) {
+                    const targetX = tObj.mesh.position.x;
+                    const targetZ = tObj.mesh.position.z;
+
+                    camera.position.x = targetX + 20;
+                    camera.position.z = targetZ + 20;
+                    camera.updateProjectionMatrix();
+                }
+            };
+
+            window.actLinkID = function () {
+                const input = document.getElementById('restore-uid-input');
+                const targetUid = input.value.trim();
+                if (!targetUid) return showToast("⚠️ IDを入力してください");
+
+                if (!confirm("⚠️ ID連携モード\n\n入力したIDのデータを『共有』してプレイします。\n複数の端末で同じデータを同期できます。\n(※Firebaseのルール設定が必要です)\n\n切り替えますか？")) return;
+
+                localStorage.setItem('kingdomBuilder_sharedId', targetUid);
+                location.reload();
+            };
+
+            window.actUnlinkID = function () {
+                if (!confirm("連携を解除し、本来の自分のIDに戻りますか？")) return;
+                localStorage.removeItem('kingdomBuilder_sharedId');
+                location.reload();
+            }
+
+            window.actBuyBuilder = function () {
+                const cost = getBuilderCost();
+                if (gameState.resources.money >= cost) {
+                    gameState.resources.money -= cost;
+                    gameState.maxBuilders++;
+                    saveGame();
+                    updateHeader();
+                    openMenu();
+                }
+            };
+
+            function updateHeader() {
+                for (let k in gameState.resources) document.getElementById('display-' + k).innerText = Math.floor(gameState.resources[k]).toLocaleString();
+                document.getElementById('display-rank').innerText = gameState.rank;
+                document.getElementById('display-next-xp').innerText = (getNextRankXP(gameState.rank) - gameState.xp).toLocaleString();
+                document.getElementById('display-xp-bar').style.width = Math.min(100, (gameState.xp / getNextRankXP(gameState.rank)) * 100) + '%';
+
+                const active = getActiveBuilders();
+                const max = gameState.maxBuilders;
+                const builderEl = document.getElementById('display-builders');
+                builderEl.innerText = `${active}/${max}`;
+                builderEl.style.color = active >= max ? 'red' : '#2c3e50';
+            }
+
+            function onWindowResize() {
+                const c = document.getElementById('game-container');
+                if (!c) return;
+                const width = c.clientWidth || window.innerWidth;
+                const height = c.clientHeight || window.innerHeight;
+                const aspect = width / height;
+                const d = 10;
+
+                if (camera && renderer) {
+                    camera.left = -d * aspect;
+                    camera.right = d * aspect;
+                    camera.top = d;
+                    camera.bottom = -d;
+                    camera.updateProjectionMatrix();
+                    renderer.setSize(width, height);
+                }
+            }
+
+            function processOfflineProgress() {
+                try {
+                    const now = Date.now();
+                    const sec = (now - gameState.lastSaveTime) / 1000;
+                    if (sec > 10) {
+                        let rep = ""; let built = 0; let earn = {};
+                        gameState.tiles.forEach(t => {
+                            if (t.finishTime && t.finishTime <= now) { t.level++; t.finishTime = null; built++; gameState.xp += Math.floor(getBuildTime(t.type, t.level - 1) / 1000); }
+                            if (t.type && t.level > 0 && !t.finishTime) {
+                                const b = BUILDINGS[t.type]; const caps = getStorageCapacity(t.type, t.level);
+                                for (let r in b.prod) if (b.prod[r] > 0) {
+                                    if (!earn[r]) earn[r] = 0;
+                                    const add = Math.min(caps[r] - (t.stored[r] || 0), b.prod[r] * t.level * Math.pow(1.05, t.level - 1) * sec);
+                                    if (add > 0) { t.stored[r] = (t.stored[r] || 0) + add; earn[r] += add; }
+                                }
+                            }
+                        });
+                        if (built > 0) rep += `<div>🏗️ ${built}件完了</div>`;
+                        for (let r in earn) if (earn[r] > 1) rep += `<div>+${Math.floor(earn[r]).toLocaleString()} ${r}</div>`;
+                        if (rep) { document.getElementById('offline-report').innerHTML = rep; document.getElementById('modal-offline').style.display = 'flex'; }
+                    }
+                    gameState.lastSaveTime = now;
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+
+            window.closeModal = function (id) { document.getElementById(id).style.display = 'none'; }
 
     </script>
 </body>
