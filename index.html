@@ -2991,6 +2991,7 @@
             }
             if (total > 0) {
                 t.lastCollectTime = now;
+                saveGame(); // 即座に保存
                 updateHeader();
                 sync3DState();
                 const overlay = tileMeshes[index].overlayEl;
@@ -3817,8 +3818,9 @@
                     if (built > 0) rep += `<div>🏗️ ${built}件完了</div>`;
                     for (let r in earn) if (earn[r] > 1) rep += `<div>+${Math.floor(earn[r]).toLocaleString()} ${r}</div>`;
                     if (rep) { document.getElementById('offline-report').innerHTML = rep; document.getElementById('modal-offline').style.display = 'flex'; }
+                    gameState.lastSaveTime = now;
+                    saveGame(); // オフライン経過分を保存
                 }
-                gameState.lastSaveTime = now;
             } catch (e) {
                 console.error(e);
             }
