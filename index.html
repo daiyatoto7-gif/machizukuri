@@ -1576,33 +1576,30 @@
 
             playBGM: function () {
                 if (!this.ctx || this.bgmNode) return;
-                // Simple Ambient Drones (City Hum / Wind)
-                // Filtered Noise
-                const bufferSize = 2 * this.ctx.sampleRate;
-                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-                const data = buffer.getChannelData(0);
+                try {
+                    // Simpler Ambient Drone (Oscillator)
+                    // Less prone to buffer errors and massive memory
+                    const osc = this.ctx.createOscillator();
+                    osc.type = 'triangle';
+                    osc.frequency.value = 50; // Deep low drone
 
-                for (let i = 0; i < bufferSize; i++) {
-                    data[i] = Math.random() * 2 - 1;
+                    const filter = this.ctx.createBiquadFilter();
+                    filter.type = 'lowpass';
+                    filter.frequency.value = 200;
+
+                    const gain = this.ctx.createGain();
+                    gain.gain.value = 0.05; // Very subtle volume
+
+                    osc.connect(filter);
+                    filter.connect(gain);
+                    gain.connect(this.masterGain);
+
+                    osc.start();
+                    this.bgmNode = osc;
+                    this.bgmGain = gain;
+                } catch (e) {
+                    console.error("BGM Error:", e);
                 }
-
-                const noise = this.ctx.createBufferSource();
-                noise.buffer = buffer;
-                noise.loop = true;
-
-                const filter = this.ctx.createBiquadFilter();
-                filter.type = 'lowpass';
-                filter.frequency.value = 400; // Low hum
-
-                this.bgmGain = this.ctx.createGain();
-                this.bgmGain.gain.value = 0.15; // Very quiet
-
-                noise.connect(filter);
-                filter.connect(this.bgmGain);
-                this.bgmGain.connect(this.masterGain);
-
-                noise.start();
-                this.bgmNode = noise;
             },
 
             stopBGM: function () {
