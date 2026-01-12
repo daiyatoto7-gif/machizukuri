@@ -2985,7 +2985,7 @@
                     gameState.resources[r] += val;
                     t.stored[r] = 0;
                     total += val;
-                    const icon = r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : '🔩';
+                    const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧');
                     txt += `${icon}+${val} `;
                 }
             }
@@ -3143,7 +3143,7 @@
 
                 const c = getCost(tile.type, tile.level);
                 let refund = [];
-                for (let r in c) if (c[r] > 0) refund.push(`${(r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : '🔩')}${Math.floor(c[r] * 0.5).toLocaleString()}`);
+                for (let r in c) if (c[r] > 0) refund.push(`${(r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧')}${Math.floor(c[r] * 0.5).toLocaleString()}`);
 
                 content.innerHTML = `
                 <div style="text-align:center;">
@@ -3324,7 +3324,7 @@
                 const amount = Math.floor(c[r] * 0.5);
                 if (amount > 0) {
                     gameState.resources[r] += amount;
-                    const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : '🔩');
+                    const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧');
                     refundTxt += `${icon}+${amount.toLocaleString()} `;
                 }
             }
