@@ -3652,6 +3652,11 @@
             const t = gameState.tiles[selectedTileIndex];
             if (!t.type) return;
 
+            if (!confirm("この施設を保管庫に戻しますか？")) {
+                SoundManager.playSE('cancel');
+                return;
+            }
+
             collectResource(selectedTileIndex);
 
             gameState.inventory.push({ type: t.type, level: t.level });
