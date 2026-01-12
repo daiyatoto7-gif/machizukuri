@@ -2380,7 +2380,7 @@
                                 }
                             }
                             if (hasResource) {
-                                const icon = maxRes == 'money' ? '💰' : maxRes == 'food' ? '🌾' : maxRes == 'wood' ? '🌲' : maxRes == 'stone' ? '🪨' : '🔩';
+                                const icon = (maxRes == 'money' ? '💰' : maxRes == 'food' ? '🌾' : maxRes == 'wood' ? '🌲' : maxRes == 'stone' ? '🪨' : maxRes == 'iron' ? '🔩' : '💧');
                                 content = `<div class="harvest-bubble" onclick="collectResourceUI(${i}, event)">${icon}</div>`;
                             }
                             overlay.innerHTML = content;
@@ -2958,7 +2958,15 @@
 
         function checkAfford(c) { for (let k in c) if ((gameState.resources[k] || 0) < c[k]) return false; return true; }
         function payCost(c) { for (let k in c) gameState.resources[k] -= c[k]; updateHeader(); }
-        function addXP(a) { gameState.xp += a; if (gameState.xp >= getNextRankXP(gameState.rank)) { gameState.xp -= getNextRankXP(gameState.rank); gameState.rank++; document.getElementById('levelup-rank').innerText = gameState.rank; document.getElementById('modal-levelup').style.display = 'flex'; } }
+        function addXP(a) {
+            gameState.xp += a;
+            while (gameState.xp >= getNextRankXP(gameState.rank)) {
+                gameState.xp -= getNextRankXP(gameState.rank);
+                gameState.rank++;
+                document.getElementById('levelup-rank').innerText = gameState.rank;
+                document.getElementById('modal-levelup').style.display = 'flex';
+            }
+        }
 
         function getActiveBuilders() {
             return gameState.tiles.filter(t => t.finishTime !== null).length;
@@ -3170,7 +3178,7 @@
 
                 let storeInfo = "";
                 for (let r in b.prod) if (b.prod[r] > 0) {
-                    storeInfo += `<div>${(r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : '🔩')} ${Math.floor(tile.stored[r])}/${Math.floor(caps[r])}</div>`;
+                    storeInfo += `<div>${(r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧')} ${Math.floor(tile.stored[r])}/${Math.floor(caps[r])}</div>`;
                 }
                 // If it's a utility building, storage might be empty, but that's fine. 
                 // Wait, if it's well/clocktower, they don't have storage. 
@@ -3818,6 +3826,7 @@
                     if (built > 0) rep += `<div>🏗️ ${built}件完了</div>`;
                     for (let r in earn) if (earn[r] > 1) rep += `<div>+${Math.floor(earn[r]).toLocaleString()} ${r}</div>`;
                     if (rep) { document.getElementById('offline-report').innerHTML = rep; document.getElementById('modal-offline').style.display = 'flex'; }
+                    addXP(0); // ランクアップチェック
                     gameState.lastSaveTime = now;
                     saveGame(); // オフライン経過分を保存
                 }
