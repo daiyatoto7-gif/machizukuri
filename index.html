@@ -1532,11 +1532,14 @@
         const SoundManager = {
             ctx: null,
             bgmNode: null,
-            bgmGain: null,
             masterGain: null,
+            bgmGain: null,
+            nextNoteTime: 0,
+            isPlaying: false,
+            timerID: null,
             config: {
-                bgm: localStorage.getItem('kb_config_bgm') !== 'false', // Default true
-                se: localStorage.getItem('kb_config_se') !== 'false'   // Default true
+                bgmVolume: parseFloat(localStorage.getItem('kb_config_bgm_vol') || '0.5'),
+                seVolume: parseFloat(localStorage.getItem('kb_config_se_vol') || '0.5')
             },
 
             init: function () {
@@ -1546,10 +1549,10 @@
 
                 this.ctx = new AudioContext();
                 this.masterGain = this.ctx.createGain();
-                this.masterGain.gain.value = 0.3; // Low volume default
+                this.masterGain.gain.value = 1.0;
                 this.masterGain.connect(this.ctx.destination);
 
-                if (this.config.bgm) this.playBGM();
+                if (this.config.bgmVolume > 0) this.playBGM();
             },
 
             resume: function () {
@@ -1559,62 +1562,100 @@
                 if (!this.ctx) this.init();
             },
 
-            toggleBGM: function (enabled) {
-                this.config.bgm = enabled;
-                localStorage.setItem('kb_config_bgm', enabled);
-                if (enabled) {
+            setBGMVolume: function (val) {
+                this.config.bgmVolume = val;
+                localStorage.setItem('kb_config_bgm_vol', val);
+                if (this.bgmGain) {
+                    this.bgmGain.gain.cancelScheduledValues(0);
+                    this.bgmGain.gain.value = val * 0.3;
+                }
+                if (val > 0 && !this.isPlaying) {
                     this.playBGM();
-                } else {
+                } else if (val === 0 && this.isPlaying) {
                     this.stopBGM();
                 }
             },
 
-            toggleSE: function (enabled) {
-                this.config.se = enabled;
-                localStorage.setItem('kb_config_se', enabled);
+            setSEVolume: function (val) {
+                this.config.seVolume = val;
+                localStorage.setItem('kb_config_se_vol', val);
             },
 
+            // --- BGM Sequencer ---
             playBGM: function () {
-                if (!this.ctx || this.bgmNode) return;
-                try {
-                    // Simpler Ambient Drone (Oscillator)
-                    // Less prone to buffer errors and massive memory
-                    const osc = this.ctx.createOscillator();
-                    osc.type = 'triangle';
-                    osc.frequency.value = 50; // Deep low drone
+                if (this.isPlaying || !this.ctx) return;
+                this.resume();
 
-                    const filter = this.ctx.createBiquadFilter();
-                    filter.type = 'lowpass';
-                    filter.frequency.value = 200;
+                // If volume is 0, don't start
+                if (this.config.bgmVolume <= 0) return;
 
-                    const gain = this.ctx.createGain();
-                    gain.gain.value = 0.05; // Very subtle volume
+                this.isPlaying = true;
+                this.nextNoteTime = this.ctx.currentTime + 0.1;
 
-                    osc.connect(filter);
-                    filter.connect(gain);
-                    gain.connect(this.masterGain);
+                // Master BGM Gain for volume control
+                this.bgmGain = this.ctx.createGain();
+                this.bgmGain.gain.value = this.config.bgmVolume * 0.3;
+                this.bgmGain.connect(this.masterGain);
 
-                    osc.start();
-                    this.bgmNode = osc;
-                    this.bgmGain = gain;
-                } catch (e) {
-                    console.error("BGM Error:", e);
-                }
+                this.melodyIndex = 0;
+                this.scheduler();
             },
 
             stopBGM: function () {
-                if (this.bgmNode) {
-                    try { this.bgmNode.stop(); } catch (e) { }
-                    this.bgmNode = null;
-                }
+                this.isPlaying = false;
+                if (this.timerID) clearTimeout(this.timerID);
                 if (this.bgmGain) {
                     this.bgmGain.disconnect();
                     this.bgmGain = null;
                 }
             },
 
+            scheduler: function () {
+                if (!this.isPlaying) return;
+                // Schedule ahead 0.1s
+                while (this.nextNoteTime < this.ctx.currentTime + 0.1) {
+                    this.scheduleNote(this.nextNoteTime);
+                    this.nextNoteTime += 0.4; // Tempo
+                }
+                this.timerID = setTimeout(() => this.scheduler(), 25);
+            },
+
+            melodyIndex: 0,
+            scheduleNote: function (time) {
+                // Calming pentatonic melody loop
+                // C4, D4, E4, G4, A4 ... 
+                const notes = [
+                    261.63, 293.66, 329.63, 392.00, // C D E G
+                    440.00, 392.00, 329.63, 293.66, // A G E D
+                    261.63, -1, 329.63, -1,         // C - E -
+                    392.00, 261.63, 293.66, -1      // G C D -
+                ];
+
+                const freq = notes[this.melodyIndex % notes.length];
+                this.melodyIndex++;
+                if (freq <= 0) return;
+
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                // Soft Triangle (Electric Piano like)
+                osc.type = 'triangle';
+                osc.frequency.value = freq;
+
+                // Envelope
+                gain.gain.setValueAtTime(0, time);
+                gain.gain.linearRampToValueAtTime(1.0, time + 0.05);
+                gain.gain.exponentialRampToValueAtTime(0.01, time + 0.6);
+
+                osc.connect(gain);
+                gain.connect(this.bgmGain);
+
+                osc.start(time);
+                osc.stop(time + 0.6);
+            },
+
             playSE: function (type) {
-                if (!this.config.se) return;
+                if (this.config.seVolume <= 0) return;
                 this.resume();
                 if (!this.ctx) return;
 
@@ -1625,12 +1666,14 @@
                 osc.connect(gain);
                 gain.connect(this.masterGain);
 
+                const vol = this.config.seVolume;
+
                 if (type === 'select') {
                     // High blip
                     osc.type = 'sine';
                     osc.frequency.setValueAtTime(800, t);
                     osc.frequency.exponentialRampToValueAtTime(1200, t + 0.1);
-                    gain.gain.setValueAtTime(0.3, t);
+                    gain.gain.setValueAtTime(0.3 * vol, t);
                     gain.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
                     osc.start(t);
                     osc.stop(t + 0.1);
@@ -1640,35 +1683,33 @@
                     osc.type = 'triangle';
                     osc.frequency.setValueAtTime(150, t);
                     osc.frequency.exponentialRampToValueAtTime(40, t + 0.2);
-                    gain.gain.setValueAtTime(0.5, t);
+                    gain.gain.setValueAtTime(0.5 * vol, t);
                     gain.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
                     osc.start(t);
                     osc.stop(t + 0.2);
 
                 } else if (type === 'collect') {
-                    // Coin / Shimmer (2 tones)
+                    // Coin / Shimmer
                     osc.type = 'sine';
                     osc.frequency.setValueAtTime(1200, t);
-                    gain.gain.setValueAtTime(0.3, t);
+                    gain.gain.setValueAtTime(0.3 * vol, t);
                     gain.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
                     osc.start(t);
                     osc.stop(t + 0.15);
 
-                    // Second tone
                     const osc2 = this.ctx.createOscillator();
                     const gain2 = this.ctx.createGain();
                     osc2.connect(gain2);
                     gain2.connect(this.masterGain);
                     osc2.type = 'sine';
                     osc2.frequency.setValueAtTime(1800, t + 0.05);
-                    gain2.gain.setValueAtTime(0.3, t + 0.05);
+                    gain2.gain.setValueAtTime(0.3 * vol, t + 0.05);
                     gain2.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
                     osc2.start(t + 0.05);
                     osc2.stop(t + 0.2);
 
                 } else if (type === 'levelup') {
                     // Fanfare
-                    // C-E-G-C
                     const notes = [523.25, 659.25, 783.99, 1046.50];
                     notes.forEach((freq, i) => {
                         const o = this.ctx.createOscillator();
@@ -1677,7 +1718,7 @@
                         g.connect(this.masterGain);
                         o.type = 'triangle';
                         o.frequency.value = freq;
-                        g.gain.setValueAtTime(0.2, t + i * 0.1);
+                        g.gain.setValueAtTime(0.2 * vol, t + i * 0.1);
                         g.gain.exponentialRampToValueAtTime(0.01, t + i * 0.1 + 0.3);
                         o.start(t + i * 0.1);
                         o.stop(t + i * 0.1 + 0.3);
@@ -1688,7 +1729,7 @@
                     osc.type = 'sawtooth';
                     osc.frequency.setValueAtTime(150, t);
                     osc.frequency.linearRampToValueAtTime(100, t + 0.15);
-                    gain.gain.setValueAtTime(0.2, t);
+                    gain.gain.setValueAtTime(0.2 * vol, t);
                     gain.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
                     osc.start(t);
                     osc.stop(t + 0.15);
@@ -1697,7 +1738,7 @@
                     osc.type = 'sine';
                     osc.frequency.setValueAtTime(600, t);
                     osc.frequency.linearRampToValueAtTime(300, t + 0.2);
-                    gain.gain.setValueAtTime(0.2, t);
+                    gain.gain.setValueAtTime(0.2 * vol, t);
                     gain.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
                     osc.start(t);
                     osc.stop(t + 0.2);
@@ -3743,21 +3784,23 @@
 
             <div class="shop-item">
                 <strong>⚙️ 設定</strong>
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:5px;">
-                    <span>🎵 BGM</span>
-                    <button class="action-btn" id="btn-toggle-bgm" 
-                        onclick="SoundManager.toggleBGM(!SoundManager.config.bgm); this.innerText = SoundManager.config.bgm ? 'ON' : 'OFF'; this.style.backgroundColor = SoundManager.config.bgm ? '#2ecc71' : '#ccc';"
-                        style="width:60px; padding:5px; background-color:${SoundManager.config.bgm ? '#2ecc71' : '#ccc'};">
-                        ${SoundManager.config.bgm ? 'ON' : 'OFF'}
-                    </button>
+                <div style="margin-top:5px;">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:2px;">
+                        <span>🎵 BGM</span>
+                        <span id="label-bgm-vol">${Math.floor(SoundManager.config.bgmVolume * 100)}%</span>
+                    </div>
+                    <input type="range" min="0" max="100" value="${SoundManager.config.bgmVolume * 100}" 
+                        style="width:100%"
+                        oninput="let v = this.value / 100; SoundManager.setBGMVolume(v); document.getElementById('label-bgm-vol').innerText = this.value + '%';">
                 </div>
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:5px;">
-                    <span>🔊 効果音</span>
-                    <button class="action-btn" id="btn-toggle-se" 
-                        onclick="SoundManager.toggleSE(!SoundManager.config.se); this.innerText = SoundManager.config.se ? 'ON' : 'OFF'; this.style.backgroundColor = SoundManager.config.se ? '#2ecc71' : '#ccc';"
-                        style="width:60px; padding:5px; background-color:${SoundManager.config.se ? '#2ecc71' : '#ccc'};">
-                        ${SoundManager.config.se ? 'ON' : 'OFF'}
-                    </button>
+                <div style="margin-top:10px;">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:2px;">
+                        <span>🔊 効果音</span>
+                        <span id="label-se-vol">${Math.floor(SoundManager.config.seVolume * 100)}%</span>
+                    </div>
+                    <input type="range" min="0" max="100" value="${SoundManager.config.seVolume * 100}" 
+                        style="width:100%"
+                        oninput="let v = this.value / 100; SoundManager.setSEVolume(v); document.getElementById('label-se-vol').innerText = this.value + '%';">
                 </div>
             </div>
 
