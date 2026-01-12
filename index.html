@@ -2973,8 +2973,27 @@
         }
 
         function getBuilderCost() {
-            const extra = Math.max(0, gameState.maxBuilders - CONFIG.initialMaxBuilders);
-            return Math.floor(200000 * Math.pow(1.5, extra));
+            const current = gameState.maxBuilders;
+            const target = current + 1;
+
+            // 10人目までは通常計算 (20万 * 1.5^(N-5))
+            if (target <= 10) {
+                const extra = Math.max(0, current - 4);
+                return Math.floor(200000 * Math.pow(1.5, extra));
+            }
+
+            // 10人目のコスト（基準）
+            const cost10 = Math.floor(200000 * Math.pow(1.5, 5));
+
+            // 11人目は前回の100倍
+            if (target === 11) {
+                return cost10 * 100;
+            }
+
+            // 12人目以降は前回の3倍
+            // C(N) = C(11) * 3^(N-11)
+            const cost11 = cost10 * 100;
+            return cost11 * Math.pow(3, target - 11);
         }
 
         function collectResource(index) {
