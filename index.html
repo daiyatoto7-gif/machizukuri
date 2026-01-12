@@ -1898,9 +1898,58 @@
                 this.canTurn = true;
                 this.updateVisibility();
             }
+            isRoadBlocked(x, z, isVertical) {
+                const size = gameState.gridSize;
+                const offset = 3;
+                const start = -offset * (size - 1) / 2;
+
+                const getTileIdx = (wx, wz) => {
+                    const col = Math.round((wx - start) / offset);
+                    const row = Math.round((wz - start) / offset);
+                    if (col < 0 || col >= size || row < 0 || row >= size) return -1;
+                    return row * size + col;
+                };
+
+                let t1_idx = -1, t2_idx = -1;
+
+                if (isVertical) {
+                    // Vertical road: separates Left(x-1) and Right(x+1)
+                    t1_idx = getTileIdx(x - 1, z);
+                    t2_idx = getTileIdx(x + 1, z);
+                } else {
+                    // Horizontal road: separates Top(z-1) and Bottom(z+1)
+                    t1_idx = getTileIdx(x, z - 1);
+                    t2_idx = getTileIdx(x, z + 1);
+                }
+
+                if (t1_idx === -1 || t2_idx === -1) return false; // Edge of map, usually fine or handled by reset
+
+                const t1 = gameState.tiles[t1_idx];
+                const t2 = gameState.tiles[t2_idx];
+
+                if (!t1 || !t2) return false;
+
+                // Helper to get master index
+                const getMaster = (t, idx) => {
+                    if (!t.type) return null;
+                    if (t.type.endsWith('_part')) return t.masterIndex;
+                    return idx; // It is master or single
+                };
+
+                const m1 = getMaster(t1, t1_idx);
+                const m2 = getMaster(t2, t2_idx);
+
+                // If both share the SAME master (and are not null), they are connected -> Road Blocked
+                if (m1 !== null && m2 !== null && m1 === m2) {
+                    return true;
+                }
+
+                return false;
+            }
+
             isOnGreenRoad(x, z, isVertical) {
                 const size = gameState.gridSize;
-                const offset = 2;
+                const offset = 3; // Fixed from 2
                 const start = -offset * (size - 1) / 2;
                 const checkTile = (wx, wz) => {
                     const col = Math.round((wx - start) / offset);
@@ -1933,6 +1982,26 @@
                     this.updateVisibility();
                     return;
                 }
+
+                // Check for obstacles ahead
+                // Only check if moving
+                if (this.speed > 0) {
+                    const isVertical = (this.direction.z !== 0);
+                    // Look ahead slightly
+                    const lookAhead = 0.5;
+                    const nextX = this.mesh.position.x + this.direction.x * lookAhead;
+                    const nextZ = this.mesh.position.z + this.direction.z * lookAhead;
+
+                    if (this.isRoadBlocked(nextX, nextZ, isVertical)) {
+                        // Reverse direction
+                        this.direction.negate();
+                        // Also move back a bit to prevent sticking
+                        this.mesh.position.addScaledVector(this.direction, 0.2);
+                        this.updateVisibility();
+                        return;
+                    }
+                }
+
                 if (Math.random() < 0.005) {
                     this.isStopped = true;
                     this.stopTimer = 30 + Math.random() * 60;
@@ -1953,9 +2022,22 @@
                                 new THREE.Vector3(0, 0, 1),
                                 new THREE.Vector3(0, 0, -1)
                             ];
-                            this.direction = dirs[Math.floor(Math.random() * dirs.length)];
-                            this.mesh.position.x = nearestRoadX;
-                            this.mesh.position.z = nearestRoadZ;
+                            // Filter valid directions (don't turn into walls)
+                            const validDirs = dirs.filter(d => {
+                                // Simple check: is immediate next step blocked?
+                                const checkX = this.mesh.position.x + d.x * 0.5;
+                                const checkZ = this.mesh.position.z + d.z * 0.5;
+                                return !this.isRoadBlocked(checkX, checkZ, d.z !== 0);
+                            });
+
+                            if (validDirs.length > 0) {
+                                this.direction = validDirs[Math.floor(Math.random() * validDirs.length)];
+                                this.mesh.position.x = nearestRoadX;
+                                this.mesh.position.z = nearestRoadZ;
+                            } else {
+                                // Dead end? Reverse
+                                this.direction.negate();
+                            }
                         }
                         this.canTurn = false;
                     }
