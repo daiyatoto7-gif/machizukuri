@@ -679,6 +679,7 @@
             <div class="res-item">🌲 <span id="display-wood">0</span></div>
             <div class="res-item">🪨 <span id="display-stone">0</span></div>
             <div class="res-item">🔩 <span id="display-iron">0</span></div>
+            <div class="res-item">💧 <span id="display-water">0</span></div>
             <div class="res-item" style="border-left:1px solid #ddd; padding-left:10px; color:#e67e22;">👷 <span
                     id="display-builders">0/4</span></div>
         </div>
@@ -998,8 +999,8 @@
             // 新規追加施設 (コストは民家Lv12相当 x 10倍)
             well: {
                 name: "井戸", icon: "💧",
-                desc: "【農業支援】隣接する「畑」の生産効率をアップさせます(Lv1: 1.3倍)。レベルアップで効果が向上します。",
-                prod: {}, // 生産なし
+                desc: "【農業支援】水を生産します。隣接する「畑」の生産効率をアップさせます(Lv1: 1.3倍)。",
+                prod: { water: 5 },
                 cost: { money: 30000, food: 10000, wood: 10000, stone: 5000, iron: 2000 },
                 baseTime: 100000
             },
@@ -1016,6 +1017,14 @@
                 prod: {}, // 直接生産なし(全体バフ)
                 cost: { money: 100000, food: 50000, wood: 50000, stone: 20000, iron: 10000 },
                 baseTime: 200000
+            },
+            forest: {
+                name: "森林", icon: "🌳",
+                desc: "【林業】広大な森林。2マス占有(1x2)。伐採所が隣接すると生産量+20%。",
+                prod: { wood: 15 },
+                cost: { money: 100000, food: 40000, wood: 10000, water: 10000 },
+                baseTime: 300000,
+                w: 1, h: 2 // 1x2 size
             }
         };
 
@@ -1046,7 +1055,7 @@
 
         for (let k in BUILDINGS) {
             const b = BUILDINGS[k];
-            for (let r of ['money', 'food', 'wood', 'stone', 'iron']) {
+            for (let r of ['money', 'food', 'wood', 'stone', 'iron', 'water']) {
                 if (!b.prod[r]) b.prod[r] = 0;
                 if (!b.cost[r]) b.cost[r] = 0;
             }
@@ -1054,7 +1063,7 @@
 
         let gameState = {
             rank: 1, xp: 0,
-            resources: { money: 200, food: 100, wood: 50, stone: 0, iron: 0 },
+            resources: { money: 200, food: 100, wood: 50, stone: 0, iron: 0, water: 0 },
             tiles: [],
             inventory: [],
             maxBuilders: CONFIG.initialMaxBuilders,
@@ -2130,6 +2139,47 @@
                         group.add(createBox(0.6, 0.2, 0.6, MATERIALS.stone, 0, 0.1, 0));
                     }
                     break;
+
+                case 'forest':
+                    // Forest Area (1x2). Slave tile at Z+3.0.
+                    const addTree = (tx, tz, s) => {
+                        const trunk = createCyl(0.1 * s, 0.15 * s, 0.5 * s, MATERIALS.wood, tx, 0.25 * s, tz);
+                        group.add(trunk);
+                        const l1 = createCone(0.4 * s, 0.6 * s, MATERIALS.darkLeaf, tx, 0.6 * s, tz);
+                        group.add(l1);
+                        const l2 = createCone(0.3 * s, 0.5 * s, MATERIALS.darkLeaf, tx, 0.9 * s, tz);
+                        group.add(l2);
+                    };
+
+                    // Cabin at Master center
+                    group.add(createBox(0.8, 0.5, 0.7, MATERIALS.wood, 0, 0.25, 0.2));
+                    const cabinRoof = createCone(0.9, 0.5, MATERIALS.roof, 0, 0.7, 0.2, Math.PI / 4);
+                    cabinRoof.scale.z = 0.8;
+                    group.add(cabinRoof);
+
+                    // Scatter trees
+                    // Master area
+                    addTree(-0.8, -0.8, 0.9);
+                    addTree(0.8, -0.6, 0.8);
+                    addTree(0.6, 0.8, 0.7);
+
+                    // Slave area (z around 3.0)
+                    addTree(0, 3.0, 1.2);
+                    addTree(-0.8, 2.5, 0.9);
+                    addTree(0.8, 2.5, 0.8);
+                    addTree(-0.7, 3.5, 0.7);
+                    addTree(0.7, 3.6, 0.8);
+
+                    if (tier >= 2) {
+                        addTree(-0.4, 1.5, 0.6); // Gap
+                        addTree(0.4, 1.8, 0.7);
+                        addTree(0.9, 3.0, 0.6);
+                    }
+                    if (tier >= 3) {
+                        addTree(-0.9, 3.0, 0.6);
+                        addTree(0, -1.2, 0.6);
+                    }
+                    break;
             }
             return group;
         }
@@ -2395,6 +2445,8 @@
 
                     if (tile.type && tile.level > 0 && !tile.finishTime) {
                         const b = BUILDINGS[tile.type];
+                        if (!b) return; // Safety for slave tiles
+
                         // 生産力の計算
                         // ベース計算
                         let multiplier = globalSpeedMultiplier;
@@ -2423,6 +2475,26 @@
                             const hasHouse = adj.some(t => t && t.type === 'house');
                             if (!hasMarket || !hasHouse) {
                                 multiplier = 0; // 条件を満たさないと稼働しない
+                            }
+                        }
+
+                        // 3. 森のシナジー (伐採所隣接)
+                        if (tile.type === 'forest') {
+                            const adj = getAdjacentTiles(i);
+                            // Add slave neighbors
+                            const slaveOffset = (tile.rotation % 2 === 0) ? gameState.gridSize : 1;
+                            const slaveIdx = i + slaveOffset;
+                            if (gameState.tiles[slaveIdx] && gameState.tiles[slaveIdx].masterIndex === i) {
+                                const slaveAdj = getAdjacentTiles(slaveIdx);
+                                slaveAdj.forEach(t => adj.push(t));
+                            }
+
+                            // Unique neighbors (filter duplicates and self/slave)
+                            const unique = [...new Set(adj)];
+                            const lumberCount = unique.filter(t => t && t.type === 'lumber' && t.level > 0 && !t.finishTime).length;
+
+                            if (lumberCount > 0) {
+                                multiplier *= (1 + 0.2 * lumberCount);
                             }
                         }
 
@@ -2560,12 +2632,31 @@
                 return;
             }
 
+            // Redirect slave to master
+            if (tile.type && tile.type.endsWith('_part') && tile.masterIndex !== undefined) {
+                handleMoveInput(tile.masterIndex);
+                return;
+            }
+
             if (moveMode.sourceIndex === null) {
                 // ソース選択（施設がある場所のみ）
                 if (!tile.type && !tile.finishTime) {
                     showToast("移動させる施設がありません");
                     return;
                 }
+
+                // Prevent moving multi-tile
+                const size = getBuildingSize(tile.type);
+                // Note: getBuildingSize returns {w,h}. If simple building, returns {w:1,h:1}.
+                // Forest returns {w:1,h:2} (static). But wait, existing building might be rotated?
+                // getBuildingSize helper reads from BUILDINGS config, which is static.
+                // It returns the base dimensions.
+                // If w>1 or h>1, it's multi-tile.
+                if (size.w > 1 || size.h > 1) {
+                    showToast("大型施設は移動できません(売却→建直のみ)");
+                    return;
+                }
+
                 moveMode.sourceIndex = index;
                 document.getElementById('action-mode-text').innerText = "移動先を選択してください";
                 document.getElementById('action-rotate-btn').style.display = 'block'; // Show rotate button
@@ -2641,7 +2732,7 @@
                 if (cost[r] > 0) {
                     const val = cost[r];
                     const has = gameState.resources[r] || 0;
-                    const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : '🔩');
+                    const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧');
 
                     if (has < val) {
                         html.push(`<span style="color:red; font-weight:bold;">${icon}${val.toLocaleString()}</span>`);
@@ -2663,9 +2754,16 @@
                 if (lvl === 0) return "効果なし";
 
                 if (type === 'well') {
-                    // 1.3 + (lvl-1)*0.02
-                    const val = 1.3 + (lvl - 1) * 0.02;
-                    return `隣接する畑 生産 x${val.toFixed(2)}`;
+                    // 水生産 + 農場バフ
+                    const buffVal = 1.3 + (lvl - 1) * 0.02;
+                    let parts = [`隣接畑x${buffVal.toFixed(2)}`];
+
+                    // 水生産
+                    if (b.prod.water) {
+                        const waterVal = b.prod.water * lvl * Math.pow(1.05, lvl - 1);
+                        parts.push(`💧${waterVal.toFixed(1)}/s`);
+                    }
+                    return parts.join(' / ');
                 } else if (type === 'clocktower') {
                     // 2.0 + (lvl-1)*0.1
                     const val = 2.0 + (lvl - 1) * 0.1;
@@ -2682,7 +2780,7 @@
                     for (let r in b.prod) {
                         if (b.prod[r] > 0) {
                             const val = b.prod[r] * lvl * Math.pow(1.05, lvl - 1);
-                            const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : '🔩');
+                            const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧');
                             parts.push(`${icon}${val.toFixed(1)}/s`);
                         }
                     }
@@ -2783,6 +2881,11 @@
         };
 
         function selectTile(index) {
+            const t = gameState.tiles[index];
+            if (t && t.type && t.type.endsWith('_part') && t.masterIndex !== undefined) {
+                selectTile(t.masterIndex);
+                return;
+            }
             selectedTileIndex = index;
             sync3DState();
             showPanel(index);
@@ -3096,6 +3199,118 @@
             }
         }
 
+        // --- Multi-tile Helper Functions ---
+        function getBuildingSize(type) {
+            const b = BUILDINGS[type];
+            return { w: b.w || 1, h: b.h || 1 };
+        }
+
+        function getGridPos(index) {
+            const s = gameState.gridSize;
+            return { x: index % s, y: Math.floor(index / s) };
+        }
+
+        function getIndexFromPos(x, y) {
+            const s = gameState.gridSize;
+            if (x < 0 || y < 0 || x >= s || y >= s) return -1;
+            return y * s + x;
+        }
+
+        function checkPlacement(index, type, rot = 0) {
+            const size = getBuildingSize(type);
+            const w = (rot % 2 === 0) ? size.w : size.h;
+            const h = (rot % 2 === 0) ? size.h : size.w;
+            const origin = getGridPos(index);
+
+            for (let dy = 0; dy < h; dy++) {
+                for (let dx = 0; dx < w; dx++) {
+                    const tx = origin.x + dx;
+                    const ty = origin.y + dy;
+                    const tidx = getIndexFromPos(tx, ty);
+                    if (tidx === -1) return false; // Out of bounds
+
+                    // Check occupancy
+                    // Target tile (index) is assumed to be the one we clicked, so it's nominally "available" (checked by UI)
+                    // But we must ensure other tiles are also available.
+                    // Also, must ensure tiles are Unlocked.
+                    const t = gameState.tiles[tidx];
+                    if (!t.unlocked) return false;
+                    if (t.type || t.finishTime) {
+                        // If checking the origin tile itself, it's fine (we are building on it)
+                        // But wait, if we are upgrading, this function is not called for size check usually.
+                        // If new build, origin tile must be empty.
+                        // The UI calls actBuild only on selectedTileIndex.
+                        // We should ensure we don't overwrite existing stuff unless we mean to.
+                        // For new build, all tiles must be empty.
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        function setMultiTile(index, type, rot = 0) {
+            const size = getBuildingSize(type);
+            const w = (rot % 2 === 0) ? size.w : size.h;
+            const h = (rot % 2 === 0) ? size.h : size.w;
+            const origin = getGridPos(index);
+
+            for (let dy = 0; dy < h; dy++) {
+                for (let dx = 0; dx < w; dx++) {
+                    const tidx = getIndexFromPos(origin.x + dx, origin.y + dy);
+                    const t = gameState.tiles[tidx];
+                    if (dx === 0 && dy === 0) {
+                        // Master
+                        t.type = type;
+                        t.rotation = rot;
+                        t.mas = true; // master flag
+                    } else {
+                        // Slave
+                        t.type = type + '_part';
+                        t.masterIndex = index;
+                    }
+                }
+            }
+        }
+
+        function clearMultiTile(index) {
+            const t = gameState.tiles[index];
+            if (!t.type) return;
+
+            // If slave, redirect to master
+            if (t.type.endsWith('_part')) {
+                // Should have been handled by caller, but safety check
+                if (t.masterIndex !== undefined) clearMultiTile(t.masterIndex);
+                return;
+            }
+
+            // Master: clear self and all parts
+            // We need to know the size/rotation to find parts?
+            // Or just scan? Scanning is slow.
+            // Using currently stored rotation and type.
+            const size = getBuildingSize(t.type);
+            const rot = t.rotation || 0;
+            const w = (rot % 2 === 0) ? size.w : size.h;
+            const h = (rot % 2 === 0) ? size.h : size.w;
+            const origin = getGridPos(index);
+
+            for (let dy = 0; dy < h; dy++) {
+                for (let dx = 0; dx < w; dx++) {
+                    const tidx = getIndexFromPos(origin.x + dx, origin.y + dy);
+                    if (tidx !== -1) {
+                        const part = gameState.tiles[tidx];
+                        part.type = null;
+                        part.level = 0;
+                        part.finishTime = null;
+                        part.stored = {};
+                        part.mas = undefined;
+                        part.masterIndex = undefined;
+                        part.rotation = 0;
+                    }
+                }
+            }
+        }
+
         window.actCancelBuild = function () {
             if (selectedTileIndex === null) return;
             const t = gameState.tiles[selectedTileIndex];
@@ -3116,8 +3331,7 @@
 
             t.finishTime = null;
             if (t.level === 0) {
-                t.type = null;
-                t.stored = {};
+                clearMultiTile(selectedTileIndex);
             }
 
             saveGame();
@@ -3138,17 +3352,37 @@
             const t = gameState.tiles[selectedTileIndex];
             const lv = t.type === type ? t.level : 0;
 
-            if (lv === 0 && !checkBuildingLimit(type)) {
-                showToast("⚠️ この施設はこれ以上建設できません");
-                return;
+            if (lv === 0) {
+                if (!checkBuildingLimit(type)) {
+                    showToast("⚠️ この施設はこれ以上建設できません");
+                    return;
+                }
+
+                // Forest unlock check
+                if (type === 'forest' && gameState.rank < 20) {
+                    showToast("⚠️ 森林はランク20から建設可能です");
+                    return;
+                }
+
+                // Check placement (assume rotation 0)
+                if (!checkPlacement(selectedTileIndex, type, 0)) {
+                    showToast("⚠️ 配置できません(スペース不足/障害物)");
+                    return;
+                }
             }
 
             const c = getCost(type, lv);
             if (checkAfford(c)) {
                 payCost(c);
-                t.type = type;
+
+                if (lv === 0) {
+                    setMultiTile(selectedTileIndex, type, 0);
+                }
+
+                // Master tile properties
                 t.finishTime = Date.now() + getBuildTime(type, lv);
-                t.stored = {};
+                t.stored = {}; // Reset storage
+
                 saveGame();
                 sync3DState();
                 updatePanelUI();
@@ -3165,10 +3399,7 @@
 
             gameState.inventory.push({ type: t.type, level: t.level });
 
-            t.type = null;
-            t.level = 0;
-            t.finishTime = null;
-            t.stored = {};
+            clearMultiTile(selectedTileIndex);
 
             saveGame();
             sync3DState();
