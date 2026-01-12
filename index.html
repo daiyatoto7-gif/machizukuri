@@ -3117,6 +3117,7 @@
         window.closePanel = function () {
             selectedTileIndex = null;
             document.getElementById('control-panel').classList.remove('active');
+            SoundManager.playSE('cancel');
             sync3DState();
         };
 
@@ -3301,6 +3302,7 @@
             const tile = gameState.tiles[index];
             const p = document.getElementById('control-panel');
             const content = document.getElementById('panel-content');
+            SoundManager.playSE('select');
             p.classList.add('active');
             updatePanelUI();
         }
@@ -3715,6 +3717,7 @@
             if (checkAfford(c)) {
                 payCost(c);
                 gameState.tiles[selectedTileIndex].unlocked = true;
+                SoundManager.playSE('build'); // Land construction sound
                 saveGame();
 
                 checkAndExpandWorld();
@@ -3725,6 +3728,7 @@
         }
 
         window.openMenu = function () {
+            SoundManager.playSE('select');
             const modal = document.getElementById('modal-menu');
             const content = document.getElementById('menu-content');
 
@@ -3819,6 +3823,7 @@
 
 
         window.openCatalog = function () {
+            SoundManager.playSE('select');
             closeModal('modal-menu');
             const modal = document.getElementById('modal-catalog');
             const content = document.getElementById('catalog-content');
@@ -3847,6 +3852,7 @@
         };
 
         window.showCatalogDetail = function (type) {
+            SoundManager.playSE('select');
             const b = BUILDINGS[type];
             const content = document.getElementById('catalog-content');
 
@@ -3913,6 +3919,7 @@
         };
 
         window.openBuildingList = function () {
+            SoundManager.playSE('select');
             closeModal('modal-menu');
             const modal = document.getElementById('modal-building-list');
             const content = document.getElementById('building-list-content');
@@ -4016,6 +4023,7 @@
         };
 
         window.actLinkID = function () {
+            SoundManager.playSE('select');
             const input = document.getElementById('restore-uid-input');
             const targetUid = input.value.trim();
             if (!targetUid) return showToast("⚠️ IDを入力してください");
@@ -4027,6 +4035,7 @@
         };
 
         window.actUnlinkID = function () {
+            SoundManager.playSE('cancel');
             if (!confirm("連携を解除し、本来の自分のIDに戻りますか？")) return;
             localStorage.removeItem('kingdomBuilder_sharedId');
             location.reload();
@@ -4037,6 +4046,7 @@
             if (gameState.resources.money >= cost) {
                 gameState.resources.money -= cost;
                 gameState.maxBuilders++;
+                SoundManager.playSE('collect'); // Investment sound
                 saveGame();
                 updateHeader();
                 openMenu();
@@ -4103,7 +4113,10 @@
             }
         }
 
-        window.closeModal = function (id) { document.getElementById(id).style.display = 'none'; }
+        window.closeModal = function (id) {
+            SoundManager.playSE('cancel');
+            document.getElementById(id).style.display = 'none';
+        }
 
     </script>
 </body>
