@@ -726,6 +726,18 @@
         </div>
     </div>
 
+    <div id="modal-confirm" class="modal" style="z-index:200;">
+        <div class="modal-content">
+            <h3 id="modal-confirm-title">確認</h3>
+            <p id="modal-confirm-msg" style="margin:20px 0; line-height:1.5;"></p>
+            <div style="display:flex; justify-content:space-around; margin-top:20px;">
+                <button id="modal-confirm-yes" class="action-btn" style="width:100px;">はい</button>
+                <button onclick="closeModal('modal-confirm')" class="action-btn"
+                    style="width:100px; background-color:#95a5a6;">いいえ</button>
+            </div>
+        </div>
+    </div>
+
     <div id="modal-menu" class="modal">
         <div class="modal-content">
             <h3 style="margin-top:0;">メニュー</h3>
@@ -1357,7 +1369,7 @@
             const group = new THREE.Group();
 
             let dimW = 1, dimH = 1;
-            if (type && window.getBuildingSize) {
+            if (type && getBuildingSize) {
                 const s = getBuildingSize(type);
                 dimW = s.w; dimH = s.h;
             }
@@ -1767,6 +1779,7 @@
         };
 
         // Click to resume
+        window.SoundManager = SoundManager;
         const initAudio = () => { SoundManager.resume(); };
         document.addEventListener('click', initAudio, { once: true });
         document.addEventListener('touchstart', initAudio, { once: true });
@@ -3223,6 +3236,22 @@
             sync3DState();
         };
 
+        // Helper for Confirm Modal
+        window.showConfirmModal = function (msg, onYes) {
+            document.getElementById('modal-confirm-msg').innerText = msg;
+            const yesBtn = document.getElementById('modal-confirm-yes');
+            // Remove old listeners by cloning
+            const newBtn = yesBtn.cloneNode(true);
+            yesBtn.parentNode.replaceChild(newBtn, yesBtn);
+            newBtn.addEventListener('click', () => {
+                if (window.SoundManager) SoundManager.playSE('select');
+                document.getElementById('modal-confirm').style.display = 'none';
+                onYes();
+            });
+            document.getElementById('modal-confirm').style.display = 'flex';
+            if (window.SoundManager) SoundManager.playSE('select');
+        };
+
         window.closeModal = function (id) {
             SoundManager.playSE('cancel');
             document.getElementById(id).style.display = 'none';
@@ -3678,30 +3707,30 @@
             const t = gameState.tiles[selectedTileIndex];
             if (!t.finishTime) return;
 
-            if (!confirm("工事を中止しますか？\n費用の一部(50%)が返還されます。")) return;
-
-            const c = getCost(t.type, t.level);
-            let refundTxt = "";
-            for (let r in c) {
-                const amount = Math.floor(c[r] * 0.5);
-                if (amount > 0) {
-                    gameState.resources[r] += amount;
-                    const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧');
-                    refundTxt += `${icon}+${amount.toLocaleString()} `;
+            showConfirmModal("工事を中止しますか？\n費用の一部(50%)が返還されます。", () => {
+                const c = getCost(t.type, t.level);
+                let refundTxt = "";
+                for (let r in c) {
+                    const amount = Math.floor(c[r] * 0.5);
+                    if (amount > 0) {
+                        gameState.resources[r] += amount;
+                        const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧');
+                        refundTxt += `${icon}+${amount.toLocaleString()} `;
+                    }
                 }
-            }
 
-            t.finishTime = null;
-            if (t.level === 0) {
-                clearMultiTile(selectedTileIndex);
-            }
-            SoundManager.playSE('cancel');
+                t.finishTime = null;
+                if (t.level === 0) {
+                    clearMultiTile(selectedTileIndex);
+                }
+                SoundManager.playSE('cancel');
 
-            saveGame();
-            sync3DState();
-            updatePanelUI();
-            updateHeader();
-            showToast(`工事を中止しました ${refundTxt}`);
+                saveGame();
+                sync3DState();
+                updatePanelUI();
+                updateHeader();
+                showToast(`工事を中止しました ${refundTxt}`);
+            });
         }
 
         window.actBuild = function (type) {
@@ -3716,6 +3745,7 @@
             const lv = t.type === type ? t.level : 0;
 
             let targetIndex = selectedTileIndex;
+            let detectedRotation = 0;
 
             if (lv === 0) {
                 if (!checkBuildingLimit(type)) {
@@ -3729,38 +3759,43 @@
                 }
 
                 // Smart Placement Logic
+                // Smart Placement Logic (Try Rotation 0 then 1)
                 let placed = false;
-                // 1. Check direct placement
-                if (checkPlacement(selectedTileIndex, type, 0)) {
-                    targetIndex = selectedTileIndex;
-                    placed = true;
-                } else {
-                    // 2. Check offsets if multi-tile
-                    const size = getBuildingSize(type);
-                    if (size.w > 1 || size.h > 1) {
-                        const origin = getGridPos(selectedTileIndex);
-                        // Scan neighborhood
-                        for (let dy = -(size.h - 1); dy <= 0; dy++) {
-                            for (let dx = -(size.w - 1); dx <= 0; dx++) {
-                                if (dx === 0 && dy === 0) continue; // Already checked
+                const size0 = getBuildingSize(type);
 
-                                const tx = origin.x + dx;
-                                const ty = origin.y + dy;
-                                const tidx = getIndexFromPos(tx, ty);
-                                if (tidx !== -1 && checkPlacement(tidx, type, 0)) {
-                                    // Verify that this placement COVERS the selected tile
-                                    // Rect: [tx, tx+w-1] x [ty, ty+h-1]
-                                    // Selected: origin.x, origin.y
-                                    if (origin.x >= tx && origin.x < tx + size.w &&
-                                        origin.y >= ty && origin.y < ty + size.h) {
-                                        targetIndex = tidx;
-                                        placed = true;
-                                        break;
-                                    }
+                // Allow rotation trial
+                const rotations = [0];
+                if (size0.w !== size0.h) rotations.push(1);
+
+                for (let r of rotations) {
+                    if (placed) break;
+
+                    const w = (r % 2 === 0) ? size0.w : size0.h;
+                    const h = (r % 2 === 0) ? size0.h : size0.w;
+
+                    // Scan neighborhood to find a Master pos (tx, ty) such that
+                    // building placed at (tx,ty) covers selectedTileIndex (origin).
+                    const origin = getGridPos(selectedTileIndex);
+
+                    for (let dy = -(h - 1); dy <= 0; dy++) {
+                        for (let dx = -(w - 1); dx <= 0; dx++) {
+                            const tx = origin.x + dx;
+                            const ty = origin.y + dy;
+                            const tidx = getIndexFromPos(tx, ty);
+
+                            if (tidx !== -1 && checkPlacement(tidx, type, r)) {
+                                // Double check coverage
+                                if (origin.x >= tx && origin.x < tx + w &&
+                                    origin.y >= ty && origin.y < ty + h) {
+
+                                    targetIndex = tidx;
+                                    detectedRotation = r;
+                                    placed = true;
+                                    break;
                                 }
                             }
-                            if (placed) break;
                         }
+                        if (placed) break;
                     }
                 }
 
@@ -3775,7 +3810,7 @@
                 payCost(c);
 
                 if (lv === 0) {
-                    setMultiTile(targetIndex, type, 0);
+                    setMultiTile(targetIndex, type, detectedRotation);
                     // Update UI focus to master
                     if (targetIndex !== selectedTileIndex) {
                         selectedTileIndex = targetIndex; // Update global selection
@@ -3804,41 +3839,25 @@
         }
 
         window.actStore = function () {
-            try {
-                if (selectedTileIndex === null) return;
-                const t = gameState.tiles[selectedTileIndex];
-                if (!t.type) return;
+            if (selectedTileIndex === null) return;
+            const t = gameState.tiles[selectedTileIndex];
+            if (!t.type) return;
 
-                let confirmed = false;
+            showConfirmModal("この施設を保管庫に戻しますか？", () => {
                 try {
-                    confirmed = confirm("この施設を保管庫に戻しますか？");
-                } catch (e) {
-                    // If confirm fails (unlikely), default to true or log
-                    console.error("Confirm dialog failed", e);
-                    confirmed = true;
+                    collectResource(selectedTileIndex);
+                    gameState.inventory.push({ type: t.type, level: t.level });
+                    clearMultiTile(selectedTileIndex);
+
+                    saveGame();
+                    sync3DState();
+                    updatePanelUI();
+                    updateHeader();
+                } catch (err) {
+                    console.error("actStore Error", err);
+                    showToast("⚠️ システムエラーが発生しました");
                 }
-
-                if (!confirmed) {
-                    if (window.SoundManager) {
-                        try { SoundManager.playSE('cancel'); } catch (e) { }
-                    }
-                    return;
-                }
-
-                collectResource(selectedTileIndex);
-
-                gameState.inventory.push({ type: t.type, level: t.level });
-
-                clearMultiTile(selectedTileIndex);
-
-                saveGame();
-                sync3DState();
-                updatePanelUI();
-                updateHeader();
-            } catch (err) {
-                console.error("actStore Error", err);
-                showToast("⚠️ システムエラーが発生しました");
-            }
+            });
         };
 
         window.actRestore = function (invIndex) {
@@ -4105,7 +4124,7 @@
 
             let mapBuildings = [];
             gameState.tiles.forEach((t, i) => {
-                if (t.type) {
+                if (t.type && !t.type.endsWith('_part')) {
                     mapBuildings.push({ tile: t, index: i });
                 }
             });
