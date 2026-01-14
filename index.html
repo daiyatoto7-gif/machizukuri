@@ -4020,6 +4020,7 @@
         };
 
         window.actRestore = function (invIndex) {
+            console.log("actRestore called", invIndex);
             if (selectedTileIndex === null) return;
 
             if (getActiveBuilders() >= gameState.maxBuilders) {
@@ -4027,23 +4028,43 @@
                 return;
             }
 
-            if (invIndex < 0 || invIndex >= gameState.inventory.length) return;
+            if (invIndex < 0 || invIndex >= gameState.inventory.length) {
+                showToast("⚠️ アイテムが見つかりません");
+                return;
+            }
+
             const item = gameState.inventory[invIndex];
-            // No limit check needed for restore (already owned)
+            // 復元時は所持数制限チェックを行わない (既に所持しているため)
 
-            const t = gameState.tiles[selectedTileIndex];
+            try {
+                // Remove from inventory
+                gameState.inventory.splice(invIndex, 1);
 
-            gameState.inventory.splice(invIndex, 1);
+                // Setup tile
+                const t = gameState.tiles[selectedTileIndex];
 
-            t.type = item.type;
-            t.level = Math.max(0, item.level - 1);
-            t.finishTime = Date.now() + getBuildTime(item.type, t.level);
-            t.stored = {};
+                // Use setMultiTile to ensure consistency (flag setting etc.)
+                // Restore assumes standard rotation (0) for now, or could store rotation in inventory later
+                setMultiTile(selectedTileIndex, item.type, 0);
 
-            saveGame();
-            sync3DState();
-            updatePanelUI();
-            updateHeader();
+                // Override level/finishTime
+                // Re-fetch t as setMultiTile might have replaced object reference? 
+                // (No, it modifies properties of object in array)
+                const tNew = gameState.tiles[selectedTileIndex];
+                tNew.level = Math.max(0, item.level - 1);
+                tNew.finishTime = Date.now() + getBuildTime(item.type, tNew.level);
+                tNew.stored = {};
+
+                SoundManager.playSE('build');
+                saveGame();
+                sync3DState();
+                updatePanelUI();
+                updateHeader();
+                showToast("保管庫から配置しました");
+            } catch (e) {
+                console.error("Restore failed", e);
+                showToast("⚠️ 配置に失敗しました");
+            }
         };
 
         function getAdjacentTiles(index) {
