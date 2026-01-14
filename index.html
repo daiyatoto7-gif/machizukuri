@@ -3620,9 +3620,9 @@
                     gameState.inventory.forEach((item, idx) => {
                         const b = BUILDINGS[item.type];
                         const timeSec = getBuildTime(item.type, item.level - 1) / 1000;
-                        const canRestore = checkBuildingLimit(item.type);
-                        const disabledAttr = canRestore ? '' : 'disabled';
-                        const warnText = canRestore ? '' : '<span style="color:red; font-size:0.8em;">(上限到達)</span>';
+                        // Restoration is always allowed (already counted in limit)
+                        const disabledAttr = '';
+                        const warnText = '';
 
                         html += `
                         <div class="building-item" style="background:#fff8e1;">
@@ -4028,13 +4028,8 @@
             }
 
             if (invIndex < 0 || invIndex >= gameState.inventory.length) return;
-
             const item = gameState.inventory[invIndex];
-
-            if (!checkBuildingLimit(item.type)) {
-                showToast("⚠️ この施設はこれ以上配置できません");
-                return;
-            }
+            // No limit check needed for restore (already owned)
 
             const t = gameState.tiles[selectedTileIndex];
 
