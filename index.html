@@ -1175,6 +1175,111 @@
             ctx.closePath();
         }
 
+        function sanitizeGameState() {
+            let fixedCount = 0;
+            const grid = gameState.tiles;
+            const size = gameState.gridSize;
+
+            // 1. Remove Orphan Parts
+            for (let i = 0; i < grid.length; i++) {
+                const t = grid[i];
+                if (t.type && t.type.endsWith('_part')) {
+                    const mIdx = t.masterIndex;
+                    if (mIdx === undefined || mIdx < 0 || mIdx >= grid.length) {
+                        t.type = null; t.level = 0; t.masterIndex = undefined;
+                        fixedCount++;
+                        continue;
+                    }
+                    const master = grid[mIdx];
+                    const expectedType = t.type.substring(0, t.type.length - 5);
+                    if (!master.type || master.type !== expectedType) {
+                        t.type = null; t.level = 0; t.masterIndex = undefined;
+                        fixedCount++;
+                    }
+                }
+            }
+
+            // 2. Validate Masters & Heal/Delete
+            for (let i = 0; i < grid.length; i++) {
+                const t = grid[i];
+                if (t.type && !t.type.endsWith('_part')) {
+                    if (typeof getBuildingSize !== 'function') continue; // Safety
+                    const bSize = getBuildingSize(t.type);
+                    if (bSize.w === 1 && bSize.h === 1) continue;
+
+                    const rot = t.rotation || 0;
+                    const w = (rot % 2 === 0) ? bSize.w : bSize.h;
+                    const h = (rot % 2 === 0) ? bSize.h : bSize.w;
+                    const origin = getGridPos(i);
+
+                    let isValid = true;
+                    let partsToRestore = [];
+
+                    for (let dy = 0; dy < h; dy++) {
+                        for (let dx = 0; dx < w; dx++) {
+                            if (dx === 0 && dy === 0) continue;
+
+                            const tx = origin.x + dx;
+                            const ty = origin.y + dy;
+                            const tidx = getIndexFromPos(tx, ty);
+
+                            if (tidx === -1) {
+                                isValid = false; break; // Out of bounds
+                            }
+                            const target = grid[tidx];
+
+                            if (!target.type) {
+                                partsToRestore.push(tidx);
+                            } else if (target.type === t.type + '_part' && target.masterIndex === i) {
+                                // OK
+                            } else {
+                                isValid = false; break; // Collision
+                            }
+                        }
+                        if (!isValid) break;
+                    }
+
+                    if (!isValid) {
+                        // Corrupted -> Remove Master Only (don't touch conflicted tile)
+                        t.type = null; t.level = 0; t.finishTime = null; t.stored = {}; t.rotation = 0;
+                        // Clean my parts
+                        for (let dy = 0; dy < h; dy++) {
+                            for (let dx = 0; dx < w; dx++) {
+                                if (dx === 0 && dy === 0) continue;
+                                const tx = origin.x + dx;
+                                const ty = origin.y + dy;
+                                const tidx = getIndexFromPos(tx, ty);
+                                if (tidx !== -1) {
+                                    const p = grid[tidx];
+                                    if (p.type === (t.type ? t.type + '_part' : '') && p.masterIndex === i) {
+                                        p.type = null; p.level = 0; p.masterIndex = undefined;
+                                    }
+                                }
+                            }
+                        }
+                        fixedCount++;
+                    } else {
+                        // Heal
+                        if (partsToRestore.length > 0) {
+                            partsToRestore.forEach(pidx => {
+                                const p = grid[pidx];
+                                p.type = t.type + '_part';
+                                p.masterIndex = i;
+                                p.level = t.level;
+                            });
+                            fixedCount++;
+                        }
+                    }
+                }
+            }
+
+            if (fixedCount > 0) {
+                console.log(`Sanitized ${fixedCount} issues.`);
+                showToast(`データの不整合を修正しました(${fixedCount}件)`);
+                saveGame(); // Save fixes
+            }
+        }
+
         function initGame() {
             log("Game initializing...");
 
@@ -1215,6 +1320,8 @@
                 });
             }
             if (!gameState.inventory) gameState.inventory = [];
+
+            sanitizeGameState(); // Auto-fix corrupted data on load
 
             try {
                 init3D();
@@ -3758,44 +3865,60 @@
                     return;
                 }
 
-                // Smart Placement Logic
-                // Smart Placement Logic (Try Rotation 0 then 1)
+                // Smart Placement Logic (Updated)
+                // Priority:
+                // 1. Closest to Origin (dx=0, dy=0) -> "Build starting here"
+                // 2. Default Rotation (0) -> "Vertical/Standard"
                 let placed = false;
                 const size0 = getBuildingSize(type);
 
                 // Allow rotation trial
-                const rotations = [0];
-                if (size0.w !== size0.h) rotations.push(1);
+                const allowedRotations = [0];
+                if (size0.w !== size0.h) allowedRotations.push(1);
 
-                for (let r of rotations) {
-                    if (placed) break;
+                // Generate all possible candidates: {r, dx, dy}
+                let candidates = [];
 
+                for (let r of allowedRotations) {
                     const w = (r % 2 === 0) ? size0.w : size0.h;
                     const h = (r % 2 === 0) ? size0.h : size0.w;
 
-                    // Scan neighborhood to find a Master pos (tx, ty) such that
-                    // building placed at (tx,ty) covers selectedTileIndex (origin).
-                    const origin = getGridPos(selectedTileIndex);
-
                     for (let dy = -(h - 1); dy <= 0; dy++) {
                         for (let dx = -(w - 1); dx <= 0; dx++) {
-                            const tx = origin.x + dx;
-                            const ty = origin.y + dy;
-                            const tidx = getIndexFromPos(tx, ty);
-
-                            if (tidx !== -1 && checkPlacement(tidx, type, r)) {
-                                // Double check coverage
-                                if (origin.x >= tx && origin.x < tx + w &&
-                                    origin.y >= ty && origin.y < ty + h) {
-
-                                    targetIndex = tidx;
-                                    detectedRotation = r;
-                                    placed = true;
-                                    break;
-                                }
-                            }
+                            candidates.push({ r: r, dx: dx, dy: dy });
                         }
-                        if (placed) break;
+                    }
+                }
+
+                // Sort candidates
+                candidates.sort((a, b) => {
+                    const distA = Math.abs(a.dx) + Math.abs(a.dy);
+                    const distB = Math.abs(b.dx) + Math.abs(b.dy);
+                    if (distA !== distB) return distA - distB;
+                    return a.r - b.r;
+                });
+
+                // Execute Search
+                const origin = getGridPos(selectedTileIndex);
+
+                for (let cand of candidates) {
+                    const w = (cand.r % 2 === 0) ? size0.w : size0.h;
+                    const h = (cand.r % 2 === 0) ? size0.h : size0.w;
+
+                    const tx = origin.x + cand.dx;
+                    const ty = origin.y + cand.dy;
+                    const tidx = getIndexFromPos(tx, ty);
+
+                    if (tidx !== -1 && checkPlacement(tidx, type, cand.r)) {
+                        // Double check coverage
+                        if (origin.x >= tx && origin.x < tx + w &&
+                            origin.y >= ty && origin.y < ty + h) {
+
+                            targetIndex = tidx;
+                            detectedRotation = cand.r;
+                            placed = true;
+                            break;
+                        }
                     }
                 }
 
