@@ -3425,14 +3425,37 @@
 
         function checkAfford(c) { for (let k in c) if ((gameState.resources[k] || 0) < c[k]) return false; return true; }
         function payCost(c) { for (let k in c) gameState.resources[k] -= c[k]; updateHeader(); }
+        function getUnlockRank(type) {
+            if (type === 'forest') return 20;
+            if (type === 'well') return 10;
+            if (type === 'inn' || type === 'clocktower') return 15;
+            return 1;
+        }
+
         function addXP(a) {
+            const oldRank = gameState.rank;
             gameState.xp += a;
             while (gameState.xp >= getNextRankXP(gameState.rank)) {
                 gameState.xp -= getNextRankXP(gameState.rank);
                 gameState.rank++;
+            }
+
+            if (gameState.rank > oldRank) {
                 document.getElementById('levelup-rank').innerText = gameState.rank;
                 document.getElementById('modal-levelup').style.display = 'flex';
                 SoundManager.playSE('levelup');
+
+                // Check for new unlocks
+                let unlockedNames = [];
+                for (let k in BUILDINGS) {
+                    const r = getUnlockRank(k);
+                    if (r > oldRank && r <= gameState.rank) {
+                        unlockedNames.push(BUILDINGS[k].name);
+                    }
+                }
+                if (unlockedNames.length > 0) {
+                    showToast(`🎉 新しい施設が解放されました: ${unlockedNames.join(', ')}`);
+                }
             }
         }
 
@@ -3860,8 +3883,9 @@
                     return;
                 }
 
-                if (type === 'forest' && gameState.rank < 20) {
-                    showToast("⚠️ 森林はランク20から建設可能です");
+                const reqRank = getUnlockRank(type);
+                if (gameState.rank < reqRank) {
+                    showToast(`⚠️ ${BUILDINGS[type].name}はランク${reqRank}から建設可能です`);
                     return;
                 }
 
@@ -4151,12 +4175,24 @@
 
             for (let k in BUILDINGS) {
                 const b = BUILDINGS[k];
-                html += `
-                    <div class="catalog-item" onclick="showCatalogDetail('${k}')">
-                        <div class="catalog-icon">${b.icon}</div>
-                        <div class="catalog-name">${b.name}</div>
-                    </div>
-                `;
+                const reqRank = getUnlockRank(k);
+                const isLocked = gameState.rank < reqRank;
+
+                if (isLocked) {
+                    html += `
+                        <div class="catalog-item" style="opacity:0.6; cursor:not-allowed;" onclick="showToast('⚠️ ランク${reqRank}で解放されます')">
+                            <div class="catalog-icon">🔒</div>
+                            <div class="catalog-name">Rank ${reqRank}</div>
+                        </div>
+                    `;
+                } else {
+                    html += `
+                        <div class="catalog-item" onclick="showCatalogDetail('${k}')">
+                            <div class="catalog-icon">${b.icon}</div>
+                            <div class="catalog-name">${b.name}</div>
+                        </div>
+                    `;
+                }
             }
 
             html += '</div>';
