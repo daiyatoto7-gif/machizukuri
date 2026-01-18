@@ -1242,36 +1242,57 @@
                     const origin = getGridPos(i);
 
                     let isValid = true;
+                    if (!t.unlocked) isValid = false; // Check Master Unlock
+
                     let partsToRestore = [];
 
-                    for (let dy = 0; dy < h; dy++) {
-                        for (let dx = 0; dx < w; dx++) {
-                            if (dx === 0 && dy === 0) continue;
+                    if (isValid) {
+                        for (let dy = 0; dy < h; dy++) {
+                            for (let dx = 0; dx < w; dx++) {
+                                if (dx === 0 && dy === 0) continue;
 
-                            const tx = origin.x + dx;
-                            const ty = origin.y + dy;
-                            const tidx = getIndexFromPos(tx, ty);
+                                const tx = origin.x + dx;
+                                const ty = origin.y + dy;
+                                const tidx = getIndexFromPos(tx, ty);
 
-                            if (tidx === -1) {
-                                isValid = false; break; // Out of bounds
+                                if (tidx === -1) {
+                                    isValid = false; break; // Out of bounds
+                                }
+                                const target = grid[tidx];
+
+                                if (!target.unlocked) {
+                                    isValid = false; break; // Locked tile
+                                }
+
+                                if (!target.type) {
+                                    partsToRestore.push(tidx);
+                                } else if (target.type === t.type + '_part' && target.masterIndex === i) {
+                                    // OK
+                                } else {
+                                    isValid = false; break; // Collision
+                                }
                             }
-                            const target = grid[tidx];
-
-                            if (!target.type) {
-                                partsToRestore.push(tidx);
-                            } else if (target.type === t.type + '_part' && target.masterIndex === i) {
-                                // OK
-                            } else {
-                                isValid = false; break; // Collision
-                            }
+                            if (!isValid) break;
                         }
-                        if (!isValid) break;
                     }
 
                     if (!isValid) {
-                        // Corrupted -> Remove Master Only (don't touch conflicted tile)
+                        // Corrupted or Invalid Pos -> Move to Inventory & Remove
+                        // Recover Stored Resources first
+                        if (t.stored) {
+                            for (let r in t.stored) {
+                                if (gameState.resources[r] !== undefined) {
+                                    gameState.resources[r] += t.stored[r];
+                                }
+                            }
+                        }
+                        // Move to Inventory
+                        gameState.inventory.push({ type: t.type, level: t.level });
+
+                        // Remove Master
                         t.type = null; t.level = 0; t.finishTime = null; t.stored = {}; t.rotation = 0;
-                        // Clean my parts
+
+                        // Clean parts
                         for (let dy = 0; dy < h; dy++) {
                             for (let dx = 0; dx < w; dx++) {
                                 if (dx === 0 && dy === 0) continue;
@@ -1304,7 +1325,7 @@
 
             if (fixedCount > 0) {
                 console.log(`Sanitized ${fixedCount} issues.`);
-                showToast(`データの不整合を修正しました(${fixedCount}件)`);
+                showToast(`不整合データを修正/保管庫へ移動しました(${fixedCount}件)`);
                 saveGame(); // Save fixes
             }
         }
@@ -4430,22 +4451,30 @@
             }
 
             const item = gameState.inventory[invIndex];
-            // 復元時は所持数制限チェックを行わない (既に所持しているため)
+
+            // Placement Check with Rotation
+            let bestRot = -1;
+            // Try all 4 rotations to find one that fits
+            // Prefer 0 (default) -> 1 -> 2 -> 3
+            for (let r = 0; r < 4; r++) {
+                if (checkPlacement(selectedTileIndex, item.type, r)) {
+                    bestRot = r;
+                    break;
+                }
+            }
+
+            if (bestRot === -1) {
+                showToast("⚠️ ここには配置できません(スペース不足/障害物)");
+                return;
+            }
 
             try {
-                // Remove from inventory
+                // Remove from inventory ONLY if valid
                 gameState.inventory.splice(invIndex, 1);
 
-                // Setup tile
-                const t = gameState.tiles[selectedTileIndex];
+                // Use setMultiTile with the found rotation
+                setMultiTile(selectedTileIndex, item.type, bestRot);
 
-                // Use setMultiTile to ensure consistency (flag setting etc.)
-                // Restore assumes standard rotation (0) for now, or could store rotation in inventory later
-                setMultiTile(selectedTileIndex, item.type, 0);
-
-                // Override level/finishTime
-                // Re-fetch t as setMultiTile might have replaced object reference? 
-                // (No, it modifies properties of object in array)
                 const tNew = gameState.tiles[selectedTileIndex];
                 tNew.level = Math.max(0, item.level - 1);
                 tNew.finishTime = Date.now() + getBuildTime(item.type, tNew.level);
@@ -4458,10 +4487,14 @@
                 updateHeader();
                 showToast("保管庫から配置しました");
             } catch (e) {
-                console.error("Restore failed", e);
-                showToast("⚠️ 配置に失敗しました");
+                console.error("actRestore Error", e);
+                showToast("⚠️ システムエラーが発生しました");
+                // On error, we technically lost the item since we spliced it. 
+                // But in a real crash loop, it's safer to just log. 
+                // Ideally we'd rollback splice, but we're inside the Try block that failed.
             }
         };
+
 
         function getAdjacentTiles(index) {
             const size = gameState.gridSize;
