@@ -3761,7 +3761,15 @@
                     const disabledAttr = (afford && canBuild) ? '' : 'disabled';
 
                     let limitNum = 4;
-                    if (['well', 'inn', 'clocktower', 'bank'].includes(k)) limitNum = 2;
+                    // 正確な制限数を表示するためのロジック一致
+                    const kIdx = BUILDING_KEYS.indexOf(k);
+                    if (['well', 'inn', 'clocktower', 'bank'].includes(k)) {
+                        limitNum = 2;
+                    } else if (kIdx >= LIMIT_START_INDEX) {
+                        limitNum = 4;
+                    } else {
+                        limitNum = 999; // 制限なし
+                    }
 
                     const limitText = canBuild ? '' : `<br><span style="color:red; font-size:0.8em;">⚠️ 上限(${limitNum}つ)に達しています</span>`;
 
