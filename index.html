@@ -3879,12 +3879,89 @@
             gameState.tiles = newTiles;
             gameState.gridSize = newSize;
 
+            remapMasterIndices(gameState.tiles, oldSize, newSize);
+            sanitizeGameState(); // Ensure integrity
+
             createTiles();
             createSurroundingEnvironment(); // 環境再生成
             showToast(`🎉 世界が広がりました！ (${newSize}x${newSize})`);
 
             initPedestrians();
             saveGame();
+        }
+
+        function remapMasterIndices(tiles, oldSize, newSize) {
+            // Re-calculate masterIndex for all slave tiles when grid resizes
+            tiles.forEach(t => {
+                if (t.type && t.type.endsWith('_part') && t.masterIndex !== undefined) {
+                    const ox = t.masterIndex % oldSize;
+                    const oy = Math.floor(t.masterIndex / oldSize);
+                    const ni = oy * newSize + ox;
+                    t.masterIndex = ni;
+                }
+            });
+        }
+
+
+
+        function validateAndFixState() {
+            // Fix 1: Multi-tile integrity
+            gameState.tiles.forEach((t, i) => {
+                if (!t.type) {
+                    // Ensure clean state if empty
+                    if (t.masterIndex !== undefined) delete t.masterIndex;
+                    if (t.mas) delete t.mas;
+                    return;
+                }
+
+                if (t.type.endsWith('_part')) {
+                    // Slave check
+                    const mIdx = t.masterIndex;
+                    const validMaster = mIdx !== undefined && gameState.tiles[mIdx];
+                    if (!validMaster || !gameState.tiles[mIdx].type || !t.type.startsWith(gameState.tiles[mIdx].type)) {
+                        console.warn("Found orphan slave part at", i, "cleaning...");
+                        t.type = null;
+                        t.level = 0;
+                        t.finishTime = null;
+                        delete t.masterIndex;
+                    }
+                } else if (t.mas) {
+                    // Master check (optional: verify slaves exist?)
+                    // For now, assume if slave is missing, it's just a visual/logic glitch but less critical 
+                    // than slave pointing to wrong things.
+                    // But we should verify.
+                    // If we find a Master whose slaves are missing/wrong, strictly we should clear it or restore them.
+                    // Let's clear to be safe against overlaps.
+                    const size = getBuildingSize(t.type);
+                    const rot = t.rotation || 0;
+                    const w = (rot % 2 === 0) ? size.w : size.h;
+                    const h = (rot % 2 === 0) ? size.h : size.w;
+                    const origin = getGridPos(i);
+                    let healthy = true;
+
+                    for (let dy = 0; dy < h; dy++) {
+                        for (let dx = 0; dx < w; dx++) {
+                            if (dx === 0 && dy === 0) continue;
+                            const sIdx = getIndexFromPos(origin.x + dx, origin.y + dy);
+                            if (sIdx === -1) { healthy = false; break; }
+                            const slave = gameState.tiles[sIdx];
+                            if (!slave || slave.masterIndex !== i) { healthy = false; break; }
+                        }
+                    }
+                    if (!healthy) {
+                        console.warn("Found broken master at", i, "cleaning...");
+                        // Can't use clearMultiTile safely here as it might recurse. Manual clear.
+                        t.type = null;
+                        t.level = 0;
+                        t.finishTime = null;
+                        delete t.mas;
+                        // We don't chase slaves here, they will be caught by orphan check on next pass or if we run multiple passes.
+                        // Better: Loop again? Or just let it slide for one frame. 
+                        // To be safe, just invalidating Master turns it into a 'ghost' or 'orphan' scenario eventually fixed.
+                        // But if we null the type, the visual won't render. Current orphan check handles slaves.
+                    }
+                }
+            });
         }
 
         function showPanel(index) {
