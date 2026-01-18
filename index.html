@@ -622,6 +622,14 @@
             border: 1px solid #eee;
         }
 
+        .tile-timer {
+            font-size: 10px;
+            color: #fff;
+            text-shadow: 1px 1px 2px #000, -1px -1px 2px #000, 1px -1px 2px #000, -1px 1px 2px #000;
+            margin-bottom: 2px;
+            white-space: nowrap;
+        }
+
         .stat-label {
             font-size: 0.75em;
             color: #7f8c8d;
@@ -2988,7 +2996,7 @@
                             const percent = Math.min(100, Math.max(0, 100 - (remaining / total * 100)));
 
                             overlay.innerHTML = `
-                            <div class="tile-timer">${formatTimeShort(remaining / 1000)}</div>
+                            <div class="tile-timer">${formatTime(remaining / 1000)}</div>
                             <div class="progress-bar-container"><div class="progress-fill" style="width:${percent}%"></div></div>
                         `;
                         } else {
