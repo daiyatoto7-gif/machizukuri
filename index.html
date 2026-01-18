@@ -3057,7 +3057,8 @@
             // 汎用ブースト倍率取得関数
             const getBoosterMultiplier = (boosterType) => {
                 let totalAdd = 0;
-                const boosters = gameState.tiles.filter(t => t.type === boosterType && !t.finishTime && t.level > 0);
+                // 工事中でも効果を発揮 (level > 0 ならOK)
+                const boosters = gameState.tiles.filter(t => t.type === boosterType && t.level > 0);
                 boosters.forEach(t => {
                     const bonus = 0.27 + (t.level * 0.03);
                     totalAdd += bonus;
@@ -3101,7 +3102,19 @@
                         if (tile.type === 'farm') {
                             const adj = getAdjacentTiles(i);
                             const maxWellLevel = adj.reduce((max, t) => {
-                                if (t && t.type === 'well' && t.level > 0 && !t.finishTime) {
+                                // 井戸が工事中でも効果適用 (Lv0建設中もLv1相当として扱うか？ -> User said "level up previous multiplier". For new build, previous is 0. 
+                                // But for adjacency count, explicit request was "Count constructing Lumberjacks".
+                                // Let's assume standard adjacency counts physical presence. For Level, we use max(level, 1) if constructing? 
+                                // Or purely level? If t.level is 0, bonus is 0. 
+                                // If the user wants "count constructing", it implies getting a bonus.
+                                // Let's support t.level 0 -> treat as 1 if constructing?
+                                // "工事中であってもレベルアップ前の倍率" -> New build (Lv0) has prev rate 0.
+                                // BUT for "Count number of lumberjacks", 0->1 adds 1 count.
+                                // For Well (Level based), 0->1 adds 0 level.
+                                // So for Well, `t.level > 0` serves the "prev rate" logic correctly (new well gives 0).
+                                // But upgrading Well (Lv1->2) should give Lv1. `t.level` is 1. Correct.
+                                // SO: Well logic is actually fine as is (since it depends on Level).
+                                if (t && t.type === 'well' && t.level > 0) {
                                     return Math.max(max, t.level);
                                 }
                                 return max;
@@ -3139,7 +3152,8 @@
 
                             // Unique neighbors (filter duplicates and self/slave)
                             const unique = [...new Set(adj)];
-                            const lumberCount = unique.filter(t => t && t.type === 'lumber' && t.level > 0 && !t.finishTime).length;
+                            // 伐採所が工事中でもカウント (New Construction logic added)
+                            const lumberCount = unique.filter(t => t && t.type === 'lumber' && (t.level > 0 || t.finishTime)).length;
 
                             if (lumberCount > 0) {
                                 multiplier *= (1 + 0.2 * lumberCount);
@@ -3611,7 +3625,7 @@
             const calcBoost = (type) => {
                 let add = 0;
                 if (typeof gameState !== 'undefined' && gameState.tiles) {
-                    gameState.tiles.filter(tl => tl.type === type && !tl.finishTime && tl.level > 0)
+                    gameState.tiles.filter(tl => tl.type === type && tl.level > 0)
                         .forEach(bk => { add += (0.27 + bk.level * 0.03); });
                 }
                 return 1.0 + add;
@@ -3627,7 +3641,7 @@
                     // Check Wells
                     const adj = getAdjacentTiles(tileIndex);
                     const maxWellLevel = adj.reduce((max, t) => {
-                        if (t && t.type === 'well' && t.level > 0 && !t.finishTime) {
+                        if (t && t.type === 'well' && t.level > 0) {
                             return Math.max(max, t.level);
                         }
                         return max;
@@ -3980,7 +3994,7 @@
                 const next = tile.level + 1;
                 const c = getCost(tile.type, tile.level);
                 const afford = checkAfford(c);
-                const caps = getStorageCapacity(tile.type, tile.level, index);
+                const caps = getStorageCapacity(tile.type, tile.level, selectedTileIndex);
                 // Use helper for upgrade cost
                 const costStr = formatCostWithColor(c);
 
@@ -4401,6 +4415,9 @@
                 <button class="action-btn" onclick="openBuildingList()" style="width:100%; margin-bottom:10px; background-color:#3498db;">
                     📋 施設一覧 (所有)
                 </button>
+                <button class="action-btn" onclick="showCurrentEffects()" style="width:100%; margin-bottom:10px; background-color:#1abc9c;">
+                    📊 現在の効果
+                </button>
                 <button class="action-btn" onclick="openCatalog()" style="width:100%; margin-bottom:10px; background-color:#9b59b6;">
                     📖 建設カタログ
                 </button>
@@ -4585,6 +4602,192 @@
                     </div>
                 </div>
             `;
+        };
+
+        window.showCurrentEffects = function (includeConstruction = false) {
+            closeModal('modal-menu');
+            SoundManager.playSE('select');
+
+            // Calculate stats
+            const stats = {
+                money: { prod: 0, mult: 1 },
+                food: { prod: 0, mult: 1 },
+                wood: { prod: 0, mult: 1 },
+                stone: { prod: 0, mult: 1 },
+                iron: { prod: 0, mult: 1 },
+                water: { prod: 0, mult: 1 }
+            };
+
+            // Global Multipliers Calculation (Mirrors gameLogicLoop)
+            const getBoost = (type) => {
+                let add = 0;
+                const targets = gameState.tiles.filter(t => {
+                    if (t.type !== type) return false;
+                    if (t.level > 0) return true; // Active or Upgrading
+                    if (includeConstruction && t.finishTime) return true; // Under construction (New)
+                    return false;
+                });
+
+                targets.forEach(t => {
+                    const l = (t.level === 0) ? 1 : t.level; // Assume Lv1 if constructing
+                    add += (0.27 + l * 0.03);
+                });
+                return 1.0 + add;
+            };
+
+            const bankMult = getBoost('bank');
+            const granaryMult = getBoost('granary');
+            const lumberMult = getBoost('lumber_hub');
+
+            // Clocktower
+            let globalSpeed = 1.0;
+            const clocks = gameState.tiles.filter(t => {
+                if (t.type !== 'clocktower') return false;
+                if (t.level > 0) return true;
+                if (includeConstruction && t.finishTime) return true;
+                return false;
+            });
+            clocks.forEach(t => {
+                const l = (t.level === 0) ? 1 : t.level;
+                globalSpeed += (0.02 + (t.level - 1) * 0.001); // Fix: use t.level
+            });
+
+            // Iterate tiles for production
+            gameState.tiles.forEach((tile, i) => {
+                let isActive = false;
+                let level = tile.level;
+
+                if (tile.unlocked && tile.type) {
+                    if (tile.level > 0) isActive = true;
+                    // If includeConstruction, also count new buildings under construction
+                    if (includeConstruction && tile.finishTime && tile.level === 0) {
+                        isActive = true;
+                        level = 1;
+                    }
+                }
+
+                if (isActive) {
+                    const b = BUILDINGS[tile.type];
+                    if (!b) return;
+
+                    let mult = globalSpeed;
+
+                    // Adjacency Helpers
+                    const countAdj = (type) => {
+                        const adj = getAdjacentTiles(i);
+                        // Filter logic similar to global boost
+                        const valid = [...new Set(adj)].filter(t => {
+                            if (!t || t.type !== type) return false;
+                            if (t.level > 0) return true;
+                            if (includeConstruction && t.finishTime) return true;
+                            return false;
+                        });
+                        return valid;
+                    };
+
+                    const getMaxLvl = (list) => list.reduce((max, t) => Math.max(max, (t.level === 0 ? 1 : t.level)), 0);
+
+                    // 1. Well -> Farm
+                    if (tile.type === 'farm') {
+                        const wells = countAdj('well');
+                        const maxLvl = getMaxLvl(wells);
+                        if (maxLvl > 0) mult *= (1 + 0.3 + (maxLvl - 1) * 0.03);
+                    }
+
+                    // 2. Inn -> Market/House (Assuming innate production always active if adjacent)
+                    if (tile.type === 'inn') {
+                        const markets = countAdj('market');
+                        const houses = countAdj('house');
+                        if (markets.length === 0 || houses.length === 0) mult = 0;
+                    }
+
+                    // 3. Forest -> Lumber
+                    if (tile.type === 'forest') {
+                        const adj = getAdjacentTiles(i);
+                        const slaveOffset = (tile.rotation % 2 === 0) ? gameState.gridSize : 1;
+                        const slaveIdx = i + slaveOffset;
+                        if (gameState.tiles[slaveIdx] && gameState.tiles[slaveIdx].masterIndex === i) {
+                            getAdjacentTiles(slaveIdx).forEach(t => adj.push(t));
+                        }
+                        const unique = [...new Set(adj)];
+                        const lumbers = unique.filter(t => {
+                            if (!t || t.type !== 'lumber') return false;
+                            if (t.level > 0) return true;
+                            // Feature request: "Count constructing Lumberjacks" logic should involve MAIN loop too
+                            // This matches gameLogicLoop which now counts finishTime unconditionally.
+                            if (t.finishTime) return true;
+                            return false;
+                        });
+                        if (lumbers.length > 0) mult *= (1 + 0.2 * lumbers.length);
+                    }
+
+                    for (let r in b.prod) {
+                        if (b.prod[r] > 0) {
+                            let finalMult = mult;
+                            if (r === 'money' && ['house', 'market', 'blacksmith', 'inn'].includes(tile.type)) finalMult *= bankMult;
+                            if (r === 'food' && ['farm'].includes(tile.type)) finalMult *= granaryMult;
+                            if (r === 'wood' && ['lumber', 'forest'].includes(tile.type)) finalMult *= lumberMult;
+
+                            const rawAmount = b.prod[r] * level * Math.pow(1.05, level - 1);
+                            const actualAmount = rawAmount * finalMult;
+
+                            stats[r].prod += actualAmount;
+                            if (!stats[r].base) stats[r].base = 0;
+                            stats[r].base += rawAmount;
+                        }
+                    }
+                }
+            });
+
+            // Build UI
+            const modal = document.getElementById('modal-building-list');
+            const content = document.getElementById('building-list-content');
+
+            let html = `
+                <div style="text-align:center; margin-bottom:15px;">
+                    <h3>📊 現在の効果一覧</h3>
+                    <p style="font-size:0.9em; color:#666;">全施設の合計生産力と適用倍率</p>
+                    <button class="action-btn" onclick="showCurrentEffects(${!includeConstruction})" style="background-color:${includeConstruction ? '#e74c3c' : '#2ecc71'}; width:auto; padding:5px 15px; font-size:0.9em; margin-top:5px;">
+                        ${includeConstruction ? '建設中を含めない' : '建設中を含める (潜在能力)'}
+                    </button>
+                    ${includeConstruction ? '<p style="color:#e67e22; font-size:0.8em; margin-top:2px;">※建設中の施設が完成したと仮定した数値です</p>' : ''}
+                </div>
+                
+                <table style="width:100%; border-collapse: collapse; font-size:0.95em;">
+                    <tr style="background:#f0f0f0; border-bottom:2px solid #ddd;">
+                        <th style="padding:8px; text-align:left;">素材</th>
+                        <th style="padding:8px; text-align:right;">合計生産/秒</th>
+                        <th style="padding:8px; text-align:right;">平均倍率</th>
+                    </tr>
+            `;
+
+            const resKeys = ['money', 'food', 'wood', 'stone', 'iron', 'water'];
+            const labels = { money: 'お金', food: '食料', wood: '木材', stone: '石材', iron: '鉄', water: '水' };
+            const icons = { money: '💰', food: '🌾', wood: '🌲', stone: '🪨', iron: '🔩', water: '💧' };
+
+            resKeys.forEach(key => {
+                const s = stats[key];
+                // Show if base > 0 (producing) OR if it's money (always show money)
+                if (s.base > 0 || key === 'money') {
+                    const avgMult = s.base > 0 ? (s.prod / s.base) : 0;
+                    html += `
+                        <tr style="border-bottom:1px solid #eee;">
+                            <td style="padding:8px;">${icons[key]} ${labels[key]}</td>
+                            <td style="padding:8px; text-align:right; font-weight:bold;">${s.prod.toFixed(1)}/s</td>
+                            <td style="padding:8px; text-align:right; color:#2980b9;">x${avgMult.toFixed(2)}</td>
+                        </tr>
+                    `;
+                }
+            });
+
+            html += `</table>
+                <div style="margin-top:20px; text-align:center;">
+                    <button onclick="openMenu()" style="padding:8px 20px; border:none; background:#eee; border-radius:5px;">戻る</button>
+                </div>
+            `;
+
+            content.innerHTML = html;
+            document.getElementById('modal-building-list').style.display = 'flex';
         };
 
         window.openBuildingList = function () {
