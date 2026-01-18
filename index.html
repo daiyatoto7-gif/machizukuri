@@ -1044,6 +1044,20 @@
                 prod: {}, // 特殊効果
                 cost: { money: 500000, wood: 200000, stone: 200000, iron: 100000 },
                 baseTime: 500000
+            },
+            granary: {
+                name: "穀倉", icon: "🛖",
+                desc: "【農業】食料の生産施設(畑)の生産量と、食料の貯蔵上限を増やします(Lv1: 1.27倍)。",
+                prod: {},
+                cost: { money: 600000, wood: 240000, stone: 240000, iron: 120000 },
+                baseTime: 600000
+            },
+            lumber_hub: {
+                name: "製材所", icon: "🪵",
+                desc: "【工業】木材の生産施設(伐採所/森林)の生産量と、木材の貯蔵上限を増やします(Lv1: 1.27倍)。",
+                prod: {},
+                cost: { money: 700000, wood: 280000, stone: 280000, iron: 140000 },
+                baseTime: 700000
             }
         };
 
@@ -1057,8 +1071,8 @@
         }
 
         function checkBuildingLimit(type) {
-            // 特別制限: 井戸・宿屋・時計塔・銀行は2つまで
-            if (['well', 'inn', 'clocktower', 'bank'].includes(type)) {
+            // 特別制限: 井戸・宿屋・時計塔・銀行・穀倉・製材所は2つまで
+            if (['well', 'inn', 'clocktower', 'bank', 'granary', 'lumber_hub'].includes(type)) {
                 if (getBuildingCount(type) >= 2) return false;
             }
 
@@ -2682,6 +2696,118 @@
                         group.add(signGroup);
                     }
                     break;
+
+                case 'granary':
+                    // Granary: Cylindrical Silos
+                    // Main Silo
+                    const siloGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.8, 16);
+                    const silo = new THREE.Mesh(siloGeo, MATERIALS.wall);
+                    silo.position.set(0, 0.4, 0);
+                    group.add(silo);
+
+                    // Dome Roof (Silo)
+                    const siloRoof = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2), MATERIALS.wood);
+                    siloRoof.position.set(0, 0.8, 0);
+                    group.add(siloRoof);
+
+                    // Wooden Platform base
+                    group.add(createBox(0.9, 0.1, 0.9, MATERIALS.wood, 0, 0.05, 0));
+
+                    // Wheat Sheaves (Cones) - Increase check
+                    const wheatGeo = new THREE.ConeGeometry(0.1, 0.3, 8);
+                    const makeWheat = (x, z) => {
+                        const m = new THREE.Mesh(wheatGeo, MATERIALS.gold); // Gold ~ Wheat color
+                        m.position.set(x, 0.2, z);
+                        return m;
+                    };
+                    group.add(makeWheat(0.3, 0.3));
+                    group.add(makeWheat(-0.3, -0.3));
+
+                    if (tier >= 2) {
+                        // Add Second Silo
+                        const silo2 = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.7, 16), MATERIALS.wall);
+                        silo2.position.set(-0.3, 0.35, 0.3);
+                        group.add(silo2);
+                        const silo2Roof = new THREE.Mesh(new THREE.SphereGeometry(0.25, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2), MATERIALS.wood);
+                        silo2Roof.position.set(-0.3, 0.7, 0.3);
+                        group.add(silo2Roof);
+                    }
+
+                    if (tier >= 3) {
+                        // More Wheat and decoration
+                        group.add(makeWheat(0.35, -0.2));
+                        group.add(makeWheat(-0.35, 0.2));
+
+                        // A crane/lift mechanism
+                        const crane = new THREE.Group();
+                        crane.add(createBox(0.05, 0.8, 0.05, MATERIALS.wood, 0.4, 0.4, 0));
+                        crane.add(createBox(0.3, 0.05, 0.05, MATERIALS.wood, 0.25, 0.8, 0));
+                        group.add(crane);
+                    }
+                    break;
+
+                case 'lumber_hub':
+                    // Lumber Hub: Industrial sawmill
+                    // Base platform
+                    group.add(createBox(0.9, 0.2, 0.9, MATERIALS.stone, 0, 0.1, 0));
+
+                    // Workshop roof (shed style)
+                    const roofGeo = new THREE.ConeGeometry(0.6, 0.3, 4);
+                    const roof = new THREE.Mesh(roofGeo, MATERIALS.wood);
+                    roof.position.set(0, 0.6, -0.2);
+                    roof.rotation.y = Math.PI / 4;
+                    roof.scale.set(1, 1, 0.5);
+                    group.add(roof);
+
+                    // Pillars holding roof
+                    group.add(createBox(0.1, 0.5, 0.1, MATERIALS.wood, -0.3, 0.35, -0.3));
+                    group.add(createBox(0.1, 0.5, 0.1, MATERIALS.wood, 0.3, 0.35, -0.3));
+
+                    // Log Piles
+                    const logGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.4, 6);
+                    const logMat = MATERIALS.wood;
+                    const makeLog = (x, y, z, rotY) => {
+                        const m = new THREE.Mesh(logGeo, logMat);
+                        m.rotation.z = Math.PI / 2;
+                        m.rotation.y = rotY || 0;
+                        m.position.set(x, y, z);
+                        return m;
+                    };
+                    group.add(makeLog(0.2, 0.25, 0.2));
+                    group.add(makeLog(0.2, 0.3, 0.2));
+
+                    if (tier >= 2) {
+                        // Big Saw Blade
+                        const sawGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.02, 16);
+                        const saw = new THREE.Mesh(sawGeo, MATERIALS.metal);
+                        saw.rotation.x = Math.PI / 2;
+                        saw.position.set(-0.2, 0.3, 0.2);
+                        // Animation data
+                        const sawGroup = new THREE.Group();
+                        sawGroup.add(saw);
+                        sawGroup.position.set(-0.2, 0.3, 0.2);
+                        saw.position.set(0, 0, 0); // Local
+
+                        // Frame for saw
+                        group.add(createBox(0.05, 0.4, 0.05, MATERIALS.metal, -0.2, 0.3, 0.2));
+
+                        sawGroup.userData = { anim: 'rotateZ', speed: 0.1 };
+                        group.add(sawGroup);
+                    }
+
+                    if (tier >= 3) {
+                        // Conveyor belt or more logs
+                        group.add(createBox(0.8, 0.05, 0.3, MATERIALS.metal, 0, 0.25, 0.3));
+                        group.add(makeLog(-0.3, 0.3, 0.3));
+                        group.add(makeLog(0, 0.3, 0.3));
+                        group.add(makeLog(0.3, 0.3, 0.3));
+
+                        // Smoke stack
+                        const stack = createCyl(0.1, 0.08, 0.8, MATERIALS.stone, 0.35, 0.4, -0.35);
+                        group.add(stack);
+                    }
+
+                    break;
             }
             return group;
         }
@@ -2925,23 +3051,25 @@
             const now = Date.now();
             let dirty = false;
 
-            // グローバルバフの計算 (時計塔 & 銀行)
+            // グローバルバフの計算 (時計塔 & ブースト施設)
             let globalSpeedMultiplier = 1.0;
-            // 銀行バフ（生産力 & 貯蔵庫）
-            let bankMultiplier = 0; // 加算式 (Base 1.27 + level*0.03) -> 1.0 + (0.27 + ...)
-            // しかし仕様は "生産力/貯蔵上限 倍率: Lv1: 1.3倍, LvUP: +0.03倍" (計算式: 1.27 + level * 0.03)
-            // 重複は加算 (例: Lv1 x2 -> 1.0 + 0.3 + 0.3 = 1.6倍)
 
-            // まず合計の倍率を計算
-            // default is 1.0. Checks banks.
-            let totalBankAdd = 0;
+            // 汎用ブースト倍率取得関数
+            const getBoosterMultiplier = (boosterType) => {
+                let totalAdd = 0;
+                const boosters = gameState.tiles.filter(t => t.type === boosterType && !t.finishTime && t.level > 0);
+                boosters.forEach(t => {
+                    const bonus = 0.27 + (t.level * 0.03);
+                    totalAdd += bonus;
+                });
+                return 1.0 + totalAdd;
+            };
 
-            const banks = gameState.tiles.filter(t => t.type === 'bank' && !t.finishTime && t.level > 0);
-            banks.forEach(t => {
-                const bonus = 0.27 + (t.level * 0.03); // Lv1: 0.3
-                totalBankAdd += bonus;
-            });
-            const bankFinalMultiplier = 1.0 + totalBankAdd;
+            const bankMult = getBoosterMultiplier('bank');
+            const granaryMult = getBoosterMultiplier('granary');
+            const lumberMult = getBoosterMultiplier('lumber_hub');
+
+
 
             const clockTowers = gameState.tiles.filter(t => t.type === 'clocktower' && !t.finishTime && t.level > 0);
             clockTowers.forEach(t => {
@@ -3024,10 +3152,10 @@
                                 // multiplierを適用
                                 let finalMult = multiplier;
 
-                                // 銀行の効果: お金生産のみブースト
-                                if (r === 'money' && ['house', 'market', 'blacksmith', 'inn'].includes(tile.type)) {
-                                    finalMult *= bankFinalMultiplier;
-                                }
+                                // ブースト施設の適用
+                                if (r === 'money' && ['house', 'market', 'blacksmith', 'inn'].includes(tile.type)) finalMult *= bankMult;
+                                if (r === 'food' && ['farm'].includes(tile.type)) finalMult *= granaryMult;
+                                if (r === 'wood' && ['lumber', 'forest'].includes(tile.type)) finalMult *= lumberMult;
 
                                 const rawAmount = b.prod[r] * tile.level * Math.pow(1.05, tile.level - 1);
                                 const amount = rawAmount * finalMult; // per second
@@ -3305,6 +3433,12 @@
                     // 1.27 + lvl * 0.03
                     const val = 1.27 + (lvl * 0.03);
                     return `金産・金貯 x${val.toFixed(2)}`;
+                } else if (type === 'granary') {
+                    const val = 1.27 + (lvl * 0.03);
+                    return `食産・食貯 x${val.toFixed(2)}`;
+                } else if (type === 'lumber_hub') {
+                    const val = 1.27 + (lvl * 0.03);
+                    return `木産・木貯 x${val.toFixed(2)}`;
                 } else {
                     // 一般生産施設
                     let parts = [];
@@ -3473,25 +3607,27 @@
         function getStorageCapacity(t, l) {
             const b = BUILDINGS[t], s = CONFIG.storageHours * 3600, c = {};
 
-            // Calculate Bank Multiplier for Storage
-            let totalBankAdd = 0;
-            // Note: This relies on gameState.tiles being available.
-            if (typeof gameState !== 'undefined' && gameState.tiles) {
-                const banks = gameState.tiles.filter(tl => tl.type === 'bank' && !tl.finishTime && tl.level > 0);
-                banks.forEach(bk => {
-                    const bonus = 0.27 + (bk.level * 0.03);
-                    totalBankAdd += bonus;
-                });
-            }
-            const bankFinalMultiplier = 1.0 + totalBankAdd;
+            // Calculate Boosters (Simplified logic)
+            const calcBoost = (type) => {
+                let add = 0;
+                if (typeof gameState !== 'undefined' && gameState.tiles) {
+                    gameState.tiles.filter(tl => tl.type === type && !tl.finishTime && tl.level > 0)
+                        .forEach(bk => { add += (0.27 + bk.level * 0.03); });
+                }
+                return 1.0 + add;
+            };
+            const bankMult = calcBoost('bank');
+            const granaryMult = calcBoost('granary');
+            const lumberMult = calcBoost('lumber_hub');
 
             for (let r in b.prod) {
                 if (b.prod[r] > 0) {
                     let capacity = b.prod[r] * l * Math.pow(1.05, l - 1) * s;
-                    // Apply Bank Multiplier to Money Storage
-                    if (r === 'money') {
-                        capacity *= bankFinalMultiplier;
-                    }
+
+                    if (r === 'money') capacity *= bankMult;
+                    if (r === 'food') capacity *= granaryMult;
+                    if (r === 'wood') capacity *= lumberMult;
+
                     c[r] = capacity;
                 }
             }
@@ -3550,6 +3686,8 @@
         function checkAfford(c) { for (let k in c) if ((gameState.resources[k] || 0) < c[k]) return false; return true; }
         function payCost(c) { for (let k in c) gameState.resources[k] -= c[k]; updateHeader(); }
         function getUnlockRank(type) {
+            if (type === 'lumber_hub') return 26;
+            if (type === 'granary') return 24;
             if (type === 'bank') return 22;
             if (type === 'forest') return 20;
             if (type === 'well') return 10;
@@ -3763,7 +3901,7 @@
                     let limitNum = 4;
                     // 正確な制限数を表示するためのロジック一致
                     const kIdx = BUILDING_KEYS.indexOf(k);
-                    if (['well', 'inn', 'clocktower', 'bank'].includes(k)) {
+                    if (['well', 'inn', 'clocktower', 'bank', 'granary', 'lumber_hub'].includes(k)) {
                         limitNum = 2;
                     } else if (kIdx >= LIMIT_START_INDEX) {
                         limitNum = 4;
