@@ -3599,7 +3599,18 @@
         };
 
         function formatTimeShort(s) { if (s < 60) return `${Math.floor(s)}s`; if (s < 3600) return `${Math.floor(s / 60)}m`; return `${Math.floor(s / 3600)}h`; }
-        function formatTime(s) { if (s < 60) return `${Math.floor(s)}秒`; if (s < 3600) return `${Math.floor(s / 60)}分${Math.floor(s % 60)}秒`; return `${Math.floor(s / 3600)}時間`; }
+        function formatTime(s) {
+            s = Math.floor(s);
+            const d = Math.floor(s / 86400);
+            const h = Math.floor((s % 86400) / 3600);
+            const m = Math.floor((s % 3600) / 60);
+            const sec = s % 60;
+
+            if (d > 0) return `${d}日${h}時間${m}分${sec}秒`;
+            if (h > 0) return `${h}時間${m}分${sec}秒`;
+            if (m > 0) return `${m}分${sec}秒`;
+            return `${sec}秒`;
+        }
 
         function getNextRankXP(r) {
             const base = r * 500;
@@ -3985,7 +3996,7 @@
                         <strong>工事後の性能:</strong>
                         ${prodDiff}
                     </div>
-                    <h2 style="color:var(--accent-color)">${formatTime(rem / 1000)}</h2>
+                    <div style="color:var(--accent-color); font-size:1.4em; font-weight:bold; margin:10px 0;">${formatTime(rem / 1000)}</div>
                     <p>工事中...</p>
                     <button class="action-btn store-btn" onclick="actStore()">📦 回収（保管庫へ）</button>
                     <button class="action-btn" style="background-color:var(--danger-color); margin-top:5px;" onclick="actCancelBuild()">🚫 工事中止 (返還: ${refund.join(' ')})</button>
