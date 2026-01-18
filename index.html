@@ -1037,6 +1037,13 @@
                 cost: { money: 100000, food: 40000, wood: 10000, water: 10000 },
                 baseTime: 300000,
                 w: 1, h: 2 // 1x2 size
+            },
+            bank: {
+                name: "銀行", icon: "🏦",
+                desc: "【金融】お金の生産施設(民家/市場/鍛冶屋/宿屋)の生産量と、お金の貯蔵上限を増やします(Lv1: 1.27倍)。",
+                prod: {}, // 特殊効果
+                cost: { money: 500000, wood: 200000, stone: 200000, iron: 100000 },
+                baseTime: 500000
             }
         };
 
@@ -1050,8 +1057,8 @@
         }
 
         function checkBuildingLimit(type) {
-            // 特別制限: 井戸・宿屋・時計塔は2つまで
-            if (['well', 'inn', 'clocktower'].includes(type)) {
+            // 特別制限: 井戸・宿屋・時計塔・銀行は2つまで
+            if (['well', 'inn', 'clocktower', 'bank'].includes(type)) {
                 if (getBuildingCount(type) >= 2) return false;
             }
 
@@ -2624,979 +2631,1082 @@
                         addTree(-0.9, 3.0, 0.6);
                         addTree(0, -1.2, 0.6);
                     }
+                    if (tier >= 3) {
+                        addTree(-0.9, 3.0, 0.6);
+                        addTree(0, -1.2, 0.6);
+                    }
+                    break;
+
+                case 'bank':
+                    // Bank: High-class stone building with gold accents
+                    // Main Hall
+                    group.add(createBox(0.8, 0.6, 0.8, MATERIALS.stone, 0, 0.3, 0));
+
+                    // Pillars (Front)
+                    const pillarGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.6, 8);
+                    const p1 = new THREE.Mesh(pillarGeo, MATERIALS.stone); p1.position.set(0.3, 0.3, 0.45); group.add(p1);
+                    const p2 = new THREE.Mesh(pillarGeo, MATERIALS.stone); p2.position.set(-0.3, 0.3, 0.45); group.add(p2);
+
+                    // Entrance (Gold door)
+                    group.add(createBox(0.3, 0.4, 0.05, MATERIALS.gold, 0, 0.2, 0.42));
+
+                    if (tier >= 2) {
+                        // 2nd Floor / Vault
+                        group.add(createBox(0.7, 0.5, 0.7, MATERIALS.wall, 0, 0.8, 0));
+                        group.add(createBox(0.85, 0.1, 0.85, MATERIALS.stone, 0, 0.6, 0)); // Cornice
+
+                        // Vault Wheel Decoration
+                        const wheel = createCyl(0.15, 0.15, 0.05, MATERIALS.metal, 0, 0.4, 0.45, Math.PI / 2);
+                        group.add(wheel);
+                    } else {
+                        group.add(createBox(0.85, 0.1, 0.85, MATERIALS.stone, 0, 0.6, 0)); // Roof base
+                    }
+
+                    if (tier >= 3) {
+                        // Dome Roof
+                        const dome = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2), MATERIALS.gold);
+                        dome.position.set(0, 1.05, 0);
+                        group.add(dome);
+
+                        // Money Signs using thin boxes
+                        const signGroup = new THREE.Group();
+                        signGroup.position.set(0, 1.6, 0);
+                        // Vertical line
+                        signGroup.add(createBox(0.05, 0.3, 0.05, MATERIALS.gold, 0, 0, 0));
+                        // S curves (approximated with small boxes)
+                        signGroup.add(createBox(0.15, 0.05, 0.05, MATERIALS.gold, 0, 0.12, 0));
+                        signGroup.add(createBox(0.15, 0.05, 0.05, MATERIALS.gold, 0, -0.12, 0));
+
+                        signGroup.userData = { anim: 'rotateY', speed: 0.02 };
+                        group.add(signGroup);
+                    }
                     break;
             }
-            return group;
-        }
 
-        function animate3D() {
-            requestAnimationFrame(animate3D);
-            const time = Date.now() * 0.001;
+            function animate3D() {
+                requestAnimationFrame(animate3D);
+                const time = Date.now() * 0.001;
 
-            tileMeshes.forEach((t, i) => {
-                t.particles.update();
+                tileMeshes.forEach((t, i) => {
+                    t.particles.update();
 
-                if (t.buildingGroup.visible) {
-                    t.buildingGroup.traverse((obj) => {
-                        if (obj.userData && obj.userData.anim) {
-                            const data = obj.userData;
-                            switch (data.anim) {
-                                case 'sway':
-                                    obj.rotation.z = Math.sin(time * data.speed + data.offset) * 0.1;
-                                    break;
-                                case 'rotateY':
-                                    obj.rotation.y += data.speed;
-                                    break;
-                                case 'rotateZ':
-                                    obj.rotation.z -= data.speed;
-                                    break;
-                                case 'spinX':
-                                    obj.rotation.x += data.speed;
-                                    break;
-                                case 'blink':
-                                    obj.visible = Math.sin(time * 10 * data.speed) > 0;
-                                    break;
-                                case 'bounceY':
-                                    obj.position.y = 0.35 + Math.abs(Math.sin(time * 5)) * data.range;
-                                    break;
-                                case 'shuttleX':
-                                    obj.position.x = Math.sin(time * data.speed * 20) * data.range;
-                                    break;
-                                case 'sawMove':
-                                    obj.position.z = Math.sin(time * 5) * 0.15;
-                                    break;
-                                case 'hammer':
-                                    const cycle = (time * 3) % Math.PI;
-                                    obj.rotation.z = Math.PI / 4 + Math.sin(cycle) * Math.PI / 4;
-                                    break;
-                                case 'smoke':
-                                    if (Math.random() < 0.05) {
-                                    }
-                                    break;
-                                case 'hammerWork':
-                                    obj.rotation.z = -Math.PI / 4 + Math.abs(Math.sin(time * 10)) * 1.5;
-                                    break;
+                    if (t.buildingGroup.visible) {
+                        t.buildingGroup.traverse((obj) => {
+                            if (obj.userData && obj.userData.anim) {
+                                const data = obj.userData;
+                                switch (data.anim) {
+                                    case 'sway':
+                                        obj.rotation.z = Math.sin(time * data.speed + data.offset) * 0.1;
+                                        break;
+                                    case 'rotateY':
+                                        obj.rotation.y += data.speed;
+                                        break;
+                                    case 'rotateZ':
+                                        obj.rotation.z -= data.speed;
+                                        break;
+                                    case 'spinX':
+                                        obj.rotation.x += data.speed;
+                                        break;
+                                    case 'blink':
+                                        obj.visible = Math.sin(time * 10 * data.speed) > 0;
+                                        break;
+                                    case 'bounceY':
+                                        obj.position.y = 0.35 + Math.abs(Math.sin(time * 5)) * data.range;
+                                        break;
+                                    case 'shuttleX':
+                                        obj.position.x = Math.sin(time * data.speed * 20) * data.range;
+                                        break;
+                                    case 'sawMove':
+                                        obj.position.z = Math.sin(time * 5) * 0.15;
+                                        break;
+                                    case 'hammer':
+                                        const cycle = (time * 3) % Math.PI;
+                                        obj.rotation.z = Math.PI / 4 + Math.sin(cycle) * Math.PI / 4;
+                                        break;
+                                    case 'smoke':
+                                        if (Math.random() < 0.05) {
+                                        }
+                                        break;
+                                    case 'hammerWork':
+                                        obj.rotation.z = -Math.PI / 4 + Math.abs(Math.sin(time * 10)) * 1.5;
+                                        break;
+                                }
                             }
-                        }
-                    });
-                }
-            });
+                        });
+                    }
+                });
 
-            pedestrians.forEach(p => p.update());
-            if (renderer && scene && camera) {
-                renderer.render(scene, camera);
+                pedestrians.forEach(p => p.update());
+                if (renderer && scene && camera) {
+                    renderer.render(scene, camera);
+                }
+                updateOverlayPositions();
             }
-            updateOverlayPositions();
-        }
 
-        function updateOverlayPositions() {
-            if (!camera) return;
-            const width = window.innerWidth;
-            const height = window.innerHeight;
-            const widthHalf = width / 2;
-            const heightHalf = height / 2;
+            function updateOverlayPositions() {
+                if (!camera) return;
+                const width = window.innerWidth;
+                const height = window.innerHeight;
+                const widthHalf = width / 2;
+                const heightHalf = height / 2;
 
-            tileMeshes.forEach((t, i) => {
-                const pos = t.mesh.position.clone();
+                tileMeshes.forEach((t, i) => {
+                    const pos = t.mesh.position.clone();
 
-                // アイコン高さ調整（土台削除に伴い少し下げる）
-                if (gameState.tiles[i] && !gameState.tiles[i].unlocked) {
-                    pos.y += 0.5;
-                } else {
-                    pos.y += 1.0;
-                }
-
-                pos.project(camera);
-
-                const x = (pos.x * widthHalf) + widthHalf;
-                const y = -(pos.y * heightHalf) + heightHalf;
-
-                // 移動モード中のハイライト
-                if (moveMode.active) {
-                    if (moveMode.sourceIndex === i) {
-                        t.overlayEl.innerHTML = `<div style="background:rgba(231, 76, 60, 0.9); color:white; padding:5px 10px; border-radius:15px; font-weight:bold; font-size:0.8em; box-shadow:0 0 10px rgba(231, 76, 60, 0.5);">移動元</div>`;
-                        t.overlayEl.style.display = 'flex';
-                    } else if (!t.overlayEl.innerHTML && t.mesh.visible && gameState.tiles[i].unlocked) {
-                        // 何もない場所（移動先候補）にガイドを表示させたい場合
-                        // ここではシンプルにするため、ソース選択後は何もしない（クリックで反応させる）
-                    }
-                }
-
-                if (x < -100 || x > width + 100 || y < -100 || y > height + 100) {
-                    t.overlayEl.style.display = 'none';
-                } else {
-                    t.overlayEl.style.display = 'flex';
-                    t.overlayEl.style.left = `${x}px`;
-                    t.overlayEl.style.top = `${y}px`;
-                }
-            });
-        }
-
-        function sync3DState() {
-            const reqRank = getRequiredRankForExpansion();
-
-            gameState.tiles.forEach((tile, i) => {
-                const tObj = tileMeshes[i];
-                const mesh = tObj.mesh; // 透明ヒットボックス
-                const overlay = tObj.overlayEl;
-                const ground = tObj.groundMesh;
-
-                if (!tile.unlocked) {
-                    // 未開拓地
-                    ground.material = MATERIALS.grassLocked;
-                    tObj.buildingGroup.visible = true;
-                    tObj.particles.active = false;
-
-                    const stateKey = `wild`;
-                    if (tObj.currentType !== stateKey) {
-                        while (tObj.buildingGroup.children.length > 0) {
-                            tObj.buildingGroup.remove(tObj.buildingGroup.children[0]);
-                        }
-                        const newModel = createBuildingMesh('wild', 0);
-                        tObj.buildingGroup.add(newModel);
-                        tObj.currentType = stateKey;
-                    }
-
-                    const canUnlock = gameState.rank >= reqRank;
-                    if (canUnlock) {
-                        overlay.innerHTML = `<div class="lock-icon">🔒</div>`;
+                    // アイコン高さ調整（土台削除に伴い少し下げる）
+                    if (gameState.tiles[i] && !gameState.tiles[i].unlocked) {
+                        pos.y += 0.5;
                     } else {
-                        overlay.innerHTML = "";
+                        pos.y += 1.0;
                     }
-                } else {
-                    // 開拓地（石畳）
-                    ground.material = MATERIALS.cobblestone;
 
-                    if (tile.type) {
+                    pos.project(camera);
+
+                    const x = (pos.x * widthHalf) + widthHalf;
+                    const y = -(pos.y * heightHalf) + heightHalf;
+
+                    // 移動モード中のハイライト
+                    if (moveMode.active) {
+                        if (moveMode.sourceIndex === i) {
+                            t.overlayEl.innerHTML = `<div style="background:rgba(231, 76, 60, 0.9); color:white; padding:5px 10px; border-radius:15px; font-weight:bold; font-size:0.8em; box-shadow:0 0 10px rgba(231, 76, 60, 0.5);">移動元</div>`;
+                            t.overlayEl.style.display = 'flex';
+                        } else if (!t.overlayEl.innerHTML && t.mesh.visible && gameState.tiles[i].unlocked) {
+                            // 何もない場所（移動先候補）にガイドを表示させたい場合
+                            // ここではシンプルにするため、ソース選択後は何もしない（クリックで反応させる）
+                        }
+                    }
+
+                    if (x < -100 || x > width + 100 || y < -100 || y > height + 100) {
+                        t.overlayEl.style.display = 'none';
+                    } else {
+                        t.overlayEl.style.display = 'flex';
+                        t.overlayEl.style.left = `${x}px`;
+                        t.overlayEl.style.top = `${y}px`;
+                    }
+                });
+            }
+
+            function sync3DState() {
+                const reqRank = getRequiredRankForExpansion();
+
+                gameState.tiles.forEach((tile, i) => {
+                    const tObj = tileMeshes[i];
+                    const mesh = tObj.mesh; // 透明ヒットボックス
+                    const overlay = tObj.overlayEl;
+                    const ground = tObj.groundMesh;
+
+                    if (!tile.unlocked) {
+                        // 未開拓地
+                        ground.material = MATERIALS.grassLocked;
                         tObj.buildingGroup.visible = true;
-                        const isBuilding = !!tile.finishTime;
-                        const stateKey = `${tile.type}_${tile.level}_${isBuilding ? 'b' : ''}`;
+                        tObj.particles.active = false;
+
+                        const stateKey = `wild`;
                         if (tObj.currentType !== stateKey) {
                             while (tObj.buildingGroup.children.length > 0) {
                                 tObj.buildingGroup.remove(tObj.buildingGroup.children[0]);
                             }
-
-                            // Lv0(新規)なら建物なし、Lv1以上ならそのレベルの建物を表示
-                            if (tile.level > 0) {
-                                const newModel = createBuildingMesh(tile.type, tile.level);
-                                tObj.buildingGroup.add(newModel);
-                            }
-
-                            // 工事中ならシートと作業員を追加
-                            if (isBuilding) {
-                                const construction = createConstructionSite(tile.type);
-                                tObj.buildingGroup.add(construction);
-                            }
-
+                            const newModel = createBuildingMesh('wild', 0);
+                            tObj.buildingGroup.add(newModel);
                             tObj.currentType = stateKey;
                         }
 
-                        // 回転の適用 (0, 1, 2, 3 -> 0, -90, -180, -270)
-                        if (tile.rotation) {
-                            tObj.buildingGroup.rotation.y = -Math.PI / 2 * tile.rotation;
+                        const canUnlock = gameState.rank >= reqRank;
+                        if (canUnlock) {
+                            overlay.innerHTML = `<div class="lock-icon">🔒</div>`;
                         } else {
-                            tObj.buildingGroup.rotation.y = 0;
+                            overlay.innerHTML = "";
                         }
+                    } else {
+                        // 開拓地（石畳）
+                        ground.material = MATERIALS.cobblestone;
 
-                        if (tile.finishTime) {
-                            tObj.particles.active = true;
-                            const remaining = Math.max(0, (tile.finishTime - Date.now()));
-                            const total = getBuildTime(tile.type, tile.level);
-                            const percent = Math.min(100, Math.max(0, 100 - (remaining / total * 100)));
+                        if (tile.type) {
+                            tObj.buildingGroup.visible = true;
+                            const isBuilding = !!tile.finishTime;
+                            const stateKey = `${tile.type}_${tile.level}_${isBuilding ? 'b' : ''}`;
+                            if (tObj.currentType !== stateKey) {
+                                while (tObj.buildingGroup.children.length > 0) {
+                                    tObj.buildingGroup.remove(tObj.buildingGroup.children[0]);
+                                }
 
-                            overlay.innerHTML = `
+                                // Lv0(新規)なら建物なし、Lv1以上ならそのレベルの建物を表示
+                                if (tile.level > 0) {
+                                    const newModel = createBuildingMesh(tile.type, tile.level);
+                                    tObj.buildingGroup.add(newModel);
+                                }
+
+                                // 工事中ならシートと作業員を追加
+                                if (isBuilding) {
+                                    const construction = createConstructionSite(tile.type);
+                                    tObj.buildingGroup.add(construction);
+                                }
+
+                                tObj.currentType = stateKey;
+                            }
+
+                            // 回転の適用 (0, 1, 2, 3 -> 0, -90, -180, -270)
+                            if (tile.rotation) {
+                                tObj.buildingGroup.rotation.y = -Math.PI / 2 * tile.rotation;
+                            } else {
+                                tObj.buildingGroup.rotation.y = 0;
+                            }
+
+                            if (tile.finishTime) {
+                                tObj.particles.active = true;
+                                const remaining = Math.max(0, (tile.finishTime - Date.now()));
+                                const total = getBuildTime(tile.type, tile.level);
+                                const percent = Math.min(100, Math.max(0, 100 - (remaining / total * 100)));
+
+                                overlay.innerHTML = `
                             <div class="tile-timer">${formatTimeShort(remaining / 1000)}</div>
                             <div class="progress-bar-container"><div class="progress-fill" style="width:${percent}%"></div></div>
                         `;
+                            } else {
+                                tObj.particles.active = false;
+
+                                let content = "";
+                                let hasResource = false;
+                                let maxRes = ""; let maxVal = 0;
+                                const canCollect = (Date.now() - (tile.lastCollectTime || 0)) >= CONFIG.collectCooldown;
+
+                                if (tile.stored && canCollect) {
+                                    for (let r in tile.stored) {
+                                        if (tile.stored[r] >= 1) {
+                                            hasResource = true;
+                                            if (tile.stored[r] > maxVal) { maxVal = tile.stored[r]; maxRes = r; }
+                                        }
+                                    }
+                                }
+                                if (hasResource) {
+                                    const icon = (maxRes == 'money' ? '💰' : maxRes == 'food' ? '🌾' : maxRes == 'wood' ? '🌲' : maxRes == 'stone' ? '🪨' : maxRes == 'iron' ? '🔩' : '💧');
+                                    content = `<div class="harvest-bubble" onclick="collectResourceUI(${i}, event)">${icon}</div>`;
+                                }
+                                overlay.innerHTML = content;
+                            }
                         } else {
+                            tObj.buildingGroup.visible = false;
                             tObj.particles.active = false;
+                            tObj.currentType = null;
+                            overlay.innerHTML = "";
+                        }
+                    }
 
-                            let content = "";
-                            let hasResource = false;
-                            let maxRes = ""; let maxVal = 0;
-                            const canCollect = (Date.now() - (tile.lastCollectTime || 0)) >= CONFIG.collectCooldown;
+                    // 選択時のハイライト (地面を光らせる)
+                    let isHighlight = (selectedTileIndex === i) || (moveMode.active && moveMode.sourceIndex === i);
 
-                            if (tile.stored && canCollect) {
-                                for (let r in tile.stored) {
-                                    if (tile.stored[r] >= 1) {
-                                        hasResource = true;
-                                        if (tile.stored[r] > maxVal) { maxVal = tile.stored[r]; maxRes = r; }
+                    if (isHighlight) {
+                        // マテリアルが共有されているので一時的にクローンして光らせる
+                        // 注意: パフォーマンス最適化のためには別途SelectionBoxを使うのが良いが、簡易実装として
+                        if (ground.material.uuid === MATERIALS.cobblestone.uuid || ground.material.uuid === MATERIALS.grassLocked.uuid) {
+                            ground.material = ground.material.clone();
+                        }
+                        if (moveMode.active && moveMode.sourceIndex === i) {
+                            ground.material.emissive.setHex(0xe74c3c); // 赤く光らせる（移動元）
+                        } else {
+                            ground.material.emissive.setHex(0x3498db); // 青く光らせる（通常選択）
+                        }
+                        ground.material.emissiveIntensity = 0.4;
+                    } else {
+                        // 光っていない状態に戻す（共有マテリアルを再割り当て）
+                        if (tile.unlocked && ground.material.uuid !== MATERIALS.cobblestone.uuid) {
+                            ground.material = MATERIALS.cobblestone;
+                        } else if (!tile.unlocked && ground.material.uuid !== MATERIALS.grassLocked.uuid) {
+                            ground.material = MATERIALS.grassLocked;
+                        }
+                    }
+                });
+            }
+
+            function gameLogicLoop() {
+                const now = Date.now();
+                let dirty = false;
+
+                // グローバルバフの計算 (時計塔 & 銀行)
+                let globalSpeedMultiplier = 1.0;
+                // 銀行バフ（生産力 & 貯蔵庫）
+                let bankMultiplier = 0; // 加算式 (Base 1.27 + level*0.03) -> 1.0 + (0.27 + ...)
+                // しかし仕様は "生産力/貯蔵上限 倍率: Lv1: 1.3倍, LvUP: +0.03倍" (計算式: 1.27 + level * 0.03)
+                // 重複は加算 (例: Lv1 x2 -> 1.0 + 0.3 + 0.3 = 1.6倍)
+
+                // まず合計の倍率を計算
+                // default is 1.0. Checks banks.
+                let totalBankAdd = 0;
+
+                const banks = gameState.tiles.filter(t => t.type === 'bank' && !t.finishTime && t.level > 0);
+                banks.forEach(t => {
+                    const bonus = 0.27 + (t.level * 0.03); // Lv1: 0.3
+                    totalBankAdd += bonus;
+                });
+                const bankFinalMultiplier = 1.0 + totalBankAdd;
+
+                const clockTowers = gameState.tiles.filter(t => t.type === 'clocktower' && !t.finishTime && t.level > 0);
+                clockTowers.forEach(t => {
+                    // Lv1: 2%, LvUP: +0.1%
+                    const bonus = 0.02 + (t.level - 1) * 0.001;
+                    globalSpeedMultiplier += bonus;
+                });
+
+                gameState.tiles.forEach((tile, i) => {
+                    if (tile.unlocked) {
+                        if (tile.finishTime && now >= tile.finishTime) {
+                            tile.level++;
+                            tile.finishTime = null;
+                            const xp = Math.floor(getBuildTime(tile.type, tile.level - 1) / 1000);
+                            addXP(xp);
+                            dirty = true;
+                            if (selectedTileIndex !== null) updatePanelUI();
+                        }
+
+                        if (tile.type && tile.level > 0 && !tile.finishTime) {
+                            const b = BUILDINGS[tile.type];
+                            if (!b) return; // Safety for slave tiles
+
+                            // 生産力の計算
+                            // ベース計算
+                            let multiplier = globalSpeedMultiplier;
+
+                            // 1. 井戸のバフ (畑の周囲に井戸があるか)
+                            if (tile.type === 'farm') {
+                                const adj = getAdjacentTiles(i);
+                                const maxWellLevel = adj.reduce((max, t) => {
+                                    if (t && t.type === 'well' && t.level > 0 && !t.finishTime) {
+                                        return Math.max(max, t.level);
+                                    }
+                                    return max;
+                                }, 0);
+
+                                if (maxWellLevel > 0) {
+                                    // Lv1: 1.3倍, +0.02/Lv
+                                    const bonus = 0.3 + (maxWellLevel - 1) * 0.02;
+                                    multiplier *= (1 + bonus);
+                                }
+                            }
+
+
+
+                            // 2. 宿屋の稼働条件 (市場と民家が隣接)
+                            if (tile.type === 'inn') {
+                                const adj = getAdjacentTiles(i);
+                                const hasMarket = adj.some(t => t && t.type === 'market');
+                                const hasHouse = adj.some(t => t && t.type === 'house');
+                                if (!hasMarket || !hasHouse) {
+                                    multiplier = 0; // 条件を満たさないと稼働しない
+                                }
+                            }
+
+                            // 3. 森のシナジー (伐採所隣接)
+                            if (tile.type === 'forest') {
+                                const adj = getAdjacentTiles(i);
+                                // Add slave neighbors
+                                const slaveOffset = (tile.rotation % 2 === 0) ? gameState.gridSize : 1;
+                                const slaveIdx = i + slaveOffset;
+                                if (gameState.tiles[slaveIdx] && gameState.tiles[slaveIdx].masterIndex === i) {
+                                    const slaveAdj = getAdjacentTiles(slaveIdx);
+                                    slaveAdj.forEach(t => adj.push(t));
+                                }
+
+                                // Unique neighbors (filter duplicates and self/slave)
+                                const unique = [...new Set(adj)];
+                                const lumberCount = unique.filter(t => t && t.type === 'lumber' && t.level > 0 && !t.finishTime).length;
+
+                                if (lumberCount > 0) {
+                                    multiplier *= (1 + 0.2 * lumberCount);
+                                }
+                            }
+
+                            const caps = getStorageCapacity(tile.type, tile.level);
+                            for (let r in b.prod) {
+                                if (b.prod[r] > 0) {
+                                    // multiplierを適用
+                                    let finalMult = multiplier;
+
+                                    // 銀行の効果: お金生産のみブースト
+                                    if (r === 'money' && ['house', 'market', 'blacksmith', 'inn'].includes(tile.type)) {
+                                        finalMult *= bankFinalMultiplier;
+                                    }
+
+                                    const rawAmount = b.prod[r] * tile.level * Math.pow(1.05, tile.level - 1);
+                                    const amount = rawAmount * finalMult; // per second
+
+                                    // 保存用に amount を秒換算ではなく、フレーム(loop)換算するならここで割る必要はないが
+                                    // 元のロジック: if(now % 1000 < 100) で呼ばれるわけではない。setInterval 1000ms で呼ばれる。
+                                    // なので amount は 1秒あたりの生産量そのままでOK。
+
+                                    if (!tile.stored[r]) tile.stored[r] = 0;
+                                    if (tile.stored[r] < caps[r]) {
+                                        tile.stored[r] = Math.min(caps[r], tile.stored[r] + amount);
+                                        if (Math.floor(tile.stored[r]) >= 1) dirty = true;
                                     }
                                 }
                             }
-                            if (hasResource) {
-                                const icon = (maxRes == 'money' ? '💰' : maxRes == 'food' ? '🌾' : maxRes == 'wood' ? '🌲' : maxRes == 'stone' ? '🪨' : maxRes == 'iron' ? '🔩' : '💧');
-                                content = `<div class="harvest-bubble" onclick="collectResourceUI(${i}, event)">${icon}</div>`;
-                            }
-                            overlay.innerHTML = content;
                         }
-                    } else {
-                        tObj.buildingGroup.visible = false;
-                        tObj.particles.active = false;
-                        tObj.currentType = null;
-                        overlay.innerHTML = "";
                     }
+                });
+
+                if (dirty || (now % 1000 < 100)) {
+                    sync3DState();
                 }
-
-                // 選択時のハイライト (地面を光らせる)
-                let isHighlight = (selectedTileIndex === i) || (moveMode.active && moveMode.sourceIndex === i);
-
-                if (isHighlight) {
-                    // マテリアルが共有されているので一時的にクローンして光らせる
-                    // 注意: パフォーマンス最適化のためには別途SelectionBoxを使うのが良いが、簡易実装として
-                    if (ground.material.uuid === MATERIALS.cobblestone.uuid || ground.material.uuid === MATERIALS.grassLocked.uuid) {
-                        ground.material = ground.material.clone();
-                    }
-                    if (moveMode.active && moveMode.sourceIndex === i) {
-                        ground.material.emissive.setHex(0xe74c3c); // 赤く光らせる（移動元）
-                    } else {
-                        ground.material.emissive.setHex(0x3498db); // 青く光らせる（通常選択）
-                    }
-                    ground.material.emissiveIntensity = 0.4;
-                } else {
-                    // 光っていない状態に戻す（共有マテリアルを再割り当て）
-                    if (tile.unlocked && ground.material.uuid !== MATERIALS.cobblestone.uuid) {
-                        ground.material = MATERIALS.cobblestone;
-                    } else if (!tile.unlocked && ground.material.uuid !== MATERIALS.grassLocked.uuid) {
-                        ground.material = MATERIALS.grassLocked;
-                    }
-                }
-            });
-        }
-
-        function gameLogicLoop() {
-            const now = Date.now();
-            let dirty = false;
-
-            // グローバルバフの計算 (時計塔)
-            let globalSpeedMultiplier = 1.0;
-            const clockTowers = gameState.tiles.filter(t => t.type === 'clocktower' && !t.finishTime && t.level > 0);
-            clockTowers.forEach(t => {
-                // Lv1: 2%, LvUP: +0.1%
-                const bonus = 0.02 + (t.level - 1) * 0.001;
-                globalSpeedMultiplier += bonus;
-            });
-
-            gameState.tiles.forEach((tile, i) => {
-                if (tile.unlocked) {
-                    if (tile.finishTime && now >= tile.finishTime) {
-                        tile.level++;
-                        tile.finishTime = null;
-                        const xp = Math.floor(getBuildTime(tile.type, tile.level - 1) / 1000);
-                        addXP(xp);
-                        dirty = true;
-                        if (selectedTileIndex !== null) updatePanelUI();
-                    }
-
-                    if (tile.type && tile.level > 0 && !tile.finishTime) {
-                        const b = BUILDINGS[tile.type];
-                        if (!b) return; // Safety for slave tiles
-
-                        // 生産力の計算
-                        // ベース計算
-                        let multiplier = globalSpeedMultiplier;
-
-                        // 1. 井戸のバフ (畑の周囲に井戸があるか)
-                        if (tile.type === 'farm') {
-                            const adj = getAdjacentTiles(i);
-                            const maxWellLevel = adj.reduce((max, t) => {
-                                if (t && t.type === 'well' && t.level > 0 && !t.finishTime) {
-                                    return Math.max(max, t.level);
-                                }
-                                return max;
-                            }, 0);
-
-                            if (maxWellLevel > 0) {
-                                // Lv1: 1.3倍, +0.02/Lv
-                                const bonus = 0.3 + (maxWellLevel - 1) * 0.02;
-                                multiplier *= (1 + bonus);
-                            }
-                        }
-
-                        // 2. 宿屋の稼働条件 (市場と民家が隣接)
-                        if (tile.type === 'inn') {
-                            const adj = getAdjacentTiles(i);
-                            const hasMarket = adj.some(t => t && t.type === 'market');
-                            const hasHouse = adj.some(t => t && t.type === 'house');
-                            if (!hasMarket || !hasHouse) {
-                                multiplier = 0; // 条件を満たさないと稼働しない
-                            }
-                        }
-
-                        // 3. 森のシナジー (伐採所隣接)
-                        if (tile.type === 'forest') {
-                            const adj = getAdjacentTiles(i);
-                            // Add slave neighbors
-                            const slaveOffset = (tile.rotation % 2 === 0) ? gameState.gridSize : 1;
-                            const slaveIdx = i + slaveOffset;
-                            if (gameState.tiles[slaveIdx] && gameState.tiles[slaveIdx].masterIndex === i) {
-                                const slaveAdj = getAdjacentTiles(slaveIdx);
-                                slaveAdj.forEach(t => adj.push(t));
-                            }
-
-                            // Unique neighbors (filter duplicates and self/slave)
-                            const unique = [...new Set(adj)];
-                            const lumberCount = unique.filter(t => t && t.type === 'lumber' && t.level > 0 && !t.finishTime).length;
-
-                            if (lumberCount > 0) {
-                                multiplier *= (1 + 0.2 * lumberCount);
-                            }
-                        }
-
-                        const caps = getStorageCapacity(tile.type, tile.level);
-                        for (let r in b.prod) {
-                            if (b.prod[r] > 0) {
-                                // multiplierを適用
-                                const rawAmount = b.prod[r] * tile.level * Math.pow(1.05, tile.level - 1);
-                                const amount = rawAmount * multiplier; // per second
-
-                                // 保存用に amount を秒換算ではなく、フレーム(loop)換算するならここで割る必要はないが
-                                // 元のロジック: if(now % 1000 < 100) で呼ばれるわけではない。setInterval 1000ms で呼ばれる。
-                                // なので amount は 1秒あたりの生産量そのままでOK。
-
-                                if (!tile.stored[r]) tile.stored[r] = 0;
-                                if (tile.stored[r] < caps[r]) {
-                                    tile.stored[r] = Math.min(caps[r], tile.stored[r] + amount);
-                                    if (Math.floor(tile.stored[r]) >= 1) dirty = true;
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-
-            if (dirty || (now % 1000 < 100)) {
-                sync3DState();
+                updateHeader();
             }
-            updateHeader();
-        }
 
-        function onPointerDown(event) {
-            pointerDownPos.set(event.clientX, event.clientY);
-            lastPointerPos.set(event.clientX, event.clientY);
-            isDragging = false;
-
-            if (event.button === 0 || event.pointerType === 'touch') {
-                isPanning = true;
-            }
-        }
-
-        function onPointerMove(event) {
-            if (!isDragging && (Math.abs(event.clientX - pointerDownPos.x) > 5 || Math.abs(event.clientY - pointerDownPos.y) > 5)) {
-                isDragging = true;
-            }
-            if (isPanning) {
-                const deltaX = event.clientX - lastPointerPos.x;
-                const deltaY = event.clientY - lastPointerPos.y;
+            function onPointerDown(event) {
+                pointerDownPos.set(event.clientX, event.clientY);
                 lastPointerPos.set(event.clientX, event.clientY);
+                isDragging = false;
 
-                if (touchStartDist > 0) return;
-
-                moveCamera(deltaX, deltaY);
+                if (event.button === 0 || event.pointerType === 'touch') {
+                    isPanning = true;
+                }
             }
-        }
 
-        function onPointerUp(event) {
-            isPanning = false;
+            function onPointerMove(event) {
+                if (!isDragging && (Math.abs(event.clientX - pointerDownPos.x) > 5 || Math.abs(event.clientY - pointerDownPos.y) > 5)) {
+                    isDragging = true;
+                }
+                if (isPanning) {
+                    const deltaX = event.clientX - lastPointerPos.x;
+                    const deltaY = event.clientY - lastPointerPos.y;
+                    lastPointerPos.set(event.clientX, event.clientY);
 
-            if (isDragging) return;
+                    if (touchStartDist > 0) return;
 
-            event.preventDefault();
+                    moveCamera(deltaX, deltaY);
+                }
+            }
 
-            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            function onPointerUp(event) {
+                isPanning = false;
 
-            raycaster.setFromCamera(mouse, camera);
+                if (isDragging) return;
 
-            const targetObjects = tileMeshes.map(t => t.mesh);
-            const intersects = raycaster.intersectObjects(targetObjects, true);
+                event.preventDefault();
 
-            if (intersects.length > 0) {
-                let target = intersects[0].object;
-                while (target && target.userData.index === undefined && target.parent) {
-                    target = target.parent;
+                mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+                raycaster.setFromCamera(mouse, camera);
+
+                const targetObjects = tileMeshes.map(t => t.mesh);
+                const intersects = raycaster.intersectObjects(targetObjects, true);
+
+                if (intersects.length > 0) {
+                    let target = intersects[0].object;
+                    while (target && target.userData.index === undefined && target.parent) {
+                        target = target.parent;
+                    }
+
+                    if (target && target.userData.index !== undefined) {
+                        const idx = target.userData.index;
+
+                        // 移動モードの処理
+                        if (moveMode.active) {
+                            handleMoveInput(idx);
+                            return;
+                        }
+
+                        const collected = collectResource(idx);
+                        if (!collected) {
+                            selectTile(idx);
+                        }
+                    }
+                } else {
+                    // 背景クリックなどでパネルを閉じる（移動モード以外）
+                    if (!moveMode.active) {
+                        closePanel();
+                    }
+                }
+            }
+
+            // --- Move Mode Logic ---
+            window.startMoveMode = function () {
+                closeModal('modal-menu');
+                closePanel();
+                moveMode.active = true;
+                moveMode.sourceIndex = null;
+
+                document.getElementById('action-mode-bar').style.display = 'flex';
+                document.getElementById('action-mode-text').innerText = "移動する施設を選択してください";
+
+                sync3DState(); // ハイライト解除など
+            };
+
+            window.actRotate = function () {
+                if (moveMode.sourceIndex === null) return;
+                const tile = gameState.tiles[moveMode.sourceIndex];
+                if (!tile.rotation) tile.rotation = 0;
+                tile.rotation = (tile.rotation + 1) % 4;
+                sync3DState();
+            };
+
+            window.cancelMoveMode = function () {
+                moveMode.active = false;
+                moveMode.sourceIndex = null;
+                document.getElementById('action-mode-bar').style.display = 'none';
+                document.getElementById('action-rotate-btn').style.display = 'none'; // Hide rotate button
+                sync3DState();
+            };
+
+            function handleMoveInput(index) {
+                const tile = gameState.tiles[index];
+
+                // 未開拓地は対象外
+                if (!tile.unlocked) {
+                    showToast("未開拓地は操作できません");
+                    return;
                 }
 
-                if (target && target.userData.index !== undefined) {
-                    const idx = target.userData.index;
+                // Redirect slave to master
+                if (tile.type && tile.type.endsWith('_part') && tile.masterIndex !== undefined) {
+                    handleMoveInput(tile.masterIndex);
+                    return;
+                }
 
-                    // 移動モードの処理
-                    if (moveMode.active) {
-                        handleMoveInput(idx);
+                if (moveMode.sourceIndex === null) {
+                    // ソース選択（施設がある場所のみ）
+                    if (!tile.type && !tile.finishTime) {
+                        showToast("移動させる施設がありません");
                         return;
                     }
 
-                    const collected = collectResource(idx);
-                    if (!collected) {
-                        selectTile(idx);
+                    // Prevent moving multi-tile
+                    const size = getBuildingSize(tile.type);
+                    // Note: getBuildingSize returns {w,h}. If simple building, returns {w:1,h:1}.
+                    // Forest returns {w:1,h:2} (static). But wait, existing building might be rotated?
+                    // getBuildingSize helper reads from BUILDINGS config, which is static.
+                    // It returns the base dimensions.
+                    // If w>1 or h>1, it's multi-tile.
+                    if (size.w > 1 || size.h > 1) {
+                        showToast("大型施設は移動できません(売却→建直のみ)");
+                        return;
                     }
-                }
-            } else {
-                // 背景クリックなどでパネルを閉じる（移動モード以外）
-                if (!moveMode.active) {
-                    closePanel();
-                }
-            }
-        }
 
-        // --- Move Mode Logic ---
-        window.startMoveMode = function () {
-            closeModal('modal-menu');
-            closePanel();
-            moveMode.active = true;
-            moveMode.sourceIndex = null;
-
-            document.getElementById('action-mode-bar').style.display = 'flex';
-            document.getElementById('action-mode-text').innerText = "移動する施設を選択してください";
-
-            sync3DState(); // ハイライト解除など
-        };
-
-        window.actRotate = function () {
-            if (moveMode.sourceIndex === null) return;
-            const tile = gameState.tiles[moveMode.sourceIndex];
-            if (!tile.rotation) tile.rotation = 0;
-            tile.rotation = (tile.rotation + 1) % 4;
-            sync3DState();
-        };
-
-        window.cancelMoveMode = function () {
-            moveMode.active = false;
-            moveMode.sourceIndex = null;
-            document.getElementById('action-mode-bar').style.display = 'none';
-            document.getElementById('action-rotate-btn').style.display = 'none'; // Hide rotate button
-            sync3DState();
-        };
-
-        function handleMoveInput(index) {
-            const tile = gameState.tiles[index];
-
-            // 未開拓地は対象外
-            if (!tile.unlocked) {
-                showToast("未開拓地は操作できません");
-                return;
-            }
-
-            // Redirect slave to master
-            if (tile.type && tile.type.endsWith('_part') && tile.masterIndex !== undefined) {
-                handleMoveInput(tile.masterIndex);
-                return;
-            }
-
-            if (moveMode.sourceIndex === null) {
-                // ソース選択（施設がある場所のみ）
-                if (!tile.type && !tile.finishTime) {
-                    showToast("移動させる施設がありません");
-                    return;
-                }
-
-                // Prevent moving multi-tile
-                const size = getBuildingSize(tile.type);
-                // Note: getBuildingSize returns {w,h}. If simple building, returns {w:1,h:1}.
-                // Forest returns {w:1,h:2} (static). But wait, existing building might be rotated?
-                // getBuildingSize helper reads from BUILDINGS config, which is static.
-                // It returns the base dimensions.
-                // If w>1 or h>1, it's multi-tile.
-                if (size.w > 1 || size.h > 1) {
-                    showToast("大型施設は移動できません(売却→建直のみ)");
-                    return;
-                }
-
-                moveMode.sourceIndex = index;
-                document.getElementById('action-mode-text').innerText = "移動先を選択してください";
-                document.getElementById('action-rotate-btn').style.display = 'block'; // Show rotate button
-                sync3DState(); // ハイライト更新
-            } else {
-                // ターゲット選択
-                if (moveMode.sourceIndex === index) {
-                    // 同じ場所を選択 -> キャンセル（選択解除）
-                    moveMode.sourceIndex = null;
-                    document.getElementById('action-mode-text').innerText = "移動する施設を選択してください";
-                    document.getElementById('action-rotate-btn').style.display = 'none'; // Hide rotate button
-                    sync3DState();
-                    return;
-                }
-
-                // ターゲット選択
-                if (moveMode.sourceIndex === index) {
-                    // 同じ場所を選択 -> キャンセル（選択解除）
-                    moveMode.sourceIndex = null;
-                    document.getElementById('action-mode-text').innerText = "移動する施設を選択してください";
-                    document.getElementById('action-rotate-btn').style.display = 'none'; // Hide rotate button
-                    sync3DState();
-                    return;
-                }
-
-                // 移動実行 (Swap)
-                swapTiles(moveMode.sourceIndex, index);
-
-                // モード終了
-                cancelMoveMode();
-                showToast("施設を移動しました！");
-            }
-        }
-
-        function swapTiles(idx1, idx2) {
-            const t1 = gameState.tiles[idx1];
-            const t2 = gameState.tiles[idx2];
-
-            // 土地(unlocked)以外の建物データを交換
-            const temp = {
-                type: t1.type,
-                level: t1.level,
-                finishTime: t1.finishTime,
-                stored: t1.stored,
-                lastCollectTime: t1.lastCollectTime,
-                rotation: t1.rotation || 0
-            };
-
-            // t1 <- t2
-            t1.type = t2.type;
-            t1.level = t2.level;
-            t1.finishTime = t2.finishTime;
-            t1.stored = t2.stored;
-            t1.lastCollectTime = t2.lastCollectTime;
-            t1.rotation = t2.rotation || 0;
-
-            // t2 <- temp
-            t2.type = temp.type;
-            t2.level = temp.level;
-            t2.finishTime = temp.finishTime;
-            t2.stored = temp.stored;
-            t2.lastCollectTime = temp.lastCollectTime;
-            t2.rotation = temp.rotation;
-
-            saveGame();
-            sync3DState();
-        }
-
-        // コスト表示用ヘルパー（不足分を赤字にする）
-        function formatCostWithColor(cost) {
-            let html = [];
-            for (let r in cost) {
-                if (cost[r] > 0) {
-                    const val = cost[r];
-                    const has = gameState.resources[r] || 0;
-                    const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧');
-
-                    if (has < val) {
-                        html.push(`<span style="color:red; font-weight:bold;">${icon}${val.toLocaleString()}</span>`);
-                    } else {
-                        html.push(`${icon}${val.toLocaleString()}`);
-                    }
-                }
-            }
-            return html.join(' ');
-        }
-
-        // 施設効果のHTML生成（Utility施設対応）
-        function getBuildingEffectHtml(type, level, nextLevel = null) {
-            const b = BUILDINGS[type];
-            let html = "";
-
-            // Helper to generate text for a single level
-            const getEffectText = (lvl) => {
-                if (lvl === 0) return "効果なし";
-
-                if (type === 'well') {
-                    // 水生産 + 農場バフ
-                    const buffVal = 1.3 + (lvl - 1) * 0.02;
-                    let parts = [`隣接畑x${buffVal.toFixed(2)}`];
-
-                    // 水生産
-                    if (b.prod.water) {
-                        const waterVal = b.prod.water * lvl * Math.pow(1.05, lvl - 1);
-                        parts.push(`💧${waterVal.toFixed(1)}/s`);
-                    }
-                    return parts.join(' / ');
-                } else if (type === 'clocktower') {
-                    // 2.0 + (lvl-1)*0.1
-                    const val = 2.0 + (lvl - 1) * 0.1;
-                    return `全体速度 +${val.toFixed(1)}%`;
-                } else if (type === 'inn') {
-                    // お金生産 + 条件
-                    // const val = b.prod.money * lvl * Math.pow(1.05, lvl - 1);
-                    // Innの計算式: b.prod.money=60. 
-                    const val = 60 * lvl * Math.pow(1.05, lvl - 1);
-                    return `💰${val.toFixed(1)}/s <span style="font-size:0.8em">(要:市場&民家)</span>`;
+                    moveMode.sourceIndex = index;
+                    document.getElementById('action-mode-text').innerText = "移動先を選択してください";
+                    document.getElementById('action-rotate-btn').style.display = 'block'; // Show rotate button
+                    sync3DState(); // ハイライト更新
                 } else {
-                    // 一般生産施設
-                    let parts = [];
-                    for (let r in b.prod) {
-                        if (b.prod[r] > 0) {
-                            const val = b.prod[r] * lvl * Math.pow(1.05, lvl - 1);
-                            const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧');
-                            parts.push(`${icon}${val.toFixed(1)}/s`);
+                    // ターゲット選択
+                    if (moveMode.sourceIndex === index) {
+                        // 同じ場所を選択 -> キャンセル（選択解除）
+                        moveMode.sourceIndex = null;
+                        document.getElementById('action-mode-text').innerText = "移動する施設を選択してください";
+                        document.getElementById('action-rotate-btn').style.display = 'none'; // Hide rotate button
+                        sync3DState();
+                        return;
+                    }
+
+                    // ターゲット選択
+                    if (moveMode.sourceIndex === index) {
+                        // 同じ場所を選択 -> キャンセル（選択解除）
+                        moveMode.sourceIndex = null;
+                        document.getElementById('action-mode-text').innerText = "移動する施設を選択してください";
+                        document.getElementById('action-rotate-btn').style.display = 'none'; // Hide rotate button
+                        sync3DState();
+                        return;
+                    }
+
+                    // 移動実行 (Swap)
+                    swapTiles(moveMode.sourceIndex, index);
+
+                    // モード終了
+                    cancelMoveMode();
+                    showToast("施設を移動しました！");
+                }
+            }
+
+            function swapTiles(idx1, idx2) {
+                const t1 = gameState.tiles[idx1];
+                const t2 = gameState.tiles[idx2];
+
+                // 土地(unlocked)以外の建物データを交換
+                const temp = {
+                    type: t1.type,
+                    level: t1.level,
+                    finishTime: t1.finishTime,
+                    stored: t1.stored,
+                    lastCollectTime: t1.lastCollectTime,
+                    rotation: t1.rotation || 0
+                };
+
+                // t1 <- t2
+                t1.type = t2.type;
+                t1.level = t2.level;
+                t1.finishTime = t2.finishTime;
+                t1.stored = t2.stored;
+                t1.lastCollectTime = t2.lastCollectTime;
+                t1.rotation = t2.rotation || 0;
+
+                // t2 <- temp
+                t2.type = temp.type;
+                t2.level = temp.level;
+                t2.finishTime = temp.finishTime;
+                t2.stored = temp.stored;
+                t2.lastCollectTime = temp.lastCollectTime;
+                t2.rotation = temp.rotation;
+
+                saveGame();
+                sync3DState();
+            }
+
+            // コスト表示用ヘルパー（不足分を赤字にする）
+            function formatCostWithColor(cost) {
+                let html = [];
+                for (let r in cost) {
+                    if (cost[r] > 0) {
+                        const val = cost[r];
+                        const has = gameState.resources[r] || 0;
+                        const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧');
+
+                        if (has < val) {
+                            html.push(`<span style="color:red; font-weight:bold;">${icon}${val.toLocaleString()}</span>`);
+                        } else {
+                            html.push(`${icon}${val.toLocaleString()}`);
                         }
                     }
-                    return parts.length ? parts.join(' ') : '効果なし';
                 }
-            };
-
-            const currText = getEffectText(level);
-
-            if (nextLevel !== null) {
-                const nextText = getEffectText(nextLevel);
-                // 変更部分を強調
-                // 単純に文字列全体を矢印でつなぐ (井戸や時計塔のように数値部分だけが変わる場合も含む)
-
-                // ただし、Innや通常施設のようにHTMLタグを含む場合の比較は少し冗長になるが、シンプルに
-                // "Current -> Next" とする
-                return `<div>${currText} <span style="color:#2ecc71; font-weight:bold;">➞ ${nextText}</span></div>`;
-            } else {
-                return `<div>${currText}</div>`;
+                return html.join(' ');
             }
-        }
 
-        function moveCamera(dx, dy) {
-            if (!camera) return;
+            // 施設効果のHTML生成（Utility施設対応）
+            function getBuildingEffectHtml(type, level, nextLevel = null) {
+                const b = BUILDINGS[type];
+                let html = "";
 
-            const speed = 0.05 / camera.zoom;
+                // Helper to generate text for a single level
+                const getEffectText = (lvl) => {
+                    if (lvl === 0) return "効果なし";
 
-            const vec = new THREE.Vector3();
-            const quat = camera.quaternion.clone();
+                    if (type === 'well') {
+                        // 水生産 + 農場バフ
+                        const buffVal = 1.3 + (lvl - 1) * 0.02;
+                        let parts = [`隣接畑x${buffVal.toFixed(2)}`];
 
-            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quat);
-            right.y = 0; right.normalize();
+                        // 水生産
+                        if (b.prod.water) {
+                            const waterVal = b.prod.water * lvl * Math.pow(1.05, lvl - 1);
+                            parts.push(`💧${waterVal.toFixed(1)}/s`);
+                        }
+                        return parts.join(' / ');
+                    } else if (type === 'clocktower') {
+                        // 2.0 + (lvl-1)*0.1
+                        const val = 2.0 + (lvl - 1) * 0.1;
+                        return `全体速度 +${val.toFixed(1)}%`;
+                    } else if (type === 'inn') {
+                        // お金生産 + 条件
+                        // const val = b.prod.money * lvl * Math.pow(1.05, lvl - 1);
+                        // Innの計算式: b.prod.money=60. 
+                        const val = 60 * lvl * Math.pow(1.05, lvl - 1);
+                        return `💰${val.toFixed(1)}/s <span style="font-size:0.8em">(要:市場&民家)</span>`;
+                    } else if (type === 'bank') {
+                        // 1.27 + lvl * 0.03
+                        const val = 1.27 + (lvl * 0.03);
+                        return `金産・金貯 x${val.toFixed(2)}`;
+                    } else {
+                        // 一般生産施設
+                        let parts = [];
+                        for (let r in b.prod) {
+                            if (b.prod[r] > 0) {
+                                const val = b.prod[r] * lvl * Math.pow(1.05, lvl - 1);
+                                const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧');
+                                parts.push(`${icon}${val.toFixed(1)}/s`);
+                            }
+                        }
+                        return parts.length ? parts.join(' ') : '効果なし';
+                    }
+                };
 
-            const up = new THREE.Vector3(0, 1, 0).applyQuaternion(quat);
-            up.y = 0; up.normalize();
+                const currText = getEffectText(level);
 
-            camera.position.addScaledVector(right, -dx * speed);
-            camera.position.addScaledVector(up, dy * speed);
-        }
+                if (nextLevel !== null) {
+                    const nextText = getEffectText(nextLevel);
+                    // 変更部分を強調
+                    // 単純に文字列全体を矢印でつなぐ (井戸や時計塔のように数値部分だけが変わる場合も含む)
 
-        function setCameraZoom(val) {
-            if (!camera) return;
-            const minZoom = 0.5;
-            const maxZoom = 2.5;
-            camera.zoom = Math.max(minZoom, Math.min(maxZoom, val));
-            camera.updateProjectionMatrix();
-        }
-
-        function onMouseWheel(event) {
-            event.preventDefault();
-            const zoomSpeed = 0.001;
-            const newZoom = camera.zoom - event.deltaY * zoomSpeed;
-            setCameraZoom(newZoom);
-        }
-
-        let touchStartDist = 0;
-        let touchStartZoom = 1;
-
-        function onTouchStart(event) {
-            if (event.touches.length === 2) {
-                isPanning = false;
-                const dx = event.touches[0].pageX - event.touches[1].pageX;
-                const dy = event.touches[0].pageY - event.touches[1].pageY;
-                touchStartDist = Math.sqrt(dx * dx + dy * dy);
-                touchStartZoom = camera.zoom;
+                    // ただし、Innや通常施設のようにHTMLタグを含む場合の比較は少し冗長になるが、シンプルに
+                    // "Current -> Next" とする
+                    return `<div>${currText} <span style="color:#2ecc71; font-weight:bold;">➞ ${nextText}</span></div>`;
+                } else {
+                    return `<div>${currText}</div>`;
+                }
             }
-        }
 
-        function onTouchMove(event) {
-            if (event.target === renderer.domElement) {
+            function moveCamera(dx, dy) {
+                if (!camera) return;
+
+                const speed = 0.05 / camera.zoom;
+
+                const vec = new THREE.Vector3();
+                const quat = camera.quaternion.clone();
+
+                const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quat);
+                right.y = 0; right.normalize();
+
+                const up = new THREE.Vector3(0, 1, 0).applyQuaternion(quat);
+                up.y = 0; up.normalize();
+
+                camera.position.addScaledVector(right, -dx * speed);
+                camera.position.addScaledVector(up, dy * speed);
+            }
+
+            function setCameraZoom(val) {
+                if (!camera) return;
+                const minZoom = 0.5;
+                const maxZoom = 2.5;
+                camera.zoom = Math.max(minZoom, Math.min(maxZoom, val));
+                camera.updateProjectionMatrix();
+            }
+
+            function onMouseWheel(event) {
                 event.preventDefault();
+                const zoomSpeed = 0.001;
+                const newZoom = camera.zoom - event.deltaY * zoomSpeed;
+                setCameraZoom(newZoom);
             }
 
-            if (event.touches.length === 2) {
-                const dx = event.touches[0].pageX - event.touches[1].pageX;
-                const dy = event.touches[0].pageY - event.touches[1].pageY;
-                const dist = Math.sqrt(dx * dx + dy * dy);
+            let touchStartDist = 0;
+            let touchStartZoom = 1;
 
-                if (touchStartDist > 0) {
-                    const scale = dist / touchStartDist;
-                    setCameraZoom(touchStartZoom * scale);
+            function onTouchStart(event) {
+                if (event.touches.length === 2) {
+                    isPanning = false;
+                    const dx = event.touches[0].pageX - event.touches[1].pageX;
+                    const dy = event.touches[0].pageY - event.touches[1].pageY;
+                    touchStartDist = Math.sqrt(dx * dx + dy * dy);
+                    touchStartZoom = camera.zoom;
                 }
             }
-        }
 
-        function onTouchEnd(event) {
-            if (event.touches.length < 2) {
-                touchStartDist = 0;
-            }
-        }
+            function onTouchMove(event) {
+                if (event.target === renderer.domElement) {
+                    event.preventDefault();
+                }
 
-        window.collectResourceUI = function (index, e) {
-            // 移動モード中は資源回収UIを無効化（誤タップ防止）
-            if (moveMode.active) return;
+                if (event.touches.length === 2) {
+                    const dx = event.touches[0].pageX - event.touches[1].pageX;
+                    const dy = event.touches[0].pageY - event.touches[1].pageY;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
 
-            e.stopPropagation();
-            collectResource(index);
-        };
-
-        function selectTile(index) {
-            const t = gameState.tiles[index];
-            if (t && t.type && t.type.endsWith('_part') && t.masterIndex !== undefined) {
-                selectTile(t.masterIndex);
-                return;
-            }
-            selectedTileIndex = index;
-            sync3DState();
-            showPanel(index);
-        }
-
-        window.closePanel = function () {
-            selectedTileIndex = null;
-            document.getElementById('control-panel').classList.remove('active');
-            SoundManager.playSE('cancel');
-            sync3DState();
-        };
-
-        // Helper for Confirm Modal
-        window.showConfirmModal = function (msg, onYes) {
-            document.getElementById('modal-confirm-msg').innerText = msg;
-            const yesBtn = document.getElementById('modal-confirm-yes');
-            // Remove old listeners by cloning
-            const newBtn = yesBtn.cloneNode(true);
-            yesBtn.parentNode.replaceChild(newBtn, yesBtn);
-            newBtn.addEventListener('click', () => {
-                if (window.SoundManager) SoundManager.playSE('select');
-                document.getElementById('modal-confirm').style.display = 'none';
-                onYes();
-            });
-            document.getElementById('modal-confirm').style.display = 'flex';
-            if (window.SoundManager) SoundManager.playSE('select');
-        };
-
-        window.closeModal = function (id) {
-            SoundManager.playSE('cancel');
-            document.getElementById(id).style.display = 'none';
-        };
-
-        function formatTimeShort(s) { if (s < 60) return `${Math.floor(s)}s`; if (s < 3600) return `${Math.floor(s / 60)}m`; return `${Math.floor(s / 3600)}h`; }
-        function formatTime(s) { if (s < 60) return `${Math.floor(s)}秒`; if (s < 3600) return `${Math.floor(s / 60)}分${Math.floor(s % 60)}秒`; return `${Math.floor(s / 3600)}時間`; }
-
-        function getNextRankXP(r) {
-            const base = r * 500;
-            if (r >= 12) return base * 4 * 3;
-            if (r >= 10) return base * 4;
-            return base;
-        }
-
-        function getBuildTime(t, l) { const tl = l + 1; if (tl === 1) return BUILDINGS[t].baseTime; return Math.floor(BUILDINGS[t].baseTime * Math.pow(tl, 2.8)); }
-
-        function getCost(t, l) {
-            let m = Math.pow(1.6, l) * 1.5;
-            if (l >= 10) m *= 10;
-            const r = {};
-            for (let k in BUILDINGS[t].cost) r[k] = Math.floor(BUILDINGS[t].cost[k] * m);
-            return r;
-        }
-
-        function getStorageCapacity(t, l) { const b = BUILDINGS[t], s = CONFIG.storageHours * 3600, c = {}; for (let r in b.prod) if (b.prod[r] > 0) c[r] = b.prod[r] * l * Math.pow(1.05, l - 1) * s; return c; }
-
-        function getExpandCost(r) {
-            const reqRank = getRequiredRankForExpansion();
-            const virtualUnlockedCount = reqRank + 2;
-
-            let b;
-            const thresholdRank = 22;
-            // virtualUnlockedCount = reqRank + 2
-            // Threshold count = 24
-
-            if (reqRank < thresholdRank) {
-                b = 500 * Math.pow(1.5, virtualUnlockedCount - 4);
-            } else {
-                // Base at threshold (Rank 22 / Count 24) -> 1.5^20
-                // Then grow by 1.3
-                const baseAtThreshold = 500 * Math.pow(1.5, (thresholdRank + 2) - 4);
-                b = baseAtThreshold * Math.pow(1.3, virtualUnlockedCount - (thresholdRank + 2));
-            }
-
-            if (reqRank >= 6) b *= 20;
-
-            let cost = {
-                money: Math.floor(b),
-                food: Math.floor(b * 0.5),
-                wood: Math.floor(b * 0.3),
-                stone: Math.floor(b * 0.1),
-                iron: 0
-            };
-
-            if (reqRank >= 12) {
-                cost.money *= 20;
-                cost.food *= 20;
-                cost.wood *= 5;
-                cost.stone *= 5;
-            }
-
-            return cost;
-        }
-
-        function getRequiredRankForExpansion() {
-            const unlockedCount = gameState.tiles.filter(t => t.unlocked).length;
-            const baseReq = Math.max(2, unlockedCount - 2);
-
-            if (baseReq <= 10) {
-                return baseReq;
-            } else {
-                return 10 + (baseReq - 10) * 2;
-            }
-        }
-
-        function checkAfford(c) { for (let k in c) if ((gameState.resources[k] || 0) < c[k]) return false; return true; }
-        function payCost(c) { for (let k in c) gameState.resources[k] -= c[k]; updateHeader(); }
-        function getUnlockRank(type) {
-            if (type === 'forest') return 20;
-            if (type === 'well') return 10;
-            if (type === 'inn' || type === 'clocktower') return 15;
-            return 1;
-        }
-
-        function addXP(a) {
-            const oldRank = gameState.rank;
-            gameState.xp += a;
-            while (gameState.xp >= getNextRankXP(gameState.rank)) {
-                gameState.xp -= getNextRankXP(gameState.rank);
-                gameState.rank++;
-            }
-
-            if (gameState.rank > oldRank) {
-                document.getElementById('levelup-rank').innerText = gameState.rank;
-                document.getElementById('modal-levelup').style.display = 'flex';
-                SoundManager.playSE('levelup');
-
-                // Check for new unlocks
-                let unlockedNames = [];
-                for (let k in BUILDINGS) {
-                    const r = getUnlockRank(k);
-                    if (r > oldRank && r <= gameState.rank) {
-                        unlockedNames.push(BUILDINGS[k].name);
+                    if (touchStartDist > 0) {
+                        const scale = dist / touchStartDist;
+                        setCameraZoom(touchStartZoom * scale);
                     }
                 }
-                if (unlockedNames.length > 0) {
-                    showToast(`🎉 新しい施設が解放されました: ${unlockedNames.join(', ')}`);
+            }
+
+            function onTouchEnd(event) {
+                if (event.touches.length < 2) {
+                    touchStartDist = 0;
                 }
             }
-        }
 
-        function getActiveBuilders() {
-            return gameState.tiles.filter(t => t.finishTime !== null).length;
-        }
+            window.collectResourceUI = function (index, e) {
+                // 移動モード中は資源回収UIを無効化（誤タップ防止）
+                if (moveMode.active) return;
 
-        function getBuilderCost() {
-            const current = gameState.maxBuilders;
-            const target = current + 1;
+                e.stopPropagation();
+                collectResource(index);
+            };
 
-            // 10人目までは通常計算 (20万 * 1.5^(N-5))
-            if (target <= 10) {
-                const extra = Math.max(0, current - 4);
-                return Math.floor(200000 * Math.pow(1.5, extra));
+            function selectTile(index) {
+                const t = gameState.tiles[index];
+                if (t && t.type && t.type.endsWith('_part') && t.masterIndex !== undefined) {
+                    selectTile(t.masterIndex);
+                    return;
+                }
+                selectedTileIndex = index;
+                sync3DState();
+                showPanel(index);
             }
 
-            // 10人目のコスト（基準）
-            const cost10 = Math.floor(200000 * Math.pow(1.5, 5));
+            window.closePanel = function () {
+                selectedTileIndex = null;
+                document.getElementById('control-panel').classList.remove('active');
+                SoundManager.playSE('cancel');
+                sync3DState();
+            };
 
-            // 11人目は前回の100倍
-            if (target === 11) {
-                return cost10 * 100;
+            // Helper for Confirm Modal
+            window.showConfirmModal = function (msg, onYes) {
+                document.getElementById('modal-confirm-msg').innerText = msg;
+                const yesBtn = document.getElementById('modal-confirm-yes');
+                // Remove old listeners by cloning
+                const newBtn = yesBtn.cloneNode(true);
+                yesBtn.parentNode.replaceChild(newBtn, yesBtn);
+                newBtn.addEventListener('click', () => {
+                    if (window.SoundManager) SoundManager.playSE('select');
+                    document.getElementById('modal-confirm').style.display = 'none';
+                    onYes();
+                });
+                document.getElementById('modal-confirm').style.display = 'flex';
+                if (window.SoundManager) SoundManager.playSE('select');
+            };
+
+            window.closeModal = function (id) {
+                SoundManager.playSE('cancel');
+                document.getElementById(id).style.display = 'none';
+            };
+
+            function formatTimeShort(s) { if (s < 60) return `${Math.floor(s)}s`; if (s < 3600) return `${Math.floor(s / 60)}m`; return `${Math.floor(s / 3600)}h`; }
+            function formatTime(s) { if (s < 60) return `${Math.floor(s)}秒`; if (s < 3600) return `${Math.floor(s / 60)}分${Math.floor(s % 60)}秒`; return `${Math.floor(s / 3600)}時間`; }
+
+            function getNextRankXP(r) {
+                const base = r * 500;
+                if (r >= 12) return base * 4 * 3;
+                if (r >= 10) return base * 4;
+                return base;
             }
 
-            // 12人目以降は前回の3倍
-            // C(N) = C(11) * 3^(N-11)
-            const cost11 = cost10 * 100;
-            return cost11 * Math.pow(3, target - 11);
-        }
+            function getBuildTime(t, l) { const tl = l + 1; if (tl === 1) return BUILDINGS[t].baseTime; return Math.floor(BUILDINGS[t].baseTime * Math.pow(tl, 2.8)); }
 
-        function collectResource(index) {
-            const t = gameState.tiles[index];
-            if (!t || !t.stored) return false;
+            function getCost(t, l) {
+                let m = Math.pow(1.6, l) * 1.5;
+                if (l >= 10) m *= 10;
+                const r = {};
+                for (let k in BUILDINGS[t].cost) r[k] = Math.floor(BUILDINGS[t].cost[k] * m);
+                return r;
+            }
 
-            const now = Date.now();
-            if ((now - (t.lastCollectTime || 0)) < CONFIG.collectCooldown) {
+            function getStorageCapacity(t, l) {
+                const b = BUILDINGS[t], s = CONFIG.storageHours * 3600, c = {};
+
+                // Calculate Bank Multiplier for Storage
+                let totalBankAdd = 0;
+                // Note: This relies on gameState.tiles being available.
+                if (typeof gameState !== 'undefined' && gameState.tiles) {
+                    const banks = gameState.tiles.filter(tl => tl.type === 'bank' && !tl.finishTime && tl.level > 0);
+                    banks.forEach(bk => {
+                        const bonus = 0.27 + (bk.level * 0.03);
+                        totalBankAdd += bonus;
+                    });
+                }
+                const bankFinalMultiplier = 1.0 + totalBankAdd;
+
+                for (let r in b.prod) {
+                    if (b.prod[r] > 0) {
+                        let capacity = b.prod[r] * l * Math.pow(1.05, l - 1) * s;
+                        // Apply Bank Multiplier to Money Storage
+                        if (r === 'money') {
+                            capacity *= bankFinalMultiplier;
+                        }
+                        c[r] = capacity;
+                    }
+                }
+                return c;
+            }
+
+            function getExpandCost(r) {
+                const reqRank = getRequiredRankForExpansion();
+                const virtualUnlockedCount = reqRank + 2;
+
+                let b;
+                const thresholdRank = 22;
+                // virtualUnlockedCount = reqRank + 2
+                // Threshold count = 24
+
+                if (reqRank < thresholdRank) {
+                    b = 500 * Math.pow(1.5, virtualUnlockedCount - 4);
+                } else {
+                    // Base at threshold (Rank 22 / Count 24) -> 1.5^20
+                    // Then grow by 1.3
+                    const baseAtThreshold = 500 * Math.pow(1.5, (thresholdRank + 2) - 4);
+                    b = baseAtThreshold * Math.pow(1.3, virtualUnlockedCount - (thresholdRank + 2));
+                }
+
+                if (reqRank >= 6) b *= 20;
+
+                let cost = {
+                    money: Math.floor(b),
+                    food: Math.floor(b * 0.5),
+                    wood: Math.floor(b * 0.3),
+                    stone: Math.floor(b * 0.1),
+                    iron: 0
+                };
+
+                if (reqRank >= 12) {
+                    cost.money *= 20;
+                    cost.food *= 20;
+                    cost.wood *= 5;
+                    cost.stone *= 5;
+                }
+
+                return cost;
+            }
+
+            function getRequiredRankForExpansion() {
+                const unlockedCount = gameState.tiles.filter(t => t.unlocked).length;
+                const baseReq = Math.max(2, unlockedCount - 2);
+
+                if (baseReq <= 10) {
+                    return baseReq;
+                } else {
+                    return 10 + (baseReq - 10) * 2;
+                }
+            }
+
+            function checkAfford(c) { for (let k in c) if ((gameState.resources[k] || 0) < c[k]) return false; return true; }
+            function payCost(c) { for (let k in c) gameState.resources[k] -= c[k]; updateHeader(); }
+            function getUnlockRank(type) {
+                if (type === 'bank') return 22;
+                if (type === 'forest') return 20;
+                if (type === 'well') return 10;
+                if (type === 'inn' || type === 'clocktower') return 15;
+                return 1;
+            }
+
+            function addXP(a) {
+                const oldRank = gameState.rank;
+                gameState.xp += a;
+                while (gameState.xp >= getNextRankXP(gameState.rank)) {
+                    gameState.xp -= getNextRankXP(gameState.rank);
+                    gameState.rank++;
+                }
+
+                if (gameState.rank > oldRank) {
+                    document.getElementById('levelup-rank').innerText = gameState.rank;
+                    document.getElementById('modal-levelup').style.display = 'flex';
+                    SoundManager.playSE('levelup');
+
+                    // Check for new unlocks
+                    let unlockedNames = [];
+                    for (let k in BUILDINGS) {
+                        const r = getUnlockRank(k);
+                        if (r > oldRank && r <= gameState.rank) {
+                            unlockedNames.push(BUILDINGS[k].name);
+                        }
+                    }
+                    if (unlockedNames.length > 0) {
+                        showToast(`🎉 新しい施設が解放されました: ${unlockedNames.join(', ')}`);
+                    }
+                }
+            }
+
+            function getActiveBuilders() {
+                return gameState.tiles.filter(t => t.finishTime !== null).length;
+            }
+
+            function getBuilderCost() {
+                const current = gameState.maxBuilders;
+                const target = current + 1;
+
+                // 10人目までは通常計算 (20万 * 1.5^(N-5))
+                if (target <= 10) {
+                    const extra = Math.max(0, current - 4);
+                    return Math.floor(200000 * Math.pow(1.5, extra));
+                }
+
+                // 10人目のコスト（基準）
+                const cost10 = Math.floor(200000 * Math.pow(1.5, 5));
+
+                // 11人目は前回の100倍
+                if (target === 11) {
+                    return cost10 * 100;
+                }
+
+                // 12人目以降は前回の3倍
+                // C(N) = C(11) * 3^(N-11)
+                const cost11 = cost10 * 100;
+                return cost11 * Math.pow(3, target - 11);
+            }
+
+            function collectResource(index) {
+                const t = gameState.tiles[index];
+                if (!t || !t.stored) return false;
+
+                const now = Date.now();
+                if ((now - (t.lastCollectTime || 0)) < CONFIG.collectCooldown) {
+                    return false;
+                }
+
+                let total = 0, txt = "";
+                for (let r in t.stored) {
+                    const val = Math.floor(t.stored[r]);
+                    if (val > 0) {
+                        gameState.resources[r] += val;
+                        t.stored[r] = 0;
+                        total += val;
+                        const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧');
+                        txt += `${icon}+${val} `;
+                    }
+                }
+                if (total > 0) {
+                    t.lastCollectTime = now;
+                    SoundManager.playSE('collect');
+                    saveGame(); // 即座に保存
+                    updateHeader();
+                    sync3DState();
+                    const overlay = tileMeshes[index].overlayEl;
+                    const el = document.createElement('div');
+                    el.className = 'float-text';
+                    el.innerText = txt;
+                    overlay.appendChild(el);
+                    setTimeout(() => el.remove(), 1000);
+                    return true;
+                }
                 return false;
             }
 
-            let total = 0, txt = "";
-            for (let r in t.stored) {
-                const val = Math.floor(t.stored[r]);
-                if (val > 0) {
-                    gameState.resources[r] += val;
-                    t.stored[r] = 0;
-                    total += val;
-                    const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧');
-                    txt += `${icon}+${val} `;
-                }
-            }
-            if (total > 0) {
-                t.lastCollectTime = now;
-                SoundManager.playSE('collect');
-                saveGame(); // 即座に保存
-                updateHeader();
-                sync3DState();
-                const overlay = tileMeshes[index].overlayEl;
-                const el = document.createElement('div');
-                el.className = 'float-text';
-                el.innerText = txt;
-                overlay.appendChild(el);
-                setTimeout(() => el.remove(), 1000);
-                return true;
-            }
-            return false;
-        }
-
-        function checkAndExpandWorld() {
-            const allUnlocked = gameState.tiles.every(t => t.unlocked);
-            if (allUnlocked) {
-                expandWorldSize();
-            }
-        }
-
-        function expandWorldSize() {
-            const oldSize = gameState.gridSize;
-            const newSize = oldSize + 1;
-            const newTiles = [];
-
-            for (let i = 0; i < newSize * newSize; i++) {
-                const row = Math.floor(i / newSize);
-                const col = i % newSize;
-
-                if (row < oldSize && col < oldSize) {
-                    const oldIdx = row * oldSize + col;
-                    newTiles.push(gameState.tiles[oldIdx]);
-                } else {
-                    newTiles.push({
-                        type: null, level: 0, finishTime: null,
-                        unlocked: false,
-                        stored: {},
-                        lastCollectTime: 0
-                    });
+            function checkAndExpandWorld() {
+                const allUnlocked = gameState.tiles.every(t => t.unlocked);
+                if (allUnlocked) {
+                    expandWorldSize();
                 }
             }
 
-            gameState.tiles = newTiles;
-            gameState.gridSize = newSize;
+            function expandWorldSize() {
+                const oldSize = gameState.gridSize;
+                const newSize = oldSize + 1;
+                const newTiles = [];
 
-            createTiles();
-            createSurroundingEnvironment(); // 環境再生成
-            showToast(`🎉 世界が広がりました！ (${newSize}x${newSize})`);
+                for (let i = 0; i < newSize * newSize; i++) {
+                    const row = Math.floor(i / newSize);
+                    const col = i % newSize;
 
-            initPedestrians();
-            saveGame();
-        }
+                    if (row < oldSize && col < oldSize) {
+                        const oldIdx = row * oldSize + col;
+                        newTiles.push(gameState.tiles[oldIdx]);
+                    } else {
+                        newTiles.push({
+                            type: null, level: 0, finishTime: null,
+                            unlocked: false,
+                            stored: {},
+                            lastCollectTime: 0
+                        });
+                    }
+                }
 
-        function showPanel(index) {
-            const tile = gameState.tiles[index];
-            const p = document.getElementById('control-panel');
-            const content = document.getElementById('panel-content');
-            SoundManager.playSE('select');
-            p.classList.add('active');
-            updatePanelUI();
-        }
+                gameState.tiles = newTiles;
+                gameState.gridSize = newSize;
 
-        function updatePanelUI() {
-            if (selectedTileIndex === null) return;
-            const tile = gameState.tiles[selectedTileIndex];
-            const content = document.getElementById('panel-content');
-            if (!content) return;
+                createTiles();
+                createSurroundingEnvironment(); // 環境再生成
+                showToast(`🎉 世界が広がりました！ (${newSize}x${newSize})`);
 
-            if (!tile.unlocked) {
-                const req = getRequiredRankForExpansion();
-                const cost = getExpandCost(gameState.rank);
-                const ok = gameState.rank >= req;
-                const afford = checkAfford(cost);
-                content.innerHTML = `
+                initPedestrians();
+                saveGame();
+            }
+
+            function showPanel(index) {
+                const tile = gameState.tiles[index];
+                const p = document.getElementById('control-panel');
+                const content = document.getElementById('panel-content');
+                SoundManager.playSE('select');
+                p.classList.add('active');
+                updatePanelUI();
+            }
+
+            function updatePanelUI() {
+                if (selectedTileIndex === null) return;
+                const tile = gameState.tiles[selectedTileIndex];
+                const content = document.getElementById('panel-content');
+                if (!content) return;
+
+                if (!tile.unlocked) {
+                    const req = getRequiredRankForExpansion();
+                    const cost = getExpandCost(gameState.rank);
+                    const ok = gameState.rank >= req;
+                    const afford = checkAfford(cost);
+                    content.innerHTML = `
                 <div style="text-align:center;">
                     <p><strong>未開拓の土地</strong></p>
                     <div style="background:#eee; padding:10px; border-radius:5px; text-align:left; font-size:0.9em;">
@@ -3606,25 +3716,25 @@
                     <button class="action-btn" onclick="actExpand()" ${ok && afford ? '' : 'disabled'}>拡張</button>
                     ${!ok ? '<p style="color:red;font-size:0.8em">ランク不足</p>' : ''}
                 </div>`;
-                return;
-            }
-
-            if (!tile.type) {
-                let html = "";
-                if (getActiveBuilders() >= gameState.maxBuilders) {
-                    html += `<div style="color:var(--danger-color); font-size:0.9em; font-weight:bold; margin-bottom:5px; text-align:center;">⚠️ 工事がいっぱいです！</div>`;
+                    return;
                 }
 
-                if (gameState.inventory && gameState.inventory.length > 0) {
-                    html += `<div class="inventory-section"><div class="inventory-title">📦 保管庫から再設置</div>`;
-                    gameState.inventory.forEach((item, idx) => {
-                        const b = BUILDINGS[item.type];
-                        const timeSec = getBuildTime(item.type, item.level - 1) / 1000;
-                        // Restoration is always allowed (already counted in limit)
-                        const disabledAttr = '';
-                        const warnText = '';
+                if (!tile.type) {
+                    let html = "";
+                    if (getActiveBuilders() >= gameState.maxBuilders) {
+                        html += `<div style="color:var(--danger-color); font-size:0.9em; font-weight:bold; margin-bottom:5px; text-align:center;">⚠️ 工事がいっぱいです！</div>`;
+                    }
 
-                        html += `
+                    if (gameState.inventory && gameState.inventory.length > 0) {
+                        html += `<div class="inventory-section"><div class="inventory-title">📦 保管庫から再設置</div>`;
+                        gameState.inventory.forEach((item, idx) => {
+                            const b = BUILDINGS[item.type];
+                            const timeSec = getBuildTime(item.type, item.level - 1) / 1000;
+                            // Restoration is always allowed (already counted in limit)
+                            const disabledAttr = '';
+                            const warnText = '';
+
+                            html += `
                         <div class="building-item" style="background:#fff8e1;">
                             <div class="building-info">
                                 <strong>${b.icon} ${b.name} (Lv.${item.level}) ${warnText}</strong>
@@ -3633,26 +3743,26 @@
                             <button onclick="actRestore(${idx})" style="background-color:#f39c12;" ${disabledAttr}>配置</button>
                         </div>
                     `;
-                    });
-                    html += `</div><div class="inventory-title" style="margin-top:10px;">✨ 新規建設</div>`;
-                }
+                        });
+                        html += `</div><div class="inventory-title" style="margin-top:10px;">✨ 新規建設</div>`;
+                    }
 
-                for (let k in BUILDINGS) {
-                    const b = BUILDINGS[k];
-                    const c = getCost(k, 0);
-                    const afford = checkAfford(c);
-                    // Use helper for color check
-                    const costStr = formatCostWithColor(c);
+                    for (let k in BUILDINGS) {
+                        const b = BUILDINGS[k];
+                        const c = getCost(k, 0);
+                        const afford = checkAfford(c);
+                        // Use helper for color check
+                        const costStr = formatCostWithColor(c);
 
-                    const canBuild = checkBuildingLimit(k);
-                    const disabledAttr = (afford && canBuild) ? '' : 'disabled';
+                        const canBuild = checkBuildingLimit(k);
+                        const disabledAttr = (afford && canBuild) ? '' : 'disabled';
 
-                    let limitNum = 4;
-                    if (['well', 'inn', 'clocktower'].includes(k)) limitNum = 2;
+                        let limitNum = 4;
+                        if (['well', 'inn', 'clocktower', 'bank'].includes(k)) limitNum = 2;
 
-                    const limitText = canBuild ? '' : `<br><span style="color:red; font-size:0.8em;">⚠️ 上限(${limitNum}つ)に達しています</span>`;
+                        const limitText = canBuild ? '' : `<br><span style="color:red; font-size:0.8em;">⚠️ 上限(${limitNum}つ)に達しています</span>`;
 
-                    html += `
+                        html += `
                     <div class="building-item">
                         <div class="building-info">
                             <strong>${b.icon} ${b.name}</strong>
@@ -3663,22 +3773,22 @@
                         </div>
                         <button onclick="actBuild('${k}')" ${disabledAttr}>建設</button>
                     </div>`;
+                    }
+                    content.innerHTML = html;
+                    return;
                 }
-                content.innerHTML = html;
-                return;
-            }
 
-            const b = BUILDINGS[tile.type];
-            if (tile.finishTime) {
-                const rem = Math.max(0, (tile.finishTime - Date.now()));
+                const b = BUILDINGS[tile.type];
+                if (tile.finishTime) {
+                    const rem = Math.max(0, (tile.finishTime - Date.now()));
 
-                const prodDiff = getBuildingEffectHtml(tile.type, tile.level, tile.level + 1);
+                    const prodDiff = getBuildingEffectHtml(tile.type, tile.level, tile.level + 1);
 
-                const c = getCost(tile.type, tile.level);
-                let refund = [];
-                for (let r in c) if (c[r] > 0) refund.push(`${(r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧')}${Math.floor(c[r] * 0.5).toLocaleString()}`);
+                    const c = getCost(tile.type, tile.level);
+                    let refund = [];
+                    for (let r in c) if (c[r] > 0) refund.push(`${(r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧')}${Math.floor(c[r] * 0.5).toLocaleString()}`);
 
-                content.innerHTML = `
+                    content.innerHTML = `
                 <div style="text-align:center;">
                     <h3>${b.name} (Lv.${tile.level} ➞ ${tile.level + 1})</h3>
                     <div style="background:#f9f9f9; padding:5px; border-radius:5px; margin:5px 0; font-size:0.9em;">
@@ -3690,28 +3800,28 @@
                     <button class="action-btn store-btn" onclick="actStore()">📦 回収（保管庫へ）</button>
                     <button class="action-btn" style="background-color:var(--danger-color); margin-top:5px;" onclick="actCancelBuild()">🚫 工事中止 (返還: ${refund.join(' ')})</button>
                 </div>`;
-            } else {
-                const next = tile.level + 1;
-                const c = getCost(tile.type, tile.level);
-                const afford = checkAfford(c);
-                const caps = getStorageCapacity(tile.type, tile.level);
-                // Use helper for upgrade cost
-                const costStr = formatCostWithColor(c);
+                } else {
+                    const next = tile.level + 1;
+                    const c = getCost(tile.type, tile.level);
+                    const afford = checkAfford(c);
+                    const caps = getStorageCapacity(tile.type, tile.level);
+                    // Use helper for upgrade cost
+                    const costStr = formatCostWithColor(c);
 
-                const prodInfo = getBuildingEffectHtml(tile.type, tile.level);
+                    const prodInfo = getBuildingEffectHtml(tile.type, tile.level);
 
-                let storeInfo = "";
-                for (let r in b.prod) if (b.prod[r] > 0) {
-                    storeInfo += `<div>${(r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧')} ${Math.floor(tile.stored[r])}/${Math.floor(caps[r])}</div>`;
-                }
-                // If it's a utility building, storage might be empty, but that's fine. 
-                // Wait, if it's well/clocktower, they don't have storage. 
-                // Currently code assumes b.prod determines storage, but storage is actually mostly separate logic but often linked.
-                // Well/Clocktower have b.prod={} so storeInfo will be empty loop. Correct.
+                    let storeInfo = "";
+                    for (let r in b.prod) if (b.prod[r] > 0) {
+                        storeInfo += `<div>${(r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧')} ${Math.floor(tile.stored[r])}/${Math.floor(caps[r])}</div>`;
+                    }
+                    // If it's a utility building, storage might be empty, but that's fine. 
+                    // Wait, if it's well/clocktower, they don't have storage. 
+                    // Currently code assumes b.prod determines storage, but storage is actually mostly separate logic but often linked.
+                    // Well/Clocktower have b.prod={} so storeInfo will be empty loop. Correct.
 
-                const buildersBusy = getActiveBuilders() >= gameState.maxBuilders;
+                    const buildersBusy = getActiveBuilders() >= gameState.maxBuilders;
 
-                content.innerHTML = `
+                    content.innerHTML = `
                 <div style="text-align:center;">
                     <h3>${b.name} (Lv.${tile.level})</h3>
                     <p style="font-size:0.85em; color:#666; margin:0 0 10px 0;">${b.desc}</p>
@@ -3729,388 +3839,388 @@
                     <button class="action-btn" onclick="actBuild('${tile.type}')" ${afford && !buildersBusy ? '' : 'disabled'}>レベルアップ</button>
                     <button class="action-btn store-btn" onclick="actStore()">📦 回収（保管庫へ）</button>
                 </div>`;
-            }
-        }
-
-        // --- Multi-tile Helper Functions ---
-        function getBuildingSize(type) {
-            const b = BUILDINGS[type];
-            return { w: b.w || 1, h: b.h || 1 };
-        }
-
-        function getGridPos(index) {
-            const s = gameState.gridSize;
-            return { x: index % s, y: Math.floor(index / s) };
-        }
-
-        function getIndexFromPos(x, y) {
-            const s = gameState.gridSize;
-            if (x < 0 || y < 0 || x >= s || y >= s) return -1;
-            return y * s + x;
-        }
-
-        function checkPlacement(index, type, rot = 0) {
-            const size = getBuildingSize(type);
-            const w = (rot % 2 === 0) ? size.w : size.h;
-            const h = (rot % 2 === 0) ? size.h : size.w;
-            const origin = getGridPos(index);
-
-            for (let dy = 0; dy < h; dy++) {
-                for (let dx = 0; dx < w; dx++) {
-                    const tx = origin.x + dx;
-                    const ty = origin.y + dy;
-                    const tidx = getIndexFromPos(tx, ty);
-                    if (tidx === -1) return false; // Out of bounds
-
-                    // Check occupancy
-                    // Target tile (index) is assumed to be the one we clicked, so it's nominally "available" (checked by UI)
-                    // But we must ensure other tiles are also available.
-                    // Also, must ensure tiles are Unlocked.
-                    const t = gameState.tiles[tidx];
-                    if (!t.unlocked) return false;
-                    if (t.type || t.finishTime) {
-                        // If checking the origin tile itself, it's fine (we are building on it)
-                        // But wait, if we are upgrading, this function is not called for size check usually.
-                        // If new build, origin tile must be empty.
-                        // The UI calls actBuild only on selectedTileIndex.
-                        // We should ensure we don't overwrite existing stuff unless we mean to.
-                        // For new build, all tiles must be empty.
-                        return false;
-                    }
                 }
             }
-            return true;
-        }
 
-        function setMultiTile(index, type, rot = 0) {
-            const size = getBuildingSize(type);
-            const w = (rot % 2 === 0) ? size.w : size.h;
-            const h = (rot % 2 === 0) ? size.h : size.w;
-            const origin = getGridPos(index);
-
-            for (let dy = 0; dy < h; dy++) {
-                for (let dx = 0; dx < w; dx++) {
-                    const tidx = getIndexFromPos(origin.x + dx, origin.y + dy);
-                    const t = gameState.tiles[tidx];
-                    if (dx === 0 && dy === 0) {
-                        // Master
-                        t.type = type;
-                        t.rotation = rot;
-                        t.mas = true; // master flag
-                    } else {
-                        // Slave
-                        t.type = type + '_part';
-                        t.masterIndex = index;
-                    }
-                }
-            }
-        }
-
-        function clearMultiTile(index) {
-            const t = gameState.tiles[index];
-            if (!t.type) return;
-
-            // If slave, redirect to master
-            if (t.type.endsWith('_part')) {
-                // Should have been handled by caller, but safety check
-                if (t.masterIndex !== undefined) clearMultiTile(t.masterIndex);
-                return;
+            // --- Multi-tile Helper Functions ---
+            function getBuildingSize(type) {
+                const b = BUILDINGS[type];
+                return { w: b.w || 1, h: b.h || 1 };
             }
 
-            // Master: clear self and all parts
-            // We need to know the size/rotation to find parts?
-            // Or just scan? Scanning is slow.
-            // Using currently stored rotation and type.
-            const size = getBuildingSize(t.type);
-            const rot = t.rotation || 0;
-            const w = (rot % 2 === 0) ? size.w : size.h;
-            const h = (rot % 2 === 0) ? size.h : size.w;
-            const origin = getGridPos(index);
-
-            for (let dy = 0; dy < h; dy++) {
-                for (let dx = 0; dx < w; dx++) {
-                    const tidx = getIndexFromPos(origin.x + dx, origin.y + dy);
-                    if (tidx !== -1) {
-                        const part = gameState.tiles[tidx];
-                        part.type = null;
-                        part.level = 0;
-                        part.finishTime = null;
-                        part.stored = {};
-                        part.mas = undefined;
-                        part.masterIndex = undefined;
-                        part.rotation = 0;
-                    }
-                }
-            }
-        }
-
-        window.actCancelBuild = function () {
-            if (selectedTileIndex === null) return;
-            const t = gameState.tiles[selectedTileIndex];
-            if (!t.finishTime) return;
-
-            showConfirmModal("工事を中止しますか？\n費用の一部(50%)が返還されます。", () => {
-                const c = getCost(t.type, t.level);
-                let refundTxt = "";
-                for (let r in c) {
-                    const amount = Math.floor(c[r] * 0.5);
-                    if (amount > 0) {
-                        gameState.resources[r] += amount;
-                        const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧');
-                        refundTxt += `${icon}+${amount.toLocaleString()} `;
-                    }
-                }
-
-                t.finishTime = null;
-                if (t.level === 0) {
-                    clearMultiTile(selectedTileIndex);
-                }
-                SoundManager.playSE('cancel');
-
-                saveGame();
-                sync3DState();
-                updatePanelUI();
-                updateHeader();
-                showToast(`工事を中止しました ${refundTxt}`);
-            });
-        }
-
-        window.actBuild = function (type) {
-            if (selectedTileIndex === null) return;
-
-            if (getActiveBuilders() >= gameState.maxBuilders) {
-                showToast("⚠️ 大工が全員作業中です");
-                return;
+            function getGridPos(index) {
+                const s = gameState.gridSize;
+                return { x: index % s, y: Math.floor(index / s) };
             }
 
-            const t = gameState.tiles[selectedTileIndex];
-            const lv = t.type === type ? t.level : 0;
+            function getIndexFromPos(x, y) {
+                const s = gameState.gridSize;
+                if (x < 0 || y < 0 || x >= s || y >= s) return -1;
+                return y * s + x;
+            }
 
-            let targetIndex = selectedTileIndex;
-            let detectedRotation = 0;
+            function checkPlacement(index, type, rot = 0) {
+                const size = getBuildingSize(type);
+                const w = (rot % 2 === 0) ? size.w : size.h;
+                const h = (rot % 2 === 0) ? size.h : size.w;
+                const origin = getGridPos(index);
 
-            if (lv === 0) {
-                if (!checkBuildingLimit(type)) {
-                    showToast("⚠️ この施設はこれ以上建設できません");
-                    return;
-                }
+                for (let dy = 0; dy < h; dy++) {
+                    for (let dx = 0; dx < w; dx++) {
+                        const tx = origin.x + dx;
+                        const ty = origin.y + dy;
+                        const tidx = getIndexFromPos(tx, ty);
+                        if (tidx === -1) return false; // Out of bounds
 
-                const reqRank = getUnlockRank(type);
-                if (gameState.rank < reqRank) {
-                    showToast(`⚠️ ${BUILDINGS[type].name}はランク${reqRank}から建設可能です`);
-                    return;
-                }
-
-                // Smart Placement Logic (Updated)
-                // Priority:
-                // 1. Closest to Origin (dx=0, dy=0) -> "Build starting here"
-                // 2. Default Rotation (0) -> "Vertical/Standard"
-                let placed = false;
-                const size0 = getBuildingSize(type);
-
-                // Allow rotation trial
-                const allowedRotations = [0];
-                if (size0.w !== size0.h) allowedRotations.push(1);
-
-                // Generate all possible candidates: {r, dx, dy}
-                let candidates = [];
-
-                for (let r of allowedRotations) {
-                    const w = (r % 2 === 0) ? size0.w : size0.h;
-                    const h = (r % 2 === 0) ? size0.h : size0.w;
-
-                    for (let dy = -(h - 1); dy <= 0; dy++) {
-                        for (let dx = -(w - 1); dx <= 0; dx++) {
-                            candidates.push({ r: r, dx: dx, dy: dy });
+                        // Check occupancy
+                        // Target tile (index) is assumed to be the one we clicked, so it's nominally "available" (checked by UI)
+                        // But we must ensure other tiles are also available.
+                        // Also, must ensure tiles are Unlocked.
+                        const t = gameState.tiles[tidx];
+                        if (!t.unlocked) return false;
+                        if (t.type || t.finishTime) {
+                            // If checking the origin tile itself, it's fine (we are building on it)
+                            // But wait, if we are upgrading, this function is not called for size check usually.
+                            // If new build, origin tile must be empty.
+                            // The UI calls actBuild only on selectedTileIndex.
+                            // We should ensure we don't overwrite existing stuff unless we mean to.
+                            // For new build, all tiles must be empty.
+                            return false;
                         }
                     }
                 }
+                return true;
+            }
 
-                // Sort candidates
-                candidates.sort((a, b) => {
-                    const distA = Math.abs(a.dx) + Math.abs(a.dy);
-                    const distB = Math.abs(b.dx) + Math.abs(b.dy);
-                    if (distA !== distB) return distA - distB;
-                    return a.r - b.r;
-                });
+            function setMultiTile(index, type, rot = 0) {
+                const size = getBuildingSize(type);
+                const w = (rot % 2 === 0) ? size.w : size.h;
+                const h = (rot % 2 === 0) ? size.h : size.w;
+                const origin = getGridPos(index);
 
-                // Execute Search
-                const origin = getGridPos(selectedTileIndex);
-
-                for (let cand of candidates) {
-                    const w = (cand.r % 2 === 0) ? size0.w : size0.h;
-                    const h = (cand.r % 2 === 0) ? size0.h : size0.w;
-
-                    const tx = origin.x + cand.dx;
-                    const ty = origin.y + cand.dy;
-                    const tidx = getIndexFromPos(tx, ty);
-
-                    if (tidx !== -1 && checkPlacement(tidx, type, cand.r)) {
-                        // Double check coverage
-                        if (origin.x >= tx && origin.x < tx + w &&
-                            origin.y >= ty && origin.y < ty + h) {
-
-                            targetIndex = tidx;
-                            detectedRotation = cand.r;
-                            placed = true;
-                            break;
+                for (let dy = 0; dy < h; dy++) {
+                    for (let dx = 0; dx < w; dx++) {
+                        const tidx = getIndexFromPos(origin.x + dx, origin.y + dy);
+                        const t = gameState.tiles[tidx];
+                        if (dx === 0 && dy === 0) {
+                            // Master
+                            t.type = type;
+                            t.rotation = rot;
+                            t.mas = true; // master flag
+                        } else {
+                            // Slave
+                            t.type = type + '_part';
+                            t.masterIndex = index;
                         }
                     }
                 }
+            }
 
-                if (!placed) {
-                    showToast("⚠️ 配置できません(スペース不足/障害物)");
+            function clearMultiTile(index) {
+                const t = gameState.tiles[index];
+                if (!t.type) return;
+
+                // If slave, redirect to master
+                if (t.type.endsWith('_part')) {
+                    // Should have been handled by caller, but safety check
+                    if (t.masterIndex !== undefined) clearMultiTile(t.masterIndex);
                     return;
                 }
-            }
 
-            const c = getCost(type, lv);
-            if (checkAfford(c)) {
-                payCost(c);
+                // Master: clear self and all parts
+                // We need to know the size/rotation to find parts?
+                // Or just scan? Scanning is slow.
+                // Using currently stored rotation and type.
+                const size = getBuildingSize(t.type);
+                const rot = t.rotation || 0;
+                const w = (rot % 2 === 0) ? size.w : size.h;
+                const h = (rot % 2 === 0) ? size.h : size.w;
+                const origin = getGridPos(index);
 
-                if (lv === 0) {
-                    setMultiTile(targetIndex, type, detectedRotation);
-                    // Update UI focus to master
-                    if (targetIndex !== selectedTileIndex) {
-                        selectedTileIndex = targetIndex; // Update global selection
+                for (let dy = 0; dy < h; dy++) {
+                    for (let dx = 0; dx < w; dx++) {
+                        const tidx = getIndexFromPos(origin.x + dx, origin.y + dy);
+                        if (tidx !== -1) {
+                            const part = gameState.tiles[tidx];
+                            part.type = null;
+                            part.level = 0;
+                            part.finishTime = null;
+                            part.stored = {};
+                            part.mas = undefined;
+                            part.masterIndex = undefined;
+                            part.rotation = 0;
+                        }
                     }
                 }
-
-                // Master tile properties
-                const tMaster = gameState.tiles[targetIndex]; // Re-fetch in case changed
-                tMaster.finishTime = Date.now() + getBuildTime(type, lv);
-                tMaster.stored = {}; // Reset storage
-                SoundManager.playSE('build');
-
-                saveGame();
-                sync3DState();
-
-                // Refresh UI with new selection
-                if (lv === 0 && targetIndex !== selectedTileIndex) {
-                    showPanel(targetIndex);
-                } else {
-                    updatePanelUI();
-                }
-                updateHeader();
             }
 
+            window.actCancelBuild = function () {
+                if (selectedTileIndex === null) return;
+                const t = gameState.tiles[selectedTileIndex];
+                if (!t.finishTime) return;
 
-        }
+                showConfirmModal("工事を中止しますか？\n費用の一部(50%)が返還されます。", () => {
+                    const c = getCost(t.type, t.level);
+                    let refundTxt = "";
+                    for (let r in c) {
+                        const amount = Math.floor(c[r] * 0.5);
+                        if (amount > 0) {
+                            gameState.resources[r] += amount;
+                            const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧');
+                            refundTxt += `${icon}+${amount.toLocaleString()} `;
+                        }
+                    }
 
-        window.actStore = function () {
-            if (selectedTileIndex === null) return;
-            const t = gameState.tiles[selectedTileIndex];
-            if (!t.type) return;
-
-            showConfirmModal("この施設を保管庫に戻しますか？", () => {
-                try {
-                    collectResource(selectedTileIndex);
-                    gameState.inventory.push({ type: t.type, level: t.level });
-                    clearMultiTile(selectedTileIndex);
+                    t.finishTime = null;
+                    if (t.level === 0) {
+                        clearMultiTile(selectedTileIndex);
+                    }
+                    SoundManager.playSE('cancel');
 
                     saveGame();
                     sync3DState();
                     updatePanelUI();
                     updateHeader();
-                } catch (err) {
-                    console.error("actStore Error", err);
-                    showToast("⚠️ システムエラーが発生しました");
+                    showToast(`工事を中止しました ${refundTxt}`);
+                });
+            }
+
+            window.actBuild = function (type) {
+                if (selectedTileIndex === null) return;
+
+                if (getActiveBuilders() >= gameState.maxBuilders) {
+                    showToast("⚠️ 大工が全員作業中です");
+                    return;
                 }
-            });
-        };
 
-        window.actRestore = function (invIndex) {
-            console.log("actRestore called", invIndex);
-            if (selectedTileIndex === null) return;
-
-            if (getActiveBuilders() >= gameState.maxBuilders) {
-                showToast("⚠️ 大工が全員作業中です");
-                return;
-            }
-
-            if (invIndex < 0 || invIndex >= gameState.inventory.length) {
-                showToast("⚠️ アイテムが見つかりません");
-                return;
-            }
-
-            const item = gameState.inventory[invIndex];
-            // 復元時は所持数制限チェックを行わない (既に所持しているため)
-
-            try {
-                // Remove from inventory
-                gameState.inventory.splice(invIndex, 1);
-
-                // Setup tile
                 const t = gameState.tiles[selectedTileIndex];
+                const lv = t.type === type ? t.level : 0;
 
-                // Use setMultiTile to ensure consistency (flag setting etc.)
-                // Restore assumes standard rotation (0) for now, or could store rotation in inventory later
-                setMultiTile(selectedTileIndex, item.type, 0);
+                let targetIndex = selectedTileIndex;
+                let detectedRotation = 0;
 
-                // Override level/finishTime
-                // Re-fetch t as setMultiTile might have replaced object reference? 
-                // (No, it modifies properties of object in array)
-                const tNew = gameState.tiles[selectedTileIndex];
-                tNew.level = Math.max(0, item.level - 1);
-                tNew.finishTime = Date.now() + getBuildTime(item.type, tNew.level);
-                tNew.stored = {};
+                if (lv === 0) {
+                    if (!checkBuildingLimit(type)) {
+                        showToast("⚠️ この施設はこれ以上建設できません");
+                        return;
+                    }
 
-                SoundManager.playSE('build');
-                saveGame();
-                sync3DState();
-                updatePanelUI();
-                updateHeader();
-                showToast("保管庫から配置しました");
-            } catch (e) {
-                console.error("Restore failed", e);
-                showToast("⚠️ 配置に失敗しました");
+                    const reqRank = getUnlockRank(type);
+                    if (gameState.rank < reqRank) {
+                        showToast(`⚠️ ${BUILDINGS[type].name}はランク${reqRank}から建設可能です`);
+                        return;
+                    }
+
+                    // Smart Placement Logic (Updated)
+                    // Priority:
+                    // 1. Closest to Origin (dx=0, dy=0) -> "Build starting here"
+                    // 2. Default Rotation (0) -> "Vertical/Standard"
+                    let placed = false;
+                    const size0 = getBuildingSize(type);
+
+                    // Allow rotation trial
+                    const allowedRotations = [0];
+                    if (size0.w !== size0.h) allowedRotations.push(1);
+
+                    // Generate all possible candidates: {r, dx, dy}
+                    let candidates = [];
+
+                    for (let r of allowedRotations) {
+                        const w = (r % 2 === 0) ? size0.w : size0.h;
+                        const h = (r % 2 === 0) ? size0.h : size0.w;
+
+                        for (let dy = -(h - 1); dy <= 0; dy++) {
+                            for (let dx = -(w - 1); dx <= 0; dx++) {
+                                candidates.push({ r: r, dx: dx, dy: dy });
+                            }
+                        }
+                    }
+
+                    // Sort candidates
+                    candidates.sort((a, b) => {
+                        const distA = Math.abs(a.dx) + Math.abs(a.dy);
+                        const distB = Math.abs(b.dx) + Math.abs(b.dy);
+                        if (distA !== distB) return distA - distB;
+                        return a.r - b.r;
+                    });
+
+                    // Execute Search
+                    const origin = getGridPos(selectedTileIndex);
+
+                    for (let cand of candidates) {
+                        const w = (cand.r % 2 === 0) ? size0.w : size0.h;
+                        const h = (cand.r % 2 === 0) ? size0.h : size0.w;
+
+                        const tx = origin.x + cand.dx;
+                        const ty = origin.y + cand.dy;
+                        const tidx = getIndexFromPos(tx, ty);
+
+                        if (tidx !== -1 && checkPlacement(tidx, type, cand.r)) {
+                            // Double check coverage
+                            if (origin.x >= tx && origin.x < tx + w &&
+                                origin.y >= ty && origin.y < ty + h) {
+
+                                targetIndex = tidx;
+                                detectedRotation = cand.r;
+                                placed = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!placed) {
+                        showToast("⚠️ 配置できません(スペース不足/障害物)");
+                        return;
+                    }
+                }
+
+                const c = getCost(type, lv);
+                if (checkAfford(c)) {
+                    payCost(c);
+
+                    if (lv === 0) {
+                        setMultiTile(targetIndex, type, detectedRotation);
+                        // Update UI focus to master
+                        if (targetIndex !== selectedTileIndex) {
+                            selectedTileIndex = targetIndex; // Update global selection
+                        }
+                    }
+
+                    // Master tile properties
+                    const tMaster = gameState.tiles[targetIndex]; // Re-fetch in case changed
+                    tMaster.finishTime = Date.now() + getBuildTime(type, lv);
+                    tMaster.stored = {}; // Reset storage
+                    SoundManager.playSE('build');
+
+                    saveGame();
+                    sync3DState();
+
+                    // Refresh UI with new selection
+                    if (lv === 0 && targetIndex !== selectedTileIndex) {
+                        showPanel(targetIndex);
+                    } else {
+                        updatePanelUI();
+                    }
+                    updateHeader();
+                }
+
+
             }
-        };
 
-        function getAdjacentTiles(index) {
-            const size = gameState.gridSize;
-            const row = Math.floor(index / size);
-            const col = index % size;
-            const adj = [];
+            window.actStore = function () {
+                if (selectedTileIndex === null) return;
+                const t = gameState.tiles[selectedTileIndex];
+                if (!t.type) return;
 
-            // 上下左右
-            if (row > 0) adj.push(gameState.tiles[(row - 1) * size + col]);
-            if (row < size - 1) adj.push(gameState.tiles[(row + 1) * size + col]);
-            if (col > 0) adj.push(gameState.tiles[row * size + col - 1]);
-            if (col < size - 1) adj.push(gameState.tiles[row * size + col + 1]);
+                showConfirmModal("この施設を保管庫に戻しますか？", () => {
+                    try {
+                        collectResource(selectedTileIndex);
+                        gameState.inventory.push({ type: t.type, level: t.level });
+                        clearMultiTile(selectedTileIndex);
 
-            return adj;
-        }
+                        saveGame();
+                        sync3DState();
+                        updatePanelUI();
+                        updateHeader();
+                    } catch (err) {
+                        console.error("actStore Error", err);
+                        showToast("⚠️ システムエラーが発生しました");
+                    }
+                });
+            };
 
-        window.actExpand = function () {
-            if (selectedTileIndex === null) return;
-            const c = getExpandCost(gameState.rank);
-            if (checkAfford(c)) {
-                payCost(c);
-                gameState.tiles[selectedTileIndex].unlocked = true;
-                SoundManager.playSE('build'); // Land construction sound
-                saveGame();
+            window.actRestore = function (invIndex) {
+                console.log("actRestore called", invIndex);
+                if (selectedTileIndex === null) return;
 
-                checkAndExpandWorld();
+                if (getActiveBuilders() >= gameState.maxBuilders) {
+                    showToast("⚠️ 大工が全員作業中です");
+                    return;
+                }
 
-                sync3DState();
-                updatePanelUI();
+                if (invIndex < 0 || invIndex >= gameState.inventory.length) {
+                    showToast("⚠️ アイテムが見つかりません");
+                    return;
+                }
+
+                const item = gameState.inventory[invIndex];
+                // 復元時は所持数制限チェックを行わない (既に所持しているため)
+
+                try {
+                    // Remove from inventory
+                    gameState.inventory.splice(invIndex, 1);
+
+                    // Setup tile
+                    const t = gameState.tiles[selectedTileIndex];
+
+                    // Use setMultiTile to ensure consistency (flag setting etc.)
+                    // Restore assumes standard rotation (0) for now, or could store rotation in inventory later
+                    setMultiTile(selectedTileIndex, item.type, 0);
+
+                    // Override level/finishTime
+                    // Re-fetch t as setMultiTile might have replaced object reference? 
+                    // (No, it modifies properties of object in array)
+                    const tNew = gameState.tiles[selectedTileIndex];
+                    tNew.level = Math.max(0, item.level - 1);
+                    tNew.finishTime = Date.now() + getBuildTime(item.type, tNew.level);
+                    tNew.stored = {};
+
+                    SoundManager.playSE('build');
+                    saveGame();
+                    sync3DState();
+                    updatePanelUI();
+                    updateHeader();
+                    showToast("保管庫から配置しました");
+                } catch (e) {
+                    console.error("Restore failed", e);
+                    showToast("⚠️ 配置に失敗しました");
+                }
+            };
+
+            function getAdjacentTiles(index) {
+                const size = gameState.gridSize;
+                const row = Math.floor(index / size);
+                const col = index % size;
+                const adj = [];
+
+                // 上下左右
+                if (row > 0) adj.push(gameState.tiles[(row - 1) * size + col]);
+                if (row < size - 1) adj.push(gameState.tiles[(row + 1) * size + col]);
+                if (col > 0) adj.push(gameState.tiles[row * size + col - 1]);
+                if (col < size - 1) adj.push(gameState.tiles[row * size + col + 1]);
+
+                return adj;
             }
-        }
 
-        window.openMenu = function () {
-            SoundManager.playSE('select');
-            const modal = document.getElementById('modal-menu');
-            const content = document.getElementById('menu-content');
+            window.actExpand = function () {
+                if (selectedTileIndex === null) return;
+                const c = getExpandCost(gameState.rank);
+                if (checkAfford(c)) {
+                    payCost(c);
+                    gameState.tiles[selectedTileIndex].unlocked = true;
+                    SoundManager.playSE('build'); // Land construction sound
+                    saveGame();
 
-            const builderCost = getBuilderCost();
-            const canBuyBuilder = gameState.resources.money >= builderCost;
-            const currentUid = currentUser ? currentUser.uid : "未接続(オフライン)";
+                    checkAndExpandWorld();
 
-            const sharedUid = localStorage.getItem('kingdomBuilder_sharedId');
-            const displayUid = sharedUid ? `${sharedUid} (連携中)` : currentUid;
+                    sync3DState();
+                    updatePanelUI();
+                }
+            }
 
-            content.innerHTML = `
+            window.openMenu = function () {
+                SoundManager.playSE('select');
+                const modal = document.getElementById('modal-menu');
+                const content = document.getElementById('menu-content');
+
+                const builderCost = getBuilderCost();
+                const canBuyBuilder = gameState.resources.money >= builderCost;
+                const currentUid = currentUser ? currentUser.uid : "未接続(オフライン)";
+
+                const sharedUid = localStorage.getItem('kingdomBuilder_sharedId');
+                const displayUid = sharedUid ? `${sharedUid} (連携中)` : currentUid;
+
+                content.innerHTML = `
             <div class="shop-item">
                 <button class="action-btn" onclick="openBuildingList()" style="width:100%; margin-bottom:10px; background-color:#3498db;">
                     📋 施設一覧 (所有)
@@ -4189,70 +4299,70 @@
             </div>
         `;
 
-            modal.style.display = 'flex';
-        };
+                modal.style.display = 'flex';
+            };
 
 
-        window.openCatalog = function () {
-            SoundManager.playSE('select');
-            closeModal('modal-menu');
-            const modal = document.getElementById('modal-catalog');
-            const content = document.getElementById('catalog-content');
+            window.openCatalog = function () {
+                SoundManager.playSE('select');
+                closeModal('modal-menu');
+                const modal = document.getElementById('modal-catalog');
+                const content = document.getElementById('catalog-content');
 
-            let html = '<div class="catalog-grid">';
+                let html = '<div class="catalog-grid">';
 
-            for (let k in BUILDINGS) {
-                const b = BUILDINGS[k];
-                const reqRank = getUnlockRank(k);
-                const isLocked = gameState.rank < reqRank;
+                for (let k in BUILDINGS) {
+                    const b = BUILDINGS[k];
+                    const reqRank = getUnlockRank(k);
+                    const isLocked = gameState.rank < reqRank;
 
-                if (isLocked) {
-                    html += `
+                    if (isLocked) {
+                        html += `
                         <div class="catalog-item" style="opacity:0.6; cursor:not-allowed;" onclick="showToast('⚠️ ランク${reqRank}で解放されます')">
                             <div class="catalog-icon">🔒</div>
                             <div class="catalog-name">Rank ${reqRank}</div>
                         </div>
                     `;
-                } else {
-                    html += `
+                    } else {
+                        html += `
                         <div class="catalog-item" onclick="showCatalogDetail('${k}')">
                             <div class="catalog-icon">${b.icon}</div>
                             <div class="catalog-name">${b.name}</div>
                         </div>
                     `;
+                    }
                 }
-            }
 
-            html += '</div>';
-            html += `
+                html += '</div>';
+                html += `
                 <div style="margin-top:15px; padding:10px; background:white; border-radius:8px; font-size:0.9em; color:#7f8c8d; text-align:center; border:1px dashed #ccc;">
                     施設アイコンをタップすると<br>詳細説明を確認できます
                 </div>
             `;
 
-            content.innerHTML = html;
-            modal.style.display = 'flex';
-        };
+                content.innerHTML = html;
+                modal.style.display = 'flex';
+            };
 
-        window.showCatalogDetail = function (type) {
-            SoundManager.playSE('select');
-            const b = BUILDINGS[type];
-            const content = document.getElementById('catalog-content');
+            window.showCatalogDetail = function (type) {
+                SoundManager.playSE('select');
+                const b = BUILDINGS[type];
+                const content = document.getElementById('catalog-content');
 
-            // Lv.1での効果を表示
-            const prodHtml = getBuildingEffectHtml(type, 1);
+                // Lv.1での効果を表示
+                const prodHtml = getBuildingEffectHtml(type, 1);
 
-            const costStr = formatCostWithColor(b.cost);
+                const costStr = formatCostWithColor(b.cost);
 
-            const typeIndex = BUILDING_KEYS.indexOf(type);
-            const isStandardLimited = (typeIndex >= LIMIT_START_INDEX && typeIndex !== -1);
-            const isSpecialLimited = ['well', 'inn', 'clocktower'].includes(type);
+                const typeIndex = BUILDING_KEYS.indexOf(type);
+                const isStandardLimited = (typeIndex >= LIMIT_START_INDEX && typeIndex !== -1);
+                const isSpecialLimited = ['well', 'inn', 'clocktower'].includes(type);
 
-            let limitStr = '無制限 (土地依存)';
-            if (isSpecialLimited) limitStr = '2つまで';
-            else if (isStandardLimited) limitStr = '4つまで';
+                let limitStr = '無制限 (土地依存)';
+                if (isSpecialLimited) limitStr = '2つまで';
+                else if (isStandardLimited) limitStr = '4つまで';
 
-            content.innerHTML = `
+                content.innerHTML = `
                 <button class="back-btn" onclick="openCatalog()">
                     <span>◀</span> 一覧に戻る
                 </button>
@@ -4299,57 +4409,57 @@
                     </div>
                 </div>
             `;
-        };
-
-        window.openBuildingList = function () {
-            SoundManager.playSE('select');
-            closeModal('modal-menu');
-            const modal = document.getElementById('modal-building-list');
-            const content = document.getElementById('building-list-content');
-
-            let html = '<div style="font-weight:bold; margin-bottom:5px; color:#2c3e50;">🌍 マップ上の施設</div>';
-
-            let mapBuildings = [];
-            gameState.tiles.forEach((t, i) => {
-                if (t.type && !t.type.endsWith('_part')) {
-                    mapBuildings.push({ tile: t, index: i });
-                }
-            });
-
-            const getResScore = (type) => {
-                const b = BUILDINGS[type];
-                if (b.prod.money) return 1;
-                if (b.prod.food) return 2;
-                if (b.prod.wood) return 3;
-                if (b.prod.stone) return 4;
-                if (b.prod.iron) return 5;
-                return 6;
-            };
-            const sortFn = (a, b) => {
-                const typeA = a.tile ? a.tile.type : a.type;
-                const lvlA = a.tile ? a.tile.level : a.level;
-                const typeB = b.tile ? b.tile.type : b.type;
-                const lvlB = b.tile ? b.tile.level : b.level;
-
-                const sA = getResScore(typeA);
-                const sB = getResScore(typeB);
-
-                if (sA !== sB) return sA - sB;
-                return lvlB - lvlA;
             };
 
-            mapBuildings.sort(sortFn);
+            window.openBuildingList = function () {
+                SoundManager.playSE('select');
+                closeModal('modal-menu');
+                const modal = document.getElementById('modal-building-list');
+                const content = document.getElementById('building-list-content');
 
-            if (mapBuildings.length === 0) {
-                html += '<p style="color:#999; font-size:0.9em;">施設はありません</p>';
-            } else {
-                mapBuildings.forEach(item => {
-                    const b = BUILDINGS[item.tile.type];
-                    const level = item.tile.level;
+                let html = '<div style="font-weight:bold; margin-bottom:5px; color:#2c3e50;">🌍 マップ上の施設</div>';
 
-                    const prodStr = getBuildingEffectHtml(item.tile.type, level);
+                let mapBuildings = [];
+                gameState.tiles.forEach((t, i) => {
+                    if (t.type && !t.type.endsWith('_part')) {
+                        mapBuildings.push({ tile: t, index: i });
+                    }
+                });
 
-                    html += `
+                const getResScore = (type) => {
+                    const b = BUILDINGS[type];
+                    if (b.prod.money) return 1;
+                    if (b.prod.food) return 2;
+                    if (b.prod.wood) return 3;
+                    if (b.prod.stone) return 4;
+                    if (b.prod.iron) return 5;
+                    return 6;
+                };
+                const sortFn = (a, b) => {
+                    const typeA = a.tile ? a.tile.type : a.type;
+                    const lvlA = a.tile ? a.tile.level : a.level;
+                    const typeB = b.tile ? b.tile.type : b.type;
+                    const lvlB = b.tile ? b.tile.level : b.level;
+
+                    const sA = getResScore(typeA);
+                    const sB = getResScore(typeB);
+
+                    if (sA !== sB) return sA - sB;
+                    return lvlB - lvlA;
+                };
+
+                mapBuildings.sort(sortFn);
+
+                if (mapBuildings.length === 0) {
+                    html += '<p style="color:#999; font-size:0.9em;">施設はありません</p>';
+                } else {
+                    mapBuildings.forEach(item => {
+                        const b = BUILDINGS[item.tile.type];
+                        const level = item.tile.level;
+
+                        const prodStr = getBuildingEffectHtml(item.tile.type, level);
+
+                        html += `
                     <div class="building-item" style="background:white; margin-bottom:5px;">
                         <div class="building-info">
                             <strong>${b.icon} ${b.name} (Lv.${level})</strong>
@@ -4358,23 +4468,23 @@
                         <button onclick="focusTile(${item.index})" style="padding:5px 10px; font-size:0.8em;">詳細</button>
                     </div>
                 `;
-                });
-            }
+                    });
+                }
 
-            html += '<div style="font-weight:bold; margin-top:15px; margin-bottom:5px; color:#7f8c8d; border-top:1px dashed #ccc; padding-top:10px;">📦 保管庫の施設</div>';
+                html += '<div style="font-weight:bold; margin-top:15px; margin-bottom:5px; color:#7f8c8d; border-top:1px dashed #ccc; padding-top:10px;">📦 保管庫の施設</div>';
 
-            if (gameState.inventory.length === 0) {
-                html += '<p style="color:#999; font-size:0.9em;">保管庫は空です</p>';
-            } else {
-                let sortedInv = [...gameState.inventory];
-                sortedInv.sort(sortFn);
+                if (gameState.inventory.length === 0) {
+                    html += '<p style="color:#999; font-size:0.9em;">保管庫は空です</p>';
+                } else {
+                    let sortedInv = [...gameState.inventory];
+                    sortedInv.sort(sortFn);
 
-                sortedInv.forEach(item => {
-                    const b = BUILDINGS[item.type];
-                    // Inventory items also show effect
-                    const prodStr = getBuildingEffectHtml(item.type, item.level);
+                    sortedInv.forEach(item => {
+                        const b = BUILDINGS[item.type];
+                        // Inventory items also show effect
+                        const prodStr = getBuildingEffectHtml(item.type, item.level);
 
-                    html += `
+                        html += `
                     <div class="building-item" style="background:#f5f5f5; color:#666;">
                         <div class="building-info">
                             <strong>${b.icon} ${b.name} (Lv.${item.level})</strong>
@@ -4383,118 +4493,118 @@
                         <span style="font-size:0.8em; background:#eee; padding:3px 6px; border-radius:4px;">保管中</span>
                     </div>
                 `;
-                });
-            }
-
-            content.innerHTML = html;
-            modal.style.display = 'flex';
-        };
-
-        window.focusTile = function (index) {
-            closeModal('modal-building-list');
-            selectTile(index);
-
-            const tObj = tileMeshes[index];
-            if (tObj && camera) {
-                const targetX = tObj.mesh.position.x;
-                const targetZ = tObj.mesh.position.z;
-
-                camera.position.x = targetX + 20;
-                camera.position.z = targetZ + 20;
-                camera.updateProjectionMatrix();
-            }
-        };
-
-        window.actLinkID = function () {
-            SoundManager.playSE('select');
-            const input = document.getElementById('restore-uid-input');
-            const targetUid = input.value.trim();
-            if (!targetUid) return showToast("⚠️ IDを入力してください");
-
-            if (!confirm("⚠️ ID連携モード\n\n入力したIDのデータを『共有』してプレイします。\n複数の端末で同じデータを同期できます。\n(※Firebaseのルール設定が必要です)\n\n切り替えますか？")) return;
-
-            localStorage.setItem('kingdomBuilder_sharedId', targetUid);
-            location.reload();
-        };
-
-        window.actUnlinkID = function () {
-            SoundManager.playSE('cancel');
-            if (!confirm("連携を解除し、本来の自分のIDに戻りますか？")) return;
-            localStorage.removeItem('kingdomBuilder_sharedId');
-            location.reload();
-        }
-
-        window.actBuyBuilder = function () {
-            const cost = getBuilderCost();
-            if (gameState.resources.money >= cost) {
-                gameState.resources.money -= cost;
-                gameState.maxBuilders++;
-                SoundManager.playSE('collect'); // Investment sound
-                saveGame();
-                updateHeader();
-                openMenu();
-            }
-        };
-
-        function updateHeader() {
-            for (let k in gameState.resources) document.getElementById('display-' + k).innerText = Math.floor(gameState.resources[k]).toLocaleString();
-            document.getElementById('display-rank').innerText = gameState.rank;
-            document.getElementById('display-next-xp').innerText = (getNextRankXP(gameState.rank) - gameState.xp).toLocaleString();
-            document.getElementById('display-xp-bar').style.width = Math.min(100, (gameState.xp / getNextRankXP(gameState.rank)) * 100) + '%';
-
-            const active = getActiveBuilders();
-            const max = gameState.maxBuilders;
-            const builderEl = document.getElementById('display-builders');
-            builderEl.innerText = `${active}/${max}`;
-            builderEl.style.color = active >= max ? 'red' : '#2c3e50';
-        }
-
-        function onWindowResize() {
-            const c = document.getElementById('game-container');
-            if (!c) return;
-            const width = c.clientWidth || window.innerWidth;
-            const height = c.clientHeight || window.innerHeight;
-            const aspect = width / height;
-            const d = 10;
-
-            if (camera && renderer) {
-                camera.left = -d * aspect;
-                camera.right = d * aspect;
-                camera.top = d;
-                camera.bottom = -d;
-                camera.updateProjectionMatrix();
-                renderer.setSize(width, height);
-            }
-        }
-
-        function processOfflineProgress() {
-            try {
-                const now = Date.now();
-                const sec = (now - gameState.lastSaveTime) / 1000;
-                if (sec > 10) {
-                    let rep = ""; let built = 0; let earn = {};
-                    gameState.tiles.forEach(t => {
-                        if (t.finishTime && t.finishTime <= now) { t.level++; t.finishTime = null; built++; gameState.xp += Math.floor(getBuildTime(t.type, t.level - 1) / 1000); }
-                        if (t.type && t.level > 0 && !t.finishTime) {
-                            const b = BUILDINGS[t.type]; const caps = getStorageCapacity(t.type, t.level);
-                            for (let r in b.prod) if (b.prod[r] > 0) {
-                                if (!earn[r]) earn[r] = 0;
-                                const add = Math.min(caps[r] - (t.stored[r] || 0), b.prod[r] * t.level * Math.pow(1.05, t.level - 1) * sec);
-                                if (add > 0) { t.stored[r] = (t.stored[r] || 0) + add; earn[r] += add; }
-                            }
-                        }
                     });
-                    if (built > 0) rep += `<div>🏗️ ${built}件完了</div>`;
-                    for (let r in earn) if (earn[r] > 1) rep += `<div>+${Math.floor(earn[r]).toLocaleString()} ${r}</div>`;
-                    if (rep) { document.getElementById('offline-report').innerHTML = rep; document.getElementById('modal-offline').style.display = 'flex'; }
-                    addXP(0); // ランクアップチェック
-                    gameState.lastSaveTime = now;
-                    saveGame(); // オフライン経過分を保存
                 }
-            } catch (e) {
-                console.error(e);
+
+                content.innerHTML = html;
+                modal.style.display = 'flex';
+            };
+
+            window.focusTile = function (index) {
+                closeModal('modal-building-list');
+                selectTile(index);
+
+                const tObj = tileMeshes[index];
+                if (tObj && camera) {
+                    const targetX = tObj.mesh.position.x;
+                    const targetZ = tObj.mesh.position.z;
+
+                    camera.position.x = targetX + 20;
+                    camera.position.z = targetZ + 20;
+                    camera.updateProjectionMatrix();
+                }
+            };
+
+            window.actLinkID = function () {
+                SoundManager.playSE('select');
+                const input = document.getElementById('restore-uid-input');
+                const targetUid = input.value.trim();
+                if (!targetUid) return showToast("⚠️ IDを入力してください");
+
+                if (!confirm("⚠️ ID連携モード\n\n入力したIDのデータを『共有』してプレイします。\n複数の端末で同じデータを同期できます。\n(※Firebaseのルール設定が必要です)\n\n切り替えますか？")) return;
+
+                localStorage.setItem('kingdomBuilder_sharedId', targetUid);
+                location.reload();
+            };
+
+            window.actUnlinkID = function () {
+                SoundManager.playSE('cancel');
+                if (!confirm("連携を解除し、本来の自分のIDに戻りますか？")) return;
+                localStorage.removeItem('kingdomBuilder_sharedId');
+                location.reload();
             }
-        }
+
+            window.actBuyBuilder = function () {
+                const cost = getBuilderCost();
+                if (gameState.resources.money >= cost) {
+                    gameState.resources.money -= cost;
+                    gameState.maxBuilders++;
+                    SoundManager.playSE('collect'); // Investment sound
+                    saveGame();
+                    updateHeader();
+                    openMenu();
+                }
+            };
+
+            function updateHeader() {
+                for (let k in gameState.resources) document.getElementById('display-' + k).innerText = Math.floor(gameState.resources[k]).toLocaleString();
+                document.getElementById('display-rank').innerText = gameState.rank;
+                document.getElementById('display-next-xp').innerText = (getNextRankXP(gameState.rank) - gameState.xp).toLocaleString();
+                document.getElementById('display-xp-bar').style.width = Math.min(100, (gameState.xp / getNextRankXP(gameState.rank)) * 100) + '%';
+
+                const active = getActiveBuilders();
+                const max = gameState.maxBuilders;
+                const builderEl = document.getElementById('display-builders');
+                builderEl.innerText = `${active}/${max}`;
+                builderEl.style.color = active >= max ? 'red' : '#2c3e50';
+            }
+
+            function onWindowResize() {
+                const c = document.getElementById('game-container');
+                if (!c) return;
+                const width = c.clientWidth || window.innerWidth;
+                const height = c.clientHeight || window.innerHeight;
+                const aspect = width / height;
+                const d = 10;
+
+                if (camera && renderer) {
+                    camera.left = -d * aspect;
+                    camera.right = d * aspect;
+                    camera.top = d;
+                    camera.bottom = -d;
+                    camera.updateProjectionMatrix();
+                    renderer.setSize(width, height);
+                }
+            }
+
+            function processOfflineProgress() {
+                try {
+                    const now = Date.now();
+                    const sec = (now - gameState.lastSaveTime) / 1000;
+                    if (sec > 10) {
+                        let rep = ""; let built = 0; let earn = {};
+                        gameState.tiles.forEach(t => {
+                            if (t.finishTime && t.finishTime <= now) { t.level++; t.finishTime = null; built++; gameState.xp += Math.floor(getBuildTime(t.type, t.level - 1) / 1000); }
+                            if (t.type && t.level > 0 && !t.finishTime) {
+                                const b = BUILDINGS[t.type]; const caps = getStorageCapacity(t.type, t.level);
+                                for (let r in b.prod) if (b.prod[r] > 0) {
+                                    if (!earn[r]) earn[r] = 0;
+                                    const add = Math.min(caps[r] - (t.stored[r] || 0), b.prod[r] * t.level * Math.pow(1.05, t.level - 1) * sec);
+                                    if (add > 0) { t.stored[r] = (t.stored[r] || 0) + add; earn[r] += add; }
+                                }
+                            }
+                        });
+                        if (built > 0) rep += `<div>🏗️ ${built}件完了</div>`;
+                        for (let r in earn) if (earn[r] > 1) rep += `<div>+${Math.floor(earn[r]).toLocaleString()} ${r}</div>`;
+                        if (rep) { document.getElementById('offline-report').innerHTML = rep; document.getElementById('modal-offline').style.display = 'flex'; }
+                        addXP(0); // ランクアップチェック
+                        gameState.lastSaveTime = now;
+                        saveGame(); // オフライン経過分を保存
+                    }
+                } catch (e) {
+                    console.error(e);
+                }
+            }
 
     </script>
 </body>
