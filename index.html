@@ -1040,21 +1040,21 @@
             },
             bank: {
                 name: "銀行", icon: "🏦",
-                desc: "【金融】お金の生産施設(民家/市場/鍛冶屋/宿屋)の生産量と、お金の貯蔵上限を増やします(Lv1: 1.27倍)。",
+                desc: "【金融】お金の生産施設(民家/市場/鍛冶屋/宿屋)の生産量と、お金の貯蔵上限を増やします(Lv1: 1.3倍)。",
                 prod: {}, // 特殊効果
                 cost: { money: 500000, wood: 200000, stone: 200000, iron: 100000 },
                 baseTime: 500000
             },
             granary: {
                 name: "穀倉", icon: "🛖",
-                desc: "【農業】食料の生産施設(畑)の生産量と、食料の貯蔵上限を増やします(Lv1: 1.27倍)。",
+                desc: "【農業】食料の生産施設(畑)の生産量と、食料の貯蔵上限を増やします(Lv1: 1.3倍)。",
                 prod: {},
                 cost: { money: 600000, wood: 240000, stone: 240000, iron: 120000 },
                 baseTime: 600000
             },
             lumber_hub: {
                 name: "製材所", icon: "🪵",
-                desc: "【工業】木材の生産施設(伐採所/森林)の生産量と、木材の貯蔵上限を増やします(Lv1: 1.27倍)。",
+                desc: "【工業】木材の生産施設(伐採所/森林)の生産量と、木材の貯蔵上限を増やします(Lv1: 1.3倍)。",
                 prod: {},
                 cost: { money: 700000, wood: 280000, stone: 280000, iron: 140000 },
                 baseTime: 700000
@@ -3146,7 +3146,7 @@
                             }
                         }
 
-                        const caps = getStorageCapacity(tile.type, tile.level);
+                        const caps = getStorageCapacity(tile.type, tile.level, i);
                         for (let r in b.prod) {
                             if (b.prod[r] > 0) {
                                 // multiplierを適用
@@ -3604,7 +3604,7 @@
             return r;
         }
 
-        function getStorageCapacity(t, l) {
+        function getStorageCapacity(t, l, tileIndex = -1) {
             const b = BUILDINGS[t], s = CONFIG.storageHours * 3600, c = {};
 
             // Calculate Boosters (Simplified logic)
@@ -3620,13 +3620,40 @@
             const granaryMult = calcBoost('granary');
             const lumberMult = calcBoost('lumber_hub');
 
+            // Calculate Adjacency Buffs (Well -> Farm, Forest -> Lumber)
+            let adjacencyMult = 1.0;
+            if (tileIndex >= 0 && typeof gameState !== 'undefined') {
+                if (t === 'farm') {
+                    // Check Wells
+                    const adj = getAdjacentTiles(tileIndex);
+                    const maxWellLevel = adj.reduce((max, t) => {
+                        if (t && t.type === 'well' && t.level > 0 && !t.finishTime) {
+                            return Math.max(max, t.level);
+                        }
+                        return max;
+                    }, 0);
+                    if (maxWellLevel > 0) {
+                        adjacencyMult *= (1.0 + 0.3 + (maxWellLevel - 1) * 0.02);
+                    }
+                } else if (t === 'lumber') {
+                    // Check Forests
+                    const adj = getAdjacentTiles(tileIndex);
+                    const hasForest = adj.some(t => t && t.type === 'forest'); // unlock checked in generic logic usually? Forests are usually static but here they are buildings.
+                    // The logic in gameLogicLoop for lumber is:
+                    // if (tile.type === 'lumber') { const adj = ...; if (adj.some(t => t && t.type === 'forest')) multiplier *= 1.2; }
+                    if (hasForest) {
+                        adjacencyMult *= 1.2;
+                    }
+                }
+            }
+
             for (let r in b.prod) {
                 if (b.prod[r] > 0) {
                     let capacity = b.prod[r] * l * Math.pow(1.05, l - 1) * s;
 
                     if (r === 'money') capacity *= bankMult;
-                    if (r === 'food') capacity *= granaryMult;
-                    if (r === 'wood') capacity *= lumberMult;
+                    if (r === 'food') capacity *= (granaryMult * adjacencyMult); // Apply Adjacency to Food
+                    if (r === 'wood') capacity *= (lumberMult * adjacencyMult);  // Apply Adjacency to Wood
 
                     c[r] = capacity;
                 }
@@ -3953,7 +3980,7 @@
                 const next = tile.level + 1;
                 const c = getCost(tile.type, tile.level);
                 const afford = checkAfford(c);
-                const caps = getStorageCapacity(tile.type, tile.level);
+                const caps = getStorageCapacity(tile.type, tile.level, index);
                 // Use helper for upgrade cost
                 const costStr = formatCostWithColor(c);
 
@@ -4505,7 +4532,7 @@
 
             const typeIndex = BUILDING_KEYS.indexOf(type);
             const isStandardLimited = (typeIndex >= LIMIT_START_INDEX && typeIndex !== -1);
-            const isSpecialLimited = ['well', 'inn', 'clocktower'].includes(type);
+            const isSpecialLimited = ['well', 'inn', 'clocktower', 'bank', 'granary', 'lumber_hub'].includes(type);
 
             let limitStr = '無制限 (土地依存)';
             if (isSpecialLimited) limitStr = '2つまで';
