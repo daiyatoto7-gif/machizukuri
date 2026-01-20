@@ -5081,15 +5081,36 @@
         function processOfflineProgress() {
             try {
                 const now = Date.now();
-                const sec = (now - gameState.lastSaveTime) / 1000;
-                if (sec > 10) {
+                const totalOfflineSec = (now - gameState.lastSaveTime) / 1000;
+
+                if (totalOfflineSec > 10) {
                     let rep = ""; let built = 0; let earn = {};
 
                     // Offline Processing with FULL production logic
                     const globalBuffs = getGlobalBuffs();
 
                     gameState.tiles.forEach((t, i) => {
-                        if (t.finishTime && t.finishTime <= now) { t.level++; t.finishTime = null; built++; gameState.xp += Math.floor(getBuildTime(t.type, t.level - 1) / 1000); }
+                        let activeSeconds = totalOfflineSec;
+                        let justFinished = false;
+
+                        if (t.finishTime) {
+                            if (t.finishTime <= now) {
+                                // Finished while offline
+                                // Active duration is only from finishTime to now
+                                const finishDelayV = (t.finishTime - gameState.lastSaveTime) / 1000;
+                                activeSeconds = totalOfflineSec - finishDelayV;
+                                if (activeSeconds < 0) activeSeconds = 0;
+
+                                t.level++;
+                                t.finishTime = null;
+                                built++;
+                                gameState.xp += Math.floor(getBuildTime(t.type, t.level - 1) / 1000);
+                                justFinished = true;
+                            } else {
+                                // Still building
+                                activeSeconds = 0;
+                            }
+                        }
 
                         // Production Logic
                         if (t.type && t.level > 0 && !t.finishTime) {
@@ -5097,9 +5118,9 @@
                             const caps = getStorageCapacity(t.type, t.level);
 
                             // Check Efficiency
-                            const efficiency = getTileProductionMultiplier(i, globalBuffs);
+                            const efficiency = getTileProductionMultiplier(i, globalBuffs, true); // isOffline=true
 
-                            if (efficiency > 0) {
+                            if (efficiency > 0 && activeSeconds > 0) {
                                 for (let r in b.prod) if (b.prod[r] > 0) {
                                     if (!earn[r]) earn[r] = 0;
 
@@ -5108,7 +5129,7 @@
                                     if (r === 'food' && ['farm'].includes(t.type)) finalMult *= globalBuffs.granary;
                                     if (r === 'wood' && ['lumber', 'forest'].includes(t.type)) finalMult *= globalBuffs.lumber_hub;
 
-                                    const add = Math.min(caps[r] - (t.stored[r] || 0), b.prod[r] * t.level * Math.pow(1.05, t.level - 1) * finalMult * sec);
+                                    const add = Math.min(caps[r] - (t.stored[r] || 0), b.prod[r] * t.level * Math.pow(1.05, t.level - 1) * finalMult * activeSeconds);
                                     if (add > 0) { t.stored[r] = (t.stored[r] || 0) + add; earn[r] += add; }
                                 }
                             }
