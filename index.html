@@ -3088,12 +3088,11 @@
             });
 
             // Boosters (Bank, Granary, Lumber Hub)
-            // Works if level > 0 (even if upgrading)
             const calcBoost = (type) => {
                 let add = 0;
                 gameState.tiles.forEach(t => {
                     if (t.type === type && t.level > 0) {
-                        add += 0.27 + (t.level * 0.03); // Lv1=1.3
+                        add += 0.27 + (t.level * 0.03);
                     }
                 });
                 return 1.0 + add;
@@ -3102,53 +3101,214 @@
             buffs.bank = calcBoost('bank');
             buffs.granary = calcBoost('granary');
             buffs.lumber_hub = calcBoost('lumber_hub');
+            return buffs;
+        }
+
+        // Weighted Buffs for Offline: Accounts for buildings finishing mid-offline
+        function getWeightedGlobalBuffs(totalSeconds, lastSaveTime, completionTimes) {
+            let buffs = { speed: 1.0, bank: 1.0, granary: 1.0, lumber_hub: 1.0 };
+
+            // Helper to integrate bonus over time
+            const integrateBonus = (tile, idx, baseBonusPerLevel, levelScale) => {
+                let duration = totalSeconds;
+
+                // Check if it finished during this session
+                const finishedAt = completionTimes ? completionTimes.get(idx) : null;
+
+                if (finishedAt) {
+                    // Finished during offline (Lv0 -> Lv1 or LvX -> LvX+1)
+                    // Active at CURRENT level only for (Now - FinishedAt)
+                    const finishDelay = (finishedAt - lastSaveTime) / 1000;
+                    duration = totalSeconds - finishDelay;
+                    if (duration < 0) duration = 0;
+                } else if (tile.finishTime) {
+                    // Still building (Future finish)
+                    // Currently constructing -> Level 0 contribution (or Base level if upgrading)
+                    // For Boosters: "level > 0".
+                    // If upgrading Lv1->2, t.level is 1. Effective is 1. 
+                    // Duration is Full.
+                    // If New Build, t.level is 0. Effective is 0.
+                    // So we just use Current Level * Full Duration.
+                    duration = totalSeconds;
+                }
+
+                // If finishedAt existed: t.level is high level. We apply it for 'duration'.
+                // The pre-finish time (low level) contribution is ignored here?
+                // Example: Upgrading Lv1->2. 
+                // Pre: Lv1. Post: Lv2.
+                // This function currently only adds ONE term: (duration * CurrentLevelEffect).
+                // We should add the Pre-term too.
+
+                let bonus = 0;
+                // Post-term (Current Level) - applies for 'duration'
+                if (tile.level > 0) {
+                    bonus += duration * (baseBonusPerLevel + tile.level * levelScale);
+                }
+
+                // Pre-term (Previous Level) - applies for (total - duration)
+                // Only if it finished (was upgrading)
+                if (finishedAt) {
+                    const preDuration = totalSeconds - duration;
+                    const preLevel = Math.max(0, tile.level - 1);
+                    if (preLevel > 0) {
+                        bonus += preDuration * (baseBonusPerLevel + preLevel * levelScale);
+                    }
+                }
+
+                return bonus;
+            };
+
+            let totalSpeedBonusSeconds = 0;
+            gameState.tiles.forEach((t, i) => {
+                if (t.type === 'clocktower') { // Count even if level 0 if about to finish? integrate handles level check
+                    totalSpeedBonusSeconds += integrateBonus(t, i, 0.014, 0.006); // 0.02 base = 0.014 + 0.006*1
+                }
+            });
+            buffs.speed += (totalSpeedBonusSeconds / totalSeconds);
+
+            const calcWeightedBoost = (type) => {
+                let totalAddSeconds = 0;
+                gameState.tiles.forEach((t, i) => {
+                    if (t.type === type) {
+                        totalAddSeconds += integrateBonus(t, i, 0.27, 0.03);
+                    }
+                });
+                return 1.0 + (totalAddSeconds / totalSeconds);
+            };
+
+            buffs.bank = calcWeightedBoost('bank');
+            buffs.granary = calcWeightedBoost('granary');
+            buffs.lumber_hub = calcWeightedBoost('lumber_hub');
 
             return buffs;
         }
 
-        function getTileProductionMultiplier(index, globalBuffs, isOffline = false) {
+        function getTileProductionMultiplier(index, globalBuffs, isOffline = false, offlineCtx = null) {
             const tile = gameState.tiles[index];
             if (!tile || !tile.type || tile.level <= 0) return 0;
-            // Online loop checks finishTime before calling. Offline loop checks it too.
-            // So we assume tile is active-ish. (Caller handles start conditions)
+
+            const getWeightedLevel = (t, idx) => {
+                if (!isOffline || !offlineCtx) return t.level;
+                const { totalSeconds, lastSaveTime, completionTimes } = offlineCtx;
+
+                let wL = t.level; // Current Level (High)
+
+                const finishedAt = completionTimes ? completionTimes.get(idx) : null;
+                if (finishedAt) {
+                    // Weighted Average of (Level - 1) and (Level)
+                    const finishDelay = (finishedAt - lastSaveTime) / 1000;
+                    const durHigh = Math.max(0, totalSeconds - finishDelay);
+                    const durLow = Math.max(0, totalSeconds - durHigh);
+
+                    const lowL = Math.max(0, t.level - 1);
+                    wL = (lowL * durLow + t.level * durHigh) / totalSeconds;
+                }
+                // If still building (finishTime exists), t.level is Base Level (Low). Correct.
+
+                return wL;
+            };
+
+            const getActiveDurationRatio = (t, idx) => {
+                if (!isOffline || !offlineCtx) {
+                    return (t.level > 0 && !t.finishTime) ? 1.0 : 0.0;
+                }
+                const { totalSeconds, lastSaveTime, completionTimes } = offlineCtx;
+
+                const finishedAt = completionTimes ? completionTimes.get(idx) : null;
+                if (finishedAt) {
+                    // Finished during offline.
+                    // If it was Lv0 -> Lv1, active only after finish.
+                    // If it was Lv X -> X+1, active whole time.
+                    if (t.level === 1) {
+                        const finishDelay = (finishedAt - lastSaveTime) / 1000;
+                        const activeDur = Math.max(0, totalSeconds - finishDelay);
+                        return activeDur / totalSeconds;
+                    } else {
+                        return 1.0;
+                    }
+                }
+
+                if (t.finishTime) return 0.0; // Still building
+                if (t.level > 0) return 1.0;  // Active whole time
+                return 0.0;
+            };
 
             let mult = globalBuffs.speed;
 
             // 1. Well -> Farm
             if (tile.type === 'farm') {
-                const adj = getAdjacentTiles(index);
-                const maxWellLevel = adj.reduce((max, t) => {
-                    if (t && t.type === 'well' && t.level > 0 && !t.finishTime) {
-                        return Math.max(max, t.level);
+                const gridSize = gameState.gridSize;
+                const checkOffsets = [-1, 1, -gridSize, gridSize];
+
+                let maxAvgBonus = 0;
+
+                checkOffsets.forEach(offset => {
+                    const nIdx = index + offset;
+                    // Check bounds (basic) - assuming valid grid linear logic (pseudo-valid)
+                    // Better: check if nIdx is valid and adjacent in 2D
+                    // But for now relying on checking gameState.tiles[nIdx] existence
+                    if (gameState.tiles[nIdx]) {
+                        const t = gameState.tiles[nIdx];
+                        if (t && t.type === 'well') {
+                            const wL = getWeightedLevel(t, nIdx);
+                            if (wL > 0) {
+                                const bonus = (wL < 1) ? wL * 0.3 : 0.3 + (wL - 1) * 0.03;
+                                if (bonus > maxAvgBonus) maxAvgBonus = bonus;
+                            }
+                        }
                     }
-                    return max;
-                }, 0);
-                if (maxWellLevel > 0) {
-                    mult *= (1.27 + maxWellLevel * 0.03);
-                }
+                });
+
+                if (maxAvgBonus > 0) mult *= (1 + maxAvgBonus);
             }
 
             // 2. Inn Condition
             if (tile.type === 'inn') {
-                const adj = getAdjacentTiles(index);
-                const hasMarket = adj.some(t => t && t.type === 'market');
-                const hasHouse = adj.some(t => t && t.type === 'house');
-                if (!hasMarket || !hasHouse) return 0;
+                const gridSize = gameState.gridSize;
+                const checkOffsets = [-1, 1, -gridSize, gridSize];
+
+                let maxMarketRatio = 0.0;
+                let maxHouseRatio = 0.0;
+
+                checkOffsets.forEach(offset => {
+                    const nIdx = index + offset;
+                    if (gameState.tiles[nIdx]) {
+                        const t = gameState.tiles[nIdx];
+                        if (t) {
+                            if (t.type === 'market') maxMarketRatio = Math.max(maxMarketRatio, getActiveDurationRatio(t, nIdx));
+                            if (t.type === 'house') maxHouseRatio = Math.max(maxHouseRatio, getActiveDurationRatio(t, nIdx));
+                        }
+                    }
+                });
+
+                // Effective ratio is min of requirement existences
+                const ratio = Math.min(maxMarketRatio, maxHouseRatio);
+                if (ratio <= 0) return 0;
+                mult *= ratio;
             }
 
             // 3. Forest Synergy
             if (tile.type === 'forest') {
-                const adj = getAdjacentTiles(index);
-                const slaveOffset = (tile.rotation % 2 === 0) ? gameState.gridSize : 1;
+                const gridSize = gameState.gridSize;
+                const slaveOffset = (tile.rotation % 2 === 0) ? gridSize : 1;
                 const slaveIdx = index + slaveOffset;
-                if (gameState.tiles[slaveIdx] && gameState.tiles[slaveIdx].masterIndex === index) {
-                    const slaveAdj = getAdjacentTiles(slaveIdx);
-                    slaveAdj.forEach(t => adj.push(t));
-                }
-                const unique = [...new Set(adj)];
-                const lumberCount = unique.filter(t => t && t.type === 'lumber' && (t.level > 0 || t.finishTime)).length;
-                if (lumberCount > 0) {
-                    mult *= (1 + 0.2 * lumberCount);
+
+                const checkIdxs = new Set();
+                [index, slaveIdx].forEach(center => {
+                    [-1, 1, -gridSize, gridSize].forEach(offset => checkIdxs.add(center + offset));
+                });
+
+                let weightedCount = 0;
+                checkIdxs.forEach(nIdx => {
+                    const t = gameState.tiles[nIdx];
+                    if (t && t.type === 'lumber') {
+                        const wL = getWeightedLevel(t, nIdx);
+                        weightedCount += Math.min(1, wL);
+                    }
+                });
+
+                if (weightedCount > 0) {
+                    mult *= (1 + 0.2 * weightedCount);
                 }
             }
 
@@ -3644,11 +3804,25 @@
             return r;
         }
 
-        function getStorageCapacity(t, l, tileIndex = -1) {
+        function getStorageCapacity(t, l, tileIndex = -1, passedBuffs = null) {
             const b = BUILDINGS[t];
             const s = CONFIG.storageHours * 3600;
             const c = {};
-            const globalBuffs = getGlobalBuffs(); // Use shared helper
+            // Use passed (weighted) buffs if available, else static global
+            const globalBuffs = passedBuffs || getGlobalBuffs();
+
+            // Adjacency for Storage
+            let adjacencyMult = 1.0;
+            if (tileIndex >= 0) {
+                if (t === 'farm') {
+                    const adj = getAdjacentTiles(tileIndex);
+                    const maxWell = adj.reduce((max, t) => (t && t.type === 'well' && t.level > 0 && !t.finishTime) ? Math.max(max, t.level) : max, 0);
+                    if (maxWell > 0) adjacencyMult *= (1.3 + (maxWell - 1) * 0.03);
+                } else if (t === 'lumber') {
+                    const adj = getAdjacentTiles(tileIndex);
+                    if (adj.some(t => t && t.type === 'forest')) adjacencyMult *= 1.2;
+                }
+            }
 
             for (let r in b.prod) {
                 if (b.prod[r] > 0) {
@@ -3656,6 +3830,9 @@
                     if (r === 'money' && ['house', 'market', 'blacksmith', 'inn'].includes(t)) capMult *= globalBuffs.bank;
                     if (r === 'food' && ['farm'].includes(t)) capMult *= globalBuffs.granary;
                     if (r === 'wood' && ['lumber', 'forest'].includes(t)) capMult *= globalBuffs.lumber_hub;
+
+                    if (r === 'food') capMult *= adjacencyMult;
+                    if (r === 'wood') capMult *= adjacencyMult;
 
                     c[r] = b.prod[r] * l * Math.pow(1.05, l - 1) * s * capMult;
                 }
@@ -5085,40 +5262,46 @@
 
                 if (totalOfflineSec > 10) {
                     let rep = ""; let built = 0; let earn = {};
+                    const completionTimes = new Map();
 
-                    // Offline Processing with FULL production logic
-                    const globalBuffs = getGlobalBuffs();
+                    // 1. Event Pre-scan: Identify completions and update levels
+                    gameState.tiles.forEach((t, i) => {
+                        if (t.finishTime && t.finishTime <= now) {
+                            completionTimes.set(i, t.finishTime);
+                            t.level++;
+                            t.finishTime = null;
+                            built++;
+                            gameState.xp += Math.floor(getBuildTime(t.type, t.level - 1) / 1000);
+                        }
+                    });
 
+                    // 2. Calculate Weighted Global Buffs (using completion data)
+                    const globalBuffs = getWeightedGlobalBuffs(totalOfflineSec, gameState.lastSaveTime, completionTimes);
+                    const offlineCtx = { totalSeconds: totalOfflineSec, lastSaveTime: gameState.lastSaveTime, completionTimes };
+
+                    // 3. Production Loop
                     gameState.tiles.forEach((t, i) => {
                         let activeSeconds = totalOfflineSec;
-                        let justFinished = false;
+                        const finishedAt = completionTimes.get(i); // Check if this tile finished
 
-                        if (t.finishTime) {
-                            if (t.finishTime <= now) {
-                                // Finished while offline
-                                // Active duration is only from finishTime to now
-                                const finishDelayV = (t.finishTime - gameState.lastSaveTime) / 1000;
-                                activeSeconds = totalOfflineSec - finishDelayV;
-                                if (activeSeconds < 0) activeSeconds = 0;
-
-                                t.level++;
-                                t.finishTime = null;
-                                built++;
-                                gameState.xp += Math.floor(getBuildTime(t.type, t.level - 1) / 1000);
-                                justFinished = true;
-                            } else {
-                                // Still building
-                                activeSeconds = 0;
-                            }
+                        if (finishedAt) {
+                            // Finished during offline
+                            const finishDelayV = (finishedAt - gameState.lastSaveTime) / 1000;
+                            activeSeconds = totalOfflineSec - finishDelayV;
+                            if (activeSeconds < 0) activeSeconds = 0;
+                        } else if (t.finishTime) {
+                            // Still building
+                            activeSeconds = 0;
                         }
 
                         // Production Logic
                         if (t.type && t.level > 0 && !t.finishTime) {
                             const b = BUILDINGS[t.type];
-                            const caps = getStorageCapacity(t.type, t.level);
+                            // Use index 'i' for adjacency checks. Pass globalBuffs!
+                            const caps = getStorageCapacity(t.type, t.level, i, globalBuffs);
 
                             // Check Efficiency
-                            const efficiency = getTileProductionMultiplier(i, globalBuffs, true); // isOffline=true
+                            const efficiency = getTileProductionMultiplier(i, globalBuffs, true, offlineCtx); // Pass ctx
 
                             if (efficiency > 0 && activeSeconds > 0) {
                                 for (let r in b.prod) if (b.prod[r] > 0) {
@@ -5129,6 +5312,7 @@
                                     if (r === 'food' && ['farm'].includes(t.type)) finalMult *= globalBuffs.granary;
                                     if (r === 'wood' && ['lumber', 'forest'].includes(t.type)) finalMult *= globalBuffs.lumber_hub;
 
+                                    // Use activeSeconds for production duration
                                     const add = Math.min(caps[r] - (t.stored[r] || 0), b.prod[r] * t.level * Math.pow(1.05, t.level - 1) * finalMult * activeSeconds);
                                     if (add > 0) { t.stored[r] = (t.stored[r] || 0) + add; earn[r] += add; }
                                 }
