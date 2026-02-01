@@ -1066,6 +1066,14 @@
                 prod: {},
                 cost: { money: 700000, wood: 280000, stone: 280000, iron: 140000 },
                 baseTime: 700000
+            },
+            stone_plant: {
+                name: "石材加工場", icon: "🏭",
+                desc: "【工業】お金・食料・木材を消費して、大量の石材を生産します。稼働スイッチ式。",
+                prod: { stone: 20 }, // 4x spec
+                consume: { money: 50, food: 20, wood: 20 },
+                cost: { money: 2000000, wood: 500000, iron: 100000 },
+                baseTime: 86400000 // 24 hours
             }
         };
 
@@ -1080,7 +1088,7 @@
 
         function checkBuildingLimit(type) {
             // 特別制限: 井戸・宿屋・時計塔・銀行・穀倉・製材所は2つまで
-            if (['well', 'inn', 'clocktower', 'bank', 'granary', 'lumber_hub'].includes(type)) {
+            if (['well', 'inn', 'clocktower', 'bank', 'granary', 'lumber_hub', 'stone_plant'].includes(type)) {
                 if (getBuildingCount(type) >= 2) return false;
             }
 
@@ -3336,6 +3344,58 @@
                         const b = BUILDINGS[tile.type];
                         if (!b) return;
 
+                        // Stone Processing Plant Logic
+                        if (tile.type === 'stone_plant') {
+                            if (tile.isActive) {
+                                const costScale = tile.level * Math.pow(1.05, tile.level - 1);
+                                const moneyCost = (b.consume.money || 0) * costScale;
+                                const foodCost = (b.consume.food || 0) * costScale;
+                                const woodCost = (b.consume.wood || 0) * costScale;
+
+                                // Check Affordability
+                                if (gameState.resources.money >= moneyCost &&
+                                    gameState.resources.food >= foodCost &&
+                                    gameState.resources.wood >= woodCost) {
+
+                                    // Consume
+                                    gameState.resources.money -= moneyCost;
+                                    gameState.resources.food -= foodCost;
+                                    gameState.resources.wood -= woodCost;
+
+                                    // Produce Stone
+                                    // Spec: 20 base * level logic
+                                    const stoneProd = (b.prod.stone || 0) * tile.level * Math.pow(1.05, tile.level - 1);
+
+                                    // Add Stone directly to GLOBAL resources (no storage limit mentioned for this converter, or use stored?)
+                                    // "Produce stone" - typically goes to storage? 
+                                    // Spec says "Converts resources... to produce stone".
+                                    // Standard buildings use storage. Let's use storage to be consistent with harvest logic?
+                                    // OR directly add to global because it consumes global?
+                                    // Standard logic is: Produce -> Storage -> Manual Collect.
+                                    // If it consumes AUTOMATICALLY from global, maybe it should produce to Storage.
+                                    // Let's use Storage.
+
+                                    const caps = getStorageCapacity(tile.type, tile.level, i);
+                                    if (!tile.stored.stone) tile.stored.stone = 0;
+
+                                    // If full, stop consuming? Or waste?
+                                    // Let's stop if full to be kind.
+                                    if (tile.stored.stone < caps.stone) {
+                                        tile.stored.stone += stoneProd;
+                                        if (tile.stored.stone > caps.stone) tile.stored.stone = caps.stone;
+                                        dirty = true;
+                                    }
+                                } else {
+                                    // Auto Turn Off
+                                    tile.isActive = false;
+                                    showToast(`⚠️ 素材不足のため石材加工場(Lv.${tile.level})が停止しました`);
+                                    dirty = true;
+                                    if (selectedTileIndex === i) updatePanelUI();
+                                }
+                            }
+                            return; // Skip standard logic for this special building
+                        }
+
                         // Calculate efficiency
                         const efficiency = getTileProductionMultiplier(i, globalBuffs);
 
@@ -3896,6 +3956,7 @@
             if (type === 'bank') return 22;
             if (type === 'granary') return 24;
             if (type === 'lumber_hub') return 26;
+            if (type === 'stone_plant') return 28;
             if (type === 'well') return 10;
             if (type === 'inn' || type === 'clocktower') return 15;
             return 1;
@@ -4184,7 +4245,7 @@
                     let limitNum = 4;
                     // 正確な制限数を表示するためのロジック一致
                     const kIdx = BUILDING_KEYS.indexOf(k);
-                    if (['well', 'inn', 'clocktower', 'bank', 'granary', 'lumber_hub'].includes(k)) {
+                    if (['well', 'inn', 'clocktower', 'bank', 'granary', 'lumber_hub', 'stone_plant'].includes(k)) {
                         limitNum = 2;
                     } else if (kIdx >= LIMIT_START_INDEX) {
                         limitNum = 4;
@@ -4246,12 +4307,39 @@
                 for (let r in b.prod) if (b.prod[r] > 0) {
                     storeInfo += `<div>${(r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧')} ${Math.floor(tile.stored[r])}/${Math.floor(caps[r])}</div>`;
                 }
-                // If it's a utility building, storage might be empty, but that's fine. 
-                // Wait, if it's well/clocktower, they don't have storage. 
-                // Currently code assumes b.prod determines storage, but storage is actually mostly separate logic but often linked.
-                // Well/Clocktower have b.prod={} so storeInfo will be empty loop. Correct.
+
+                // Consumption Info for Stone Plant
+                let consumeInfo = "";
+                if (tile.type === 'stone_plant') {
+                    const costScale = tile.level * Math.pow(1.05, tile.level - 1);
+                    const mCost = (b.consume.money || 0) * costScale;
+                    const fCost = (b.consume.food || 0) * costScale;
+                    const wCost = (b.consume.wood || 0) * costScale;
+                    consumeInfo = `
+                        <div style="border-top:1px dashed #ccc; margin-top:5px; padding-top:5px; font-size:0.9em;">
+                            <strong>消費コスト:</strong><br>
+                            💰-${Math.floor(mCost)}/s 🌾-${Math.floor(fCost)}/s 🌲-${Math.floor(wCost)}/s
+                        </div>
+                    `;
+                }
 
                 const buildersBusy = getActiveBuilders() >= gameState.maxBuilders;
+
+                // Special Actions (Toggle)
+                let extraBtns = "";
+                if (tile.type === 'stone_plant') {
+                    const isActive = tile.isActive;
+                    extraBtns += `
+                        <button class="action-btn" onclick="actTogglePlant()" style="background-color:${isActive ? '#e74c3c' : '#2ecc71'}; margin-bottom:5px;">
+                            ${isActive ? '⏸ 停止する' : '▶ 稼働開始'}
+                        </button>
+                    `;
+                    if (isActive) {
+                        consumeInfo += `<div style="color:#2ecc71; font-weight:bold; font-size:0.9em; margin-top:2px;">✅ 稼働中</div>`;
+                    } else {
+                        consumeInfo += `<div style="color:#95a5a6; font-weight:bold; font-size:0.9em; margin-top:2px;">⏹ 停止中</div>`;
+                    }
+                }
 
                 content.innerHTML = `
                 <div style="text-align:center;">
@@ -4259,6 +4347,7 @@
                     <p style="font-size:0.85em; color:#666; margin:0 0 10px 0;">${b.desc}</p>
                     <div style="background:#f0f0f0; padding:5px; border-radius:5px; margin-bottom:5px;">
                         <strong>現在性能:</strong><br>${prodInfo}
+                        ${consumeInfo}
                     </div>
                     ${storeInfo ? `<div style="background:#e8f4f8; padding:5px; border-radius:5px; margin-bottom:10px;">
                         <strong>貯蔵庫:</strong><br>${storeInfo}
@@ -4268,6 +4357,7 @@
                          <strong>時間:</strong> ${formatTime(getBuildTime(tile.type, tile.level) / 1000)}
                     </div>
                     ${buildersBusy ? '<p style="color:red; font-size:0.9em;">⚠️ 工事枠がいっぱいです</p>' : ''}
+                    ${extraBtns}
                     <button class="action-btn" onclick="actBuild('${tile.type}')" ${afford && !buildersBusy ? '' : 'disabled'}>レベルアップ</button>
                     <button class="action-btn store-btn" onclick="actStore()">📦 回収（保管庫へ）</button>
                 </div>`;
@@ -4636,6 +4726,23 @@
             return adj;
         }
 
+        window.actTogglePlant = function () {
+            if (selectedTileIndex === null) return;
+            const tile = gameState.tiles[selectedTileIndex];
+            if (tile.type !== 'stone_plant') return;
+
+            tile.isActive = !tile.isActive;
+            SoundManager.playSE('select');
+
+            if (tile.isActive) showToast("🏭 稼働を開始しました");
+            else showToast("⏹ 停止しました");
+
+            saveGame();
+            updatePanelUI();
+            // Optional: Update visual effects (smoke etc) -> sync3DState handled by next loop or manual call?
+            // sync3DState logic for stone_plant effect is not yet implemented in 3D, but status is saved.
+        };
+
         window.actExpand = function () {
             if (selectedTileIndex === null) return;
             const c = getExpandCost(gameState.rank);
@@ -4803,7 +4910,7 @@
 
             const typeIndex = BUILDING_KEYS.indexOf(type);
             const isStandardLimited = (typeIndex >= LIMIT_START_INDEX && typeIndex !== -1);
-            const isSpecialLimited = ['well', 'inn', 'clocktower', 'bank', 'granary', 'lumber_hub'].includes(type);
+            const isSpecialLimited = ['well', 'inn', 'clocktower', 'bank', 'granary', 'lumber_hub', 'stone_plant'].includes(type);
 
             let limitStr = '無制限 (土地依存)';
             if (isSpecialLimited) limitStr = '2つまで';
@@ -5297,6 +5404,52 @@
                         // Production Logic
                         if (t.type && t.level > 0 && !t.finishTime) {
                             const b = BUILDINGS[t.type];
+
+                            // Stone Plant Offline Simulation
+                            if (t.type === 'stone_plant') {
+                                if (t.isActive) {
+                                    const costScale = t.level * Math.pow(1.05, t.level - 1);
+                                    // Base Cons: M:50, F:20, W:20
+                                    const mCost = (b.consume.money || 0) * costScale;
+                                    const fCost = (b.consume.food || 0) * costScale;
+                                    const wCost = (b.consume.wood || 0) * costScale;
+
+                                    // Max run time limited by resources
+                                    let maxTime = activeSeconds;
+                                    if (mCost > 0) maxTime = Math.min(maxTime, gameState.resources.money / mCost);
+                                    if (fCost > 0) maxTime = Math.min(maxTime, gameState.resources.food / fCost);
+                                    if (wCost > 0) maxTime = Math.min(maxTime, gameState.resources.wood / wCost);
+
+                                    if (maxTime > 0) {
+                                        // Consume
+                                        gameState.resources.money -= mCost * maxTime;
+                                        gameState.resources.food -= fCost * maxTime;
+                                        gameState.resources.wood -= wCost * maxTime;
+
+                                        // Produce Stone (4x spec = 20 base)
+                                        const pVal = (b.prod.stone || 0) * t.level * Math.pow(1.05, t.level - 1);
+                                        const prodTotal = pVal * maxTime;
+
+                                        const caps = getStorageCapacity(t.type, t.level, i, globalBuffs);
+                                        const current = t.stored.stone || 0;
+                                        const space = Math.max(0, caps.stone - current);
+                                        const actualAdd = Math.min(prodTotal, space);
+
+                                        t.stored.stone = current + actualAdd;
+                                        if (!earn.stone) earn.stone = 0;
+                                        earn.stone += actualAdd;
+
+                                        // If ran out of resources (or close enough), turn off
+                                        if (maxTime < activeSeconds - 1) { // -1 tolerance
+                                            t.isActive = false;
+                                        }
+                                    } else {
+                                        t.isActive = false;
+                                    }
+                                }
+                                return; // Skip standard building logic
+                            }
+
                             // Use index 'i' for adjacency checks. Pass globalBuffs!
                             const caps = getStorageCapacity(t.type, t.level, i, globalBuffs);
 
