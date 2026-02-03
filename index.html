@@ -3854,7 +3854,32 @@
             return base;
         }
 
-        function getBuildTime(t, l) { const tl = l + 1; if (tl === 1) return BUILDINGS[t].baseTime; return Math.floor(BUILDINGS[t].baseTime * Math.pow(tl, 2.8)); }
+        function getBuildTime(t, l) {
+            const tl = l + 1; // Target Level
+            const base = BUILDINGS[t].baseTime;
+
+            // Optimization: If simple calculation is less than 1 day, use standard formula
+            const simpleTime = base * Math.pow(tl, 2.8);
+            if (simpleTime <= 86400000) {
+                return Math.floor(simpleTime);
+            }
+
+            // Iterative calculation for longer times
+            // 1日を超えるまでは通常式、超えたら成長率を最大30%(1.3倍)に抑える
+            let time = base;
+            for (let i = 2; i <= tl; i++) {
+                const polyRate = Math.pow(i / (i - 1), 2.8);
+                let rate = polyRate;
+
+                if (time >= 172800000) { // 2 days
+                    rate = Math.min(polyRate, 1.1); // Max 10%
+                } else if (time >= 86400000) { // 1 day
+                    rate = Math.min(polyRate, 1.3); // Max 30%
+                }
+                time = time * rate;
+            }
+            return Math.floor(time);
+        }
 
         function getCost(t, l) {
             let m = Math.pow(1.6, l) * 1.5;
