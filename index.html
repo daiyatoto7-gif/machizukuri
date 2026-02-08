@@ -2701,14 +2701,31 @@
                         // Simple wooden roof (not tiled to distinguish from house)
                         group.add(createBox(0.6, 0.05, 0.6, MATERIALS.wood, 0, roofY, 0));
 
-                        // Big Saw Mechanism
-                        const sawBase = createBox(0.5, 0.2, 0.3, MATERIALS.wood, 0, 0.1, 0);
+                        // Reciprocating Frame Saw (Vertical) - Historically more accurate than circular saw
+                        const sawBase = createBox(0.4, 0.2, 0.3, MATERIALS.wood, 0, 0.1, 0);
                         group.add(sawBase);
-                        const saw = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.02, 16), MATERIALS.metal);
-                        saw.rotation.x = Math.PI / 2;
-                        saw.position.set(0, 0.3, 0);
-                        saw.userData = { anim: 'spinX', speed: 0.3 };
-                        group.add(saw);
+
+                        // The Frame holding the blade
+                        const frame = new THREE.Group();
+                        frame.position.set(0, 0.4, 0);
+
+                        // Side posts of the frame
+                        frame.add(createBox(0.05, 0.4, 0.05, MATERIALS.woodDark, 0, 0, 0.1));
+                        frame.add(createBox(0.05, 0.4, 0.05, MATERIALS.woodDark, 0, 0, -0.1));
+                        // Top/Bottom bars
+                        frame.add(createBox(0.05, 0.05, 0.25, MATERIALS.woodDark, 0, 0.175, 0));
+                        frame.add(createBox(0.05, 0.05, 0.25, MATERIALS.woodDark, 0, -0.175, 0));
+
+                        // The Blade
+                        const blade = createBox(0.02, 0.35, 0.15, MATERIALS.metal, 0, 0, 0);
+                        frame.add(blade);
+
+                        // Animation: Move Up/Down rapidly
+                        frame.userData = { anim: 'shuttleY', speed: 1.0, range: 0.15 }; // Speed 10x
+                        group.add(frame);
+
+                        // Log being cut (Stationary for now)
+                        group.add(createCyl(0.12, 0.12, 0.8, MATERIALS.wood, 0, 0.25, 0, Math.PI / 2));
 
                         // Sawdust piles
                         group.add(createCone(0.2, 0.1, MATERIALS.gold, 0.4, 0.05, 0.4)); // Gold as sawdust color
@@ -3368,6 +3385,9 @@
                                     break;
                                 case 'shuttleX':
                                     obj.position.x = Math.sin(time * data.speed * 20) * data.range;
+                                    break;
+                                case 'shuttleY':
+                                    obj.position.y = Math.sin(time * data.speed * 20) * data.range;
                                     break;
                                 case 'sawMove':
                                     obj.position.z = Math.sin(time * 5) * 0.15;
