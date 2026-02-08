@@ -2035,6 +2035,9 @@
         document.addEventListener('click', initAudio, { once: true });
         document.addEventListener('touchstart', initAudio, { once: true });
 
+        // 道路メッシュ管理
+        let roadMeshes = [];
+
         function createTiles() {
             tileMeshes.forEach(t => {
                 scene.remove(t.mesh);
@@ -2095,6 +2098,42 @@
                     currentType: null
                 });
             }
+
+            // 道路メッシュを作成（タイル間の通路）
+            // 道路はタイル境界に沿って配置される
+            const roadWidth = 0.6; // タイル間の道幅
+            const roadGeo = new THREE.PlaneGeometry(roadWidth, 3.1); // オフセット3.0に合わせる
+            roadMeshes = []; // グローバル配列
+
+            for (let row = 0; row < size; row++) {
+                for (let col = 0; col < size; col++) {
+                    const x = start + col * offset;
+                    const z = start + row * offset;
+
+                    // 右側の道路（各タイルの右端、最右列以外）
+                    if (col < size - 1) {
+                        const roadRight = new THREE.Mesh(roadGeo, MATERIALS.dirtRoad.clone());
+                        roadRight.rotation.x = -Math.PI / 2;
+                        roadRight.rotation.z = Math.PI / 2; // 縦向き
+                        roadRight.position.set(x + offset / 2, -0.04, z);
+                        roadRight.receiveShadow = true;
+                        scene.add(roadRight);
+                        roadMeshes.push({ mesh: roadRight, rowA: row, colA: col, rowB: row, colB: col + 1, isVertical: true });
+                    }
+
+                    // 下側の道路（各タイルの下端、最下行以外）
+                    if (row < size - 1) {
+                        const roadDown = new THREE.Mesh(roadGeo, MATERIALS.dirtRoad.clone());
+                        roadDown.rotation.x = -Math.PI / 2;
+                        // 横向き（デフォルト）
+                        roadDown.position.set(x, -0.04, z + offset / 2);
+                        roadDown.receiveShadow = true;
+                        scene.add(roadDown);
+                        roadMeshes.push({ mesh: roadDown, rowA: row, colA: col, rowB: row + 1, colB: col, isVertical: false });
+                    }
+                }
+            }
+
             sync3DState();
             createSurroundingEnvironment(); // タイル生成時にも環境を更新（サイズ拡張対応）
         }
@@ -3898,6 +3937,34 @@
                         ground.material = MATERIALS.grassLocked;
                     }
                 }
+            });
+
+            // 道路の可視性を更新（マルチタイル施設の間は隠す）
+            roadMeshes.forEach(road => {
+                const idxA = road.rowA * gameState.gridSize + road.colA;
+                const idxB = road.rowB * gameState.gridSize + road.colB;
+                const tileA = gameState.tiles[idxA];
+                const tileB = gameState.tiles[idxB];
+
+                // 両方のタイルが同じマルチタイル施設に属しているか確認
+                let hideRoad = false;
+                if (tileA && tileB) {
+                    // マスターインデックスを取得
+                    const getMaster = (t, idx) => {
+                        if (!t.type) return null;
+                        if (t.type.endsWith('_part')) return t.masterIndex;
+                        return idx;
+                    };
+                    const masterA = getMaster(tileA, idxA);
+                    const masterB = getMaster(tileB, idxB);
+
+                    // 同じマスターに属する場合は道を隠す
+                    if (masterA !== null && masterB !== null && masterA === masterB) {
+                        hideRoad = true;
+                    }
+                }
+
+                road.mesh.visible = !hideRoad;
             });
         }
 
