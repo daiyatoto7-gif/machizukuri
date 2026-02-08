@@ -1562,10 +1562,10 @@
                 dimW = s.w; dimH = s.h;
             }
 
-            // 1タイルあたりの表示幅(2.4) + オフセット(3.0)
-            // 中心位置の調整
+            // Use full tile offset for barrier size to reach tile edges (road boundaries)
+            // Previously unitSize=2.4 left gaps; now matching 3.0 offset ensures full coverage
             const offsetStep = 3.0; // Tile offset
-            const unitSize = 2.4;
+            const unitSize = 3.0;   // Changed from 2.4 to 3.0 to fill entire tile
 
             const totalW = unitSize + (dimW - 1) * offsetStep;
             const totalH = unitSize + (dimH - 1) * offsetStep; // Depth (Z)
@@ -1576,7 +1576,7 @@
 
             const distW = totalW / 2;
             const distH = totalH / 2;
-            const height = 0.6;
+            const height = 0.8; // Increased height to better contain buildings
 
             // 支柱
             const poles = [
