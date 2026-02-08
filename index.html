@@ -2478,11 +2478,14 @@
                         smokeNode.userData = { anim: 'smoke' };
                         group.add(smokeNode);
                     }
+
+                    // Simple entrance stone step instead of base
+                    group.add(createBox(0.3, 0.05, 0.2, MATERIALS.stone, 0, 0.025, 0.4));
                     break;
 
                 case 'farm': // 畑 -> 農地 (Farmland)
-                    // Ground
-                    group.add(createBox(1.0, 0.1, 1.0, MATERIALS.dirt, 0, 0.05, 0));
+                    // Ground - Thin layer to look like soil, not a block foundation
+                    group.add(createBox(1.0, 0.02, 1.0, MATERIALS.dirt, 0, 0.01, 0));
 
                     if (tier >= 2) {
                         // Water channel for irrigation
@@ -2542,27 +2545,38 @@
                     break;
 
                 case 'lumber': // 伐採所 -> 林場 (Logging Camp)
-                    // Ground
-                    group.add(createBox(1.0, 0.1, 1.0, MATERIALS.dirt, 0, 0.05, 0));
+                    // Ground - minimal or just grass (no box)
 
                     if (tier === 1) { // Tier 1: Woodcutter's Clearing
-                        // No Hut, just piles of wood and stumps
-                        // Stumps
-                        group.add(createCyl(0.15, 0.15, 0.15, MATERIALS.wood, 0.3, 0.08, 0.3));
-                        group.add(createCyl(0.12, 0.12, 0.1, MATERIALS.wood, -0.2, 0.05, -0.2));
+                        // Action visual: Large log on a sawhorse
+                        const sawHorseH = 0.2;
+                        // X-legs
+                        group.add(createBox(0.05, 0.3, 0.05, MATERIALS.wood, -0.2, 0.15, 0.2, 0, 0, Math.PI / 4));
+                        group.add(createBox(0.05, 0.3, 0.05, MATERIALS.wood, -0.2, 0.15, 0.2, 0, 0, -Math.PI / 4));
+                        group.add(createBox(0.05, 0.3, 0.05, MATERIALS.wood, 0.2, 0.15, 0.2, 0, 0, Math.PI / 4));
+                        group.add(createBox(0.05, 0.3, 0.05, MATERIALS.wood, 0.2, 0.15, 0.2, 0, 0, -Math.PI / 4));
 
-                        // Log Pile
-                        group.add(createCyl(0.08, 0.08, 0.4, MATERIALS.wood, -0.3, 0.05, 0.2, Math.PI / 2, Math.PI / 4));
-                        group.add(createCyl(0.08, 0.08, 0.4, MATERIALS.wood, -0.3, 0.1, 0.2, Math.PI / 2, Math.PI / 4));
+                        // The Log being cut
+                        group.add(createCyl(0.12, 0.12, 0.8, MATERIALS.wood, 0, sawHorseH + 0.05, 0.2, Math.PI / 2));
 
-                        // Axe in stump
+                        // Hand Saw stuck in log
+                        const saw = createBox(0.1, 0.05, 0.01, MATERIALS.metal, 0, sawHorseH + 0.15, 0.2);
+                        saw.rotation.z = 0.2;
+                        group.add(saw);
+
+                        // Tree Stump with axe
+                        group.add(createCyl(0.15, 0.15, 0.2, MATERIALS.wood, -0.3, 0.1, -0.3));
                         const axeGroup = new THREE.Group();
-                        axeGroup.position.set(0.3, 0.2, 0.3);
+                        axeGroup.position.set(-0.3, 0.2, -0.3);
                         axeGroup.rotation.z = 0.5;
-                        axeGroup.rotation.y = 0.5;
                         axeGroup.add(createCyl(0.02, 0.02, 0.4, MATERIALS.wood, 0, 0.2, 0));
                         axeGroup.add(createBox(0.1, 0.05, 0.02, MATERIALS.metal, 0, 0.4, 0));
                         group.add(axeGroup);
+
+                        // Vertical standing log/tree being chopped?
+                        group.add(createCyl(0.1, 0.12, 0.6, MATERIALS.wood, 0.3, 0.3, -0.2));
+                        // Cut mark
+                        group.add(createBox(0.1, 0.05, 0.08, MATERIALS.dark, 0.3, 0.2, -0.18));
 
                     } else { // Tier 2: Sawmill Yard (Open Air)
                         // Simple roof ONLY over the saw, no walls
@@ -2593,8 +2607,8 @@
                     break;
 
                 case 'quarry': // 採石場 -> 石切り場 (Stone Pit)
-                    // Ground
-                    group.add(createBox(1.0, 0.1, 1.0, MATERIALS.stone, 0, 0.05, 0));
+                    // Ground - Thin stone layer
+                    group.add(createBox(1.0, 0.02, 1.0, MATERIALS.stone, 0, 0.01, 0));
 
                     // Rock Face (Jagged, irregular)
                     const rockScale = tier >= 2 ? 0.8 : 0.6;
@@ -2638,8 +2652,8 @@
                     break;
 
                 case 'mine': // 鉱山 -> 鉄山 (Iron Mine)
-                    // Ground
-                    group.add(createBox(1.0, 0.1, 1.0, MATERIALS.dirt, 0, 0.05, 0));
+                    // Ground - Thin dirt layer
+                    group.add(createBox(1.0, 0.02, 1.0, MATERIALS.dirt, 0, 0.01, 0));
 
                     if (tier === 1) { // Tier 1: Mine Shaft
                         // Hill/Mound
@@ -2686,19 +2700,33 @@
                     break;
 
                 case 'market': // 市場 -> 市 (Bazaar)
-                    // No solid ground box to blend better or just a rug?
-                    // Tier 1: Open Mat Market
+                    // No solid ground box - just placed on the road/grass
+
+                    // Tier 1: Open Mat Market (Enhanced)
                     if (tier === 1) {
-                        // Rug/Mat on ground
-                        group.add(createBox(0.8, 0.02, 0.6, MATERIALS.roofStraw, 0, 0.02, 0));
+                        // Rug/Mat on ground - Keep thin
+                        group.add(createBox(0.8, 0.02, 0.6, MATERIALS.roofStraw, 0, 0.01, 0));
 
-                        // Wares on mat
-                        group.add(createBox(0.1, 0.08, 0.1, MATERIALS.leaf, -0.2, 0.06, 0.1));
-                        group.add(createBox(0.1, 0.1, 0.1, MATERIALS.wood, 0, 0.07, -0.1));
-                        group.add(createCyl(0.08, 0.08, 0.1, MATERIALS.gold, 0.2, 0.05, 0.1));
+                        // Simple Stall Structure (Crates + Board + Sunshade)
+                        // Table improvised
+                        group.add(createBox(0.4, 0.2, 0.2, MATERIALS.wood, 0, 0.1, -0.1));
+                        group.add(createBox(0.4, 0.05, 0.25, MATERIALS.wood, 0, 0.2, -0.1));
 
-                        // Shopkeeper seat (small stool)
-                        group.add(createCyl(0.1, 0.1, 0.05, MATERIALS.wood, 0, 0.05, 0.3));
+                        // Sunshade / Umbrella
+                        const umbrella = new THREE.Group();
+                        umbrella.position.set(0.3, 0, 0.2);
+                        umbrella.add(createCyl(0.02, 0.02, 0.6, MATERIALS.wood, 0, 0.3, 0)); // Pole
+                        const shade = createCone(0.3, 0.1, MATERIALS.tent, 0, 0.55, 0); // Shade
+                        shade.scale.z = 0.5; // Elliptical
+                        umbrella.add(shade);
+                        group.add(umbrella);
+
+                        // Seat
+                        group.add(createCyl(0.1, 0.1, 0.05, MATERIALS.wood, -0.2, 0.025, 0.2));
+
+                        // Wares
+                        group.add(createBox(0.1, 0.1, 0.1, MATERIALS.leaf, 0, 0.25, -0.1));
+                        group.add(createCyl(0.05, 0.05, 0.1, MATERIALS.gold, 0.1, 0.25, -0.1));
 
                     } else { // Tier 2: Tented Stalls (Pavilions)
                         // Structure: 4 Poles + Cloth Roof (No walls)
@@ -2729,13 +2757,13 @@
                     break;
 
                 case 'blacksmith': // 鍛冶屋 -> 兵器廠 (Arsenal)
-                    // Ground
-                    group.add(createBox(1.0, 0.1, 1.0, MATERIALS.stone, 0, 0.05, 0));
+                    // Ground - stone patches
+                    if (tier >= 2) group.add(createBox(1.0, 0.02, 1.0, MATERIALS.stone, 0, 0.01, 0));
 
                     if (tier === 1) { // Tier 1: Field Smithy
                         // Simple open-air furnace
-                        group.add(createBox(0.3, 0.3, 0.3, MATERIALS.stone, 0, 0.2, -0.2));
-                        group.add(createBox(0.15, 0.1, 0.15, MATERIALS.gold, 0, 0.25, -0.15)); // Fire
+                        group.add(createBox(0.3, 0.3, 0.3, MATERIALS.stone, 0, 0.15, -0.2));
+                        group.add(createBox(0.15, 0.1, 0.15, MATERIALS.gold, 0, 0.2, -0.15)); // Fire
 
                         // Anvil on log
                         group.add(createCyl(0.15, 0.15, 0.2, MATERIALS.wood, -0.2, 0.1, 0));
@@ -2780,8 +2808,8 @@
                     break;
 
                 case 'well': // 井戸 -> 給水所 (Water Works)
-                    // Ground: Paving stones
-                    group.add(createBox(0.8, 0.05, 0.8, MATERIALS.pavingStone, 0, 0.025, 0));
+                    // Ground: Paving stones - Thin
+                    group.add(createBox(0.8, 0.02, 0.8, MATERIALS.pavingStone, 0, 0.01, 0));
 
                     // Well Base
                     group.add(createCyl(0.35, 0.35, 0.3, MATERIALS.stone, 0, 0.15, 0, 0, 8));
@@ -2813,8 +2841,7 @@
                     break;
 
                 case 'inn': // 宿屋 -> 茶館/宿場 (Teahouse/Inn)
-                    // Ground
-                    group.add(createFoundation(0.9, 0.9));
+                    // Ground - Removed Foundation
 
                     if (tier === 1) { // Tier 1: Teahouse
                         // Open-front building
@@ -2865,8 +2892,7 @@
                     break;
 
                 case 'clocktower': // 時計塔 -> 鐘楼 (Bell Tower)
-                    // Ground
-                    group.add(createBox(0.6, 0.1, 0.6, MATERIALS.stone, 0, 0.05, 0));
+                    // Ground - minimal
                     const towerH = tier >= 2 ? 1.4 : 1.0;
 
                     if (tier === 1) { // Tier 1: Watchtower (Wood) - Open frame
@@ -2887,7 +2913,7 @@
                         // Drum/Gong
                         group.add(createCyl(0.15, 0.15, 0.1, MATERIALS.wood, 0, towerH + 0.1, 0, Math.PI / 2));
                     } else { // Tier 2: Bell Tower (Stone Base, Open top)
-                        // Stone Base
+                        // Stone Base - kept for Bell Tower as it IS the building
                         group.add(createBox(0.6, 0.8, 0.6, MATERIALS.stone, 0, 0.4, 0));
 
                         // Upper Wooden Frame
@@ -2973,13 +2999,12 @@
                     break;
 
                 case 'bank': // 銀行 -> 金庫 (Vault)
-                    // Ground
-                    group.add(createFoundation(0.9, 0.9));
+                    // Ground - stone path under door?
 
                     if (tier === 1) { // Tier 1: Storehouse (Kurazukuri style)
                         // White walls, thick, small footprint high height
                         group.add(createBox(0.7, 0.7, 0.7, MATERIALS.wallWhite, 0, 0.35, 0));
-                        // Black base
+                        // Black base (part of the building, not platform)
                         group.add(createBox(0.72, 0.2, 0.72, MATERIALS.dark, 0, 0.1, 0));
                         // Roof - Heavy Tiled, but simple
                         group.add(createChineseRoof(0.8, 0.8, 0.4, MATERIALS.roofTileBlack, 0, 0.9, 0));
@@ -3012,8 +3037,7 @@
                     break;
 
                 case 'granary': // 穀倉 (Granary)
-                    // Ground
-                    group.add(createFoundation(0.9, 0.9));
+                    // Ground - minimal
 
                     if (tier === 1) { // Tier 1: Raised Floor Granary (Takayuka)
                         // Stilts
@@ -3021,7 +3045,6 @@
                         group.add(createCyl(0.05, 0.05, 0.3, MATERIALS.wood, -0.3, 0.15, 0.3));
                         group.add(createCyl(0.05, 0.05, 0.3, MATERIALS.wood, 0.3, 0.15, -0.3));
                         group.add(createCyl(0.05, 0.05, 0.3, MATERIALS.wood, -0.3, 0.15, -0.3));
-                        // Rat guards (Nezumi-gaeshi) - small discs
 
                         // Main box
                         group.add(createBox(0.7, 0.5, 0.7, MATERIALS.wood, 0, 0.55, 0));
@@ -3069,8 +3092,8 @@
                     break;
 
                 case 'lumber_hub': // 木材加工所 -> 大工 (Carpenter)
-                    // Ground
-                    group.add(createBox(1.0, 0.1, 1.0, MATERIALS.dirt, 0, 0.05, 0));
+                    // Ground - minimal or wood shavings?
+                    if (tier >= 2) group.add(createBox(1.0, 0.02, 1.0, MATERIALS.dirt, 0, 0.01, 0));
 
                     // Main Workshop area
                     // Main Workshop area
@@ -3117,8 +3140,8 @@
                     break;
 
                 case 'stone_plant': // 石材加工所 -> 城壁建設現場 (Wall Construction)
-                    // Ground
-                    group.add(createBox(1.0, 0.1, 1.0, MATERIALS.stone, 0, 0.05, 0));
+                    // Ground - stone dust
+                    if (tier >= 2) group.add(createBox(1.0, 0.02, 1.0, MATERIALS.stone, 0, 0.01, 0));
 
                     if (tier === 1) { // Stone Yard
                         // Piles of stones
