@@ -1032,23 +1032,23 @@
                 baseTime: 120000
             },
             clocktower: {
-                name: "時計塔", icon: "🕰️",
-                desc: "【全体加速】街のシンボル。全施設の生産速度を2%加速します(LvUPで+0.6%)。",
+                name: "鐘楼", icon: "🔔",
+                desc: "【全体加速】時を告げる鐘の音。全施設の生産速度を2%加速します(LvUPで+0.6%)。",
                 prod: {}, // 直接生産なし(全体バフ)
                 cost: { money: 100000, food: 50000, wood: 50000, stone: 20000, iron: 10000 },
                 baseTime: 200000
             },
             forest: {
-                name: "森林", icon: "🌳",
-                desc: "【林業】広大な森林。2マス占有(1x2)。伐採所が隣接すると生産量+20%。",
+                name: "竹林", icon: "🎍",
+                desc: "【林業】静寂な竹林。2マス占有(1x2)。伐採所が隣接すると生産量+20%。",
                 prod: { wood: 15 },
                 cost: { money: 100000, food: 40000, wood: 10000, water: 10000 },
                 baseTime: 300000,
                 w: 1, h: 2 // 1x2 size
             },
             bank: {
-                name: "銀行", icon: "🏦",
-                desc: "【金融】お金の生産施設(民家/市場/鍛冶屋/宿屋)の生産量と、お金の貯蔵上限を増やします(Lv1: 1.3倍)。",
+                name: "金庫", icon: "🪙",
+                desc: "【金融】財宝を保管する蔵。お金の生産施設(民家/市場/鍛冶屋/宿屋)の生産量と、お金の貯蔵上限を増やします(Lv1: 1.3倍)。",
                 prod: {}, // 特殊効果
                 cost: { money: 500000, wood: 200000, stone: 200000, iron: 100000 },
                 baseTime: 500000
@@ -1526,7 +1526,18 @@
             metal: new THREE.MeshStandardMaterial({ color: 0xbdc3c7, metalness: 0.8, roughness: 0.2 }),
             gold: new THREE.MeshStandardMaterial({ color: 0xf1c40f, metalness: 0.6, roughness: 0.3 }),
             water: new THREE.MeshStandardMaterial({ color: 0x3498db, transparent: true, opacity: 0.7 }),
-            graySheet: new THREE.MeshStandardMaterial({ color: 0x95a5a6, roughness: 0.9, side: THREE.DoubleSide })
+            graySheet: new THREE.MeshStandardMaterial({ color: 0x95a5a6, roughness: 0.9, side: THREE.DoubleSide }),
+            // New Materials for Three Kingdoms Theme
+            pillarRed: new THREE.MeshStandardMaterial({ color: 0x8e2020, roughness: 0.8 }), // 朱色
+            roofStraw: new THREE.MeshStandardMaterial({ color: 0xd4ac6e, roughness: 1.0 }), // 藁
+            roofTileBlack: new THREE.MeshStandardMaterial({ color: 0x2c3e50, roughness: 0.6 }), // 黒瓦
+            roofTileGreen: new THREE.MeshStandardMaterial({ color: 0x16a085, roughness: 0.5 }), // 緑瓦
+            roofTileGold: new THREE.MeshStandardMaterial({ color: 0xf39c12, metalness: 0.4, roughness: 0.4 }), // 金瓦
+            wallWhite: new THREE.MeshStandardMaterial({ color: 0xecf0f1, roughness: 0.9 }), // 白漆喰
+            wallEarth: new THREE.MeshStandardMaterial({ color: 0xa08362, roughness: 1.0 }), // 土壁
+            lanternRed: new THREE.MeshStandardMaterial({ color: 0xe74c3c, emissive: 0x990000, emissiveIntensity: 0.5 }), // 提灯
+            woodDark: new THREE.MeshStandardMaterial({ color: 0x5d4037, roughness: 0.9 }), // 暗い木
+            pavingStone: new THREE.MeshStandardMaterial({ color: 0x95a5a6, roughness: 0.8 }), // 石畳
             // cobblestone と grassLocked は init3D 内で追加
         };
 
@@ -2294,10 +2305,13 @@
         function createBuildingMesh(type, level) {
             const group = new THREE.Group();
             // ベーススケール調整
-            const scale = 1 + (level > 1 ? Math.log(level) * 0.1 : 0);
+            // Cap level at 30 for visuals
+            const vizLevel = Math.min(level, 30);
+            const scale = 1.0 + (vizLevel * 0.02);
             group.scale.set(scale, scale, scale);
 
-            const tier = level < 5 ? 1 : level < 10 ? 2 : 3;
+            // Tier 1: 1-20, Tier 2: 21+
+            const tier = vizLevel >= 21 ? 2 : 1;
 
             const createBox = (w, h, d, mat, x, y, z, rotY = 0) => {
                 const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -2322,6 +2336,81 @@
                 return m;
             };
 
+            // --- Helper Functions for Chinese Architecture ---
+
+            // 寄棟(よせむね)・入母屋(いりもや)風の屋根
+            const createChineseRoof = (w, d, h, mat, x, y, z, tier = 1) => {
+                const roofGroup = new THREE.Group();
+                roofGroup.position.set(x, y, z);
+
+                // Main roof slope
+                const geom = new THREE.ConeGeometry(w * 0.8, h, 4);
+                const mesh = new THREE.Mesh(geom, mat);
+                mesh.rotation.y = Math.PI / 4;
+                mesh.scale.set(1, 1, d / w); // Adjust aspect
+                mesh.castShadow = true;
+                roofGroup.add(mesh);
+
+                // Eaves (反り) - represented by a flattened wider cone/box at the bottom
+                const eaves = new THREE.Mesh(new THREE.BoxGeometry(w * 1.2, 0.1, d * 1.2), mat);
+                eaves.position.y = -h / 2;
+                eaves.castShadow = true;
+                roofGroup.add(eaves);
+
+                // Ridge decorations for higher tiers
+                if (tier >= 2) {
+                    const ridge = new THREE.Mesh(new THREE.BoxGeometry(w * 0.8, 0.1, 0.1), MATERIALS.gold);
+                    ridge.position.y = h / 2;
+                    roofGroup.add(ridge);
+                }
+
+                return roofGroup;
+            };
+
+            // 朱色の柱
+            const createPillar = (h, x, y, z) => {
+                return createCyl(0.1, 0.1, h, MATERIALS.pillarRed, x, y, z);
+            };
+
+            // 提灯
+            const createLantern = (x, y, z) => {
+                const g = new THREE.Group();
+                g.position.set(x, y, z);
+                // String
+                g.add(createBox(0.02, 0.2, 0.02, MATERIALS.woodDark, 0, 0.1, 0));
+                // Body
+                const body = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 8), MATERIALS.lanternRed);
+                body.scale.set(1, 0.8, 1);
+                body.castShadow = true;
+                g.add(body);
+                // Tassel (implied)
+                return g;
+            };
+
+            // 石畳の土台
+            const createFoundation = (w, d) => {
+                return createBox(w, 0.2, d, MATERIALS.pavingStone, 0, 0.1, 0);
+            };
+
+            // Procedural Props Generator
+            const addProps = (targetGroup, seed, count) => {
+                for (let i = 0; i < count; i++) {
+                    const type = (seed + i) % 3;
+                    const offsetX = ((seed * 7 + i * 3) % 10 - 5) * 0.1;
+                    const offsetZ = ((seed * 11 + i * 5) % 10 - 5) * 0.1;
+
+                    if (type === 0) { // Barrel
+                        targetGroup.add(createCyl(0.1, 0.1, 0.2, MATERIALS.wood, offsetX, 0.1, offsetZ));
+                    } else if (type === 1) { // Box
+                        targetGroup.add(createBox(0.15, 0.15, 0.15, MATERIALS.woodDark, offsetX, 0.1, offsetZ, (seed + i) * 0.5));
+                    } else { // Bush/Pot
+                        targetGroup.add(createCone(0.1, 0.2, MATERIALS.leaf, offsetX, 0.1, offsetZ));
+                    }
+                }
+            };
+
+            // --- End Helpers ---
+
             switch (type) {
                 case 'wild': // 未開拓地
                     // 草
@@ -2337,335 +2426,455 @@
                     group.add(createCone(0.3, 0.6, MATERIALS.leaf, -0.3, 0.5, -0.3)); // 葉
                     break;
 
-                case 'house':
-                    // 家の本体（地面から）
-                    group.add(createBox(0.8, 0.6, 0.8, MATERIALS.wall, 0, 0.3, 0));
+                case 'house': // 民家 -> 住居 (Residence)
+                    // 土台
+                    if (tier >= 2) group.add(createFoundation(0.9, 0.9));
 
-                    if (tier >= 2) {
-                        group.add(createBox(0.8, 0.5, 0.5, MATERIALS.wall, 0, 0.85, 0));
-                        const roof = createCone(0.8, 0.6, MATERIALS.roof, 0, 1.4, 0, Math.PI / 4);
+                    if (tier === 1) { // Tier 1: 茅屋 (Hut)
+                        // Earth Wall
+                        group.add(createBox(0.8, 0.5, 0.8, MATERIALS.wallEarth, 0, 0.25, 0));
+                        // Straw Roof
+                        const roof = createCone(0.9, 0.6, MATERIALS.roofStraw, 0, 0.8, 0, Math.PI / 4);
                         roof.scale.z = 0.8;
                         group.add(roof);
-                        group.add(createBox(0.2, 0.2, 0.05, MATERIALS.window, 0.2, 0.9, 0.26));
-                        group.add(createBox(0.2, 0.2, 0.05, MATERIALS.window, -0.2, 0.9, 0.26));
-                    } else {
-                        group.add(createCone(0.7, 0.5, MATERIALS.roof, 0, 0.85, 0, Math.PI / 4));
+                        // Door
+                        group.add(createBox(0.2, 0.35, 0.05, MATERIALS.wood, 0, 0.175, 0.4));
+                    } else { // Tier 2: 瓦屋 (Tile House)
+                        // Pillars
+                        group.add(createPillar(0.8, 0.35, 0.4, 0.35));
+                        group.add(createPillar(0.8, -0.35, 0.4, 0.35));
+                        group.add(createPillar(0.8, 0.35, 0.4, -0.35));
+                        group.add(createPillar(0.8, -0.35, 0.4, -0.35));
+
+                        // Walls (White plaster)
+                        group.add(createBox(0.7, 0.7, 0.7, MATERIALS.wallWhite, 0, 0.45, 0));
+
+                        // Roof (Black tile)
+                        group.add(createChineseRoof(1.0, 1.0, 0.6, MATERIALS.roofTileBlack, 0, 1.1, 0, 1));
+
+                        // Door & Windows
+                        group.add(createBox(0.25, 0.5, 0.05, MATERIALS.woodDark, 0, 0.25, 0.36));
+                        group.add(createBox(0.2, 0.2, 0.05, MATERIALS.wood, 0.25, 0.5, 0.36)); // Window
+                        group.add(createBox(0.2, 0.2, 0.05, MATERIALS.wood, -0.25, 0.5, 0.36)); // Window
+
+                        // Lanterns at higher sub-levels (Lv 30)
+                        if (vizLevel >= 30) {
+                            group.add(createLantern(0.45, 0.8, 0.45));
+                            group.add(createLantern(-0.45, 0.8, 0.45));
+                        }
                     }
 
-                    group.add(createBox(0.25, 0.4, 0.05, MATERIALS.wood, 0, 0.2, 0.4)); // Door
-                    group.add(createBox(0.2, 0.2, 0.05, MATERIALS.window, 0.2, 0.4, 0.41)); // Window
-
-                    const chimH = tier >= 2 ? 1.4 : 0.8;
-                    group.add(createBox(0.15, 0.6, 0.15, MATERIALS.stone, 0.25, chimH, -0.1));
-
-                    if (tier >= 3) {
-                        group.add(createBox(0.05, 0.3, 0.05, MATERIALS.wood, 0.5, 0.15, 0.5));
-                        group.add(createBox(0.05, 0.3, 0.05, MATERIALS.wood, 0.6, 0.15, 0.5));
-                        group.add(createBox(0.05, 0.3, 0.05, MATERIALS.wood, -0.5, 0.15, 0.5));
-                        group.add(createCyl(0.05, 0.05, 0.3, MATERIALS.wood, -0.5, 0.15, 0.3));
-                        group.add(createCone(0.2, 0.4, MATERIALS.leaf, -0.5, 0.4, 0.3));
+                    // Props (Levels 11-20 in Tier 1, 21-30 in Tier 2)
+                    if (vizLevel >= 11) {
+                        // Add props based on level seed
+                        const propCount = Math.floor(vizLevel / 5);
+                        addProps(group, vizLevel, propCount);
                     }
 
-                    if (level > 0) {
+                    // Smoke (common)
+                    if (tier >= 2 || vizLevel >= 15) {
                         const smokeNode = new THREE.Object3D();
-                        smokeNode.position.set(0.25, chimH + 0.3, -0.1);
+                        smokeNode.position.set(0, 1.5, 0);
                         smokeNode.userData = { anim: 'smoke' };
                         group.add(smokeNode);
                     }
                     break;
 
-                case 'farm':
-                    // 畑の土 (少し盛り上げる)
+                case 'farm': // 畑 -> 農地 (Farmland)
+                    // Ground
                     group.add(createBox(1.0, 0.1, 1.0, MATERIALS.dirt, 0, 0.05, 0));
 
-                    const cropRows = tier >= 3 ? 3 : 2;
-                    const cropCols = tier >= 3 ? 3 : 2;
+                    if (tier >= 2) {
+                        // Water channel for irrigation
+                        group.add(createBox(1.0, 0.08, 0.2, MATERIALS.water, 0, 0.06, 0));
+                    }
 
-                    for (let i = 0; i < cropRows; i++) {
-                        for (let j = 0; j < cropCols; j++) {
-                            const cx = (i - (cropRows - 1) / 2) * 0.3;
-                            const cz = (j - (cropCols - 1) / 2) * 0.3;
+                    const rows = 3;
+                    const cols = tier >= 2 ? 2 : 3; // Tier 2 has channel in middle
+
+                    for (let i = 0; i < rows; i++) {
+                        for (let j = 0; j < cols; j++) {
+                            // Skip middle z for tier 2 (channel)
+                            let zPos = (j - 1) * 0.3;
+                            if (tier >= 2) {
+                                zPos = (j === 0 ? -0.3 : 0.3);
+                            }
+
+                            const cx = (i - 1) * 0.3;
                             const cropGroup = new THREE.Group();
-                            cropGroup.position.set(cx, 0.1, cz);
+                            cropGroup.position.set(cx, 0.1, zPos);
 
                             if (tier === 1) {
+                                // Simple crops
                                 cropGroup.add(createCone(0.05, 0.2, MATERIALS.leaf, 0, 0.1, 0));
                             } else {
-                                cropGroup.add(createCyl(0.02, 0.02, 0.4, MATERIALS.gold, 0, 0.2, 0));
+                                // Better crops (Wheat/Vegetables)
+                                cropGroup.add(createCyl(0.02, 0.02, 0.3, MATERIALS.gold, 0, 0.15, 0));
                                 cropGroup.add(createBox(0.1, 0.1, 0.1, MATERIALS.gold, 0, 0.4, 0));
                             }
 
-                            cropGroup.userData = { anim: 'sway', speed: 2.0 + Math.random(), offset: Math.random() * 10 };
+                            cropGroup.userData = { anim: 'sway', speed: 1.5 + Math.random(), offset: Math.random() * 10 };
                             group.add(cropGroup);
                         }
                     }
 
-                    if (tier >= 2) {
-                        const scarecrow = new THREE.Group();
-                        scarecrow.position.set(0.4, 0.1, 0.4);
-                        scarecrow.add(createCyl(0.03, 0.03, 0.6, MATERIALS.wood, 0, 0.3, 0)); // 棒
-                        scarecrow.add(createBox(0.3, 0.05, 0.05, MATERIALS.wood, 0, 0.4, 0)); // 腕
-                        scarecrow.add(createBox(0.1, 0.1, 0.1, MATERIALS.white, 0, 0.55, 0)); // 頭
-                        scarecrow.rotation.y = -0.2;
-                        group.add(scarecrow);
+                    // Props
+                    if (vizLevel >= 15) {
+                        group.add(createBox(0.2, 0.4, 0.2, MATERIALS.wood, 0.4, 0.2, 0.4, 0.2)); // Scarecrow/Prop
+                        group.add(createBox(0.1, 0.1, 0.1, MATERIALS.white, 0.4, 0.45, 0.4));
                     }
 
-                    if (tier >= 3) {
-                        const windmillBase = createCyl(0.15, 0.2, 0.8, MATERIALS.wall, -0.4, 0.4, -0.4);
-                        group.add(windmillBase);
-                        const roof = createCone(0.25, 0.3, MATERIALS.roof, -0.4, 0.95, -0.4);
-                        group.add(roof);
-
-                        const blades = new THREE.Group();
-                        blades.position.set(-0.4, 0.9, -0.25);
-                        blades.add(createBox(0.8, 0.05, 0.02, MATERIALS.white, 0, 0, 0));
-                        blades.add(createBox(0.05, 0.8, 0.02, MATERIALS.white, 0, 0, 0));
-                        blades.userData = { anim: 'rotateZ', speed: 0.02 };
-                        group.add(blades);
+                    if (tier >= 2) {
+                        // Irrigation pump/bucket
+                        group.add(createCyl(0.1, 0.1, 0.3, MATERIALS.wood, -0.4, 0.15, 0));
                     }
                     break;
 
-                case 'lumber':
-                    group.add(createBox(0.4, 0.5, 0.4, MATERIALS.wood, -0.3, 0.25, -0.3));
-                    group.add(createCone(0.4, 0.4, MATERIALS.leaf, -0.3, 0.7, -0.3));
+                case 'lumber': // 伐採所 -> 林場 (Logging Camp)
+                    // Ground
+                    group.add(createBox(1.0, 0.1, 1.0, MATERIALS.dirt, 0, 0.05, 0));
 
-                    group.add(createCyl(0.1, 0.15, 0.5, MATERIALS.wood, 0.3, 0.25, 0.3));
-                    group.add(createCone(0.3, 0.6, MATERIALS.leaf, 0.3, 0.6, 0.3));
+                    if (tier === 1) { // Tier 1: Hut & Stump
+                        // Woodcutter's Hut (Tent)
+                        group.add(createCone(0.5, 0.6, MATERIALS.roofStraw, -0.2, 0.3, -0.2));
+                        // Stump
+                        group.add(createCyl(0.15, 0.15, 0.2, MATERIALS.wood, 0.3, 0.1, 0.3));
+                    } else { // Tier 2: Sawmill
+                        // Open roof structure
+                        const roofY = 0.8;
+                        group.add(createPillar(0.7, -0.3, 0.35, -0.3));
+                        group.add(createPillar(0.7, 0.3, 0.35, -0.3));
+                        group.add(createPillar(0.7, -0.3, 0.35, 0.3));
+                        group.add(createPillar(0.7, 0.3, 0.35, 0.3));
+                        group.add(createChineseRoof(0.8, 0.8, 0.4, MATERIALS.roofTileBlack, 0, roofY + 0.2, 0));
 
-                    if (tier >= 2) {
-                        group.add(createCyl(0.12, 0.12, 0.15, MATERIALS.wood, 0.3, 0.075, -0.2));
-                        group.add(createCyl(0.08, 0.08, 0.6, MATERIALS.wood, -0.2, 0.08, 0.3, Math.PI / 2));
-                        group.add(createCyl(0.08, 0.08, 0.6, MATERIALS.wood, -0.2, 0.08, 0.45, Math.PI / 2));
-                        group.add(createCyl(0.08, 0.08, 0.6, MATERIALS.wood, -0.2, 0.2, 0.375, Math.PI / 2));
+                        // Saw bench
+                        group.add(createBox(0.6, 0.3, 0.2, MATERIALS.wood, 0, 0.15, 0));
+                        // Big Saw
+                        const saw = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.02, 32), MATERIALS.metal);
+                        saw.rotation.z = Math.PI / 2;
+                        saw.position.set(0, 0.4, 0);
+                        saw.userData = { anim: 'spinX', speed: 0.2 }; // Rotate around axis
+                        group.add(saw);
                     }
-
-                    if (tier >= 3) {
-                        const sawBase = createBox(0.4, 0.2, 0.1, MATERIALS.wood, 0, 0.1, 0);
-                        group.add(sawBase);
-                        const blade = createBox(0.3, 0.01, 0.3, MATERIALS.metal, 0, 0.22, 0);
-                        blade.userData = { anim: 'sawMove' };
-                        group.add(blade);
-                    }
+                    // Logs (Props)
+                    addProps(group, vizLevel + 5, Math.floor(vizLevel / 5) + 1);
                     break;
 
-                case 'quarry':
-                    group.add(createBox(0.5, 0.4, 0.5, MATERIALS.stone, -0.2, 0.2, -0.2));
-                    group.add(createBox(0.4, 0.3, 0.4, MATERIALS.stone, 0.2, 0.15, 0.1));
+                case 'quarry': // 採石場 -> 石切り場 (Stone Pit)
+                    // Ground
+                    group.add(createBox(1.0, 0.1, 1.0, MATERIALS.stone, 0, 0.05, 0));
+
+                    // Rock Face
+                    const rockScale = tier >= 2 ? 0.8 : 0.6;
+                    for (let i = 0; i < 3; i++) {
+                        group.add(createBox(0.4, 0.3 + i * 0.2, 0.4, MATERIALS.stone, -0.2 + i * 0.1, (0.3 + i * 0.2) / 2, -0.2 - i * 0.1, 0.5));
+                    }
 
                     if (tier >= 2) {
-                        const craneBase = createCyl(0.05, 0.05, 0.6, MATERIALS.wood, 0.3, 0.3, -0.3);
-                        group.add(craneBase);
-
+                        // Crane (Wooden)
                         const craneGroup = new THREE.Group();
-                        craneGroup.position.set(0.3, 0.6, -0.3);
-                        const arm = createBox(0.5, 0.05, 0.05, MATERIALS.wood, -0.25, 0, 0);
-                        craneGroup.add(arm);
-                        const string = createCyl(0.01, 0.01, 0.4, MATERIALS.white, -0.45, -0.2, 0);
-                        craneGroup.add(string);
-                        const stoneBlock = createBox(0.15, 0.15, 0.15, MATERIALS.stone, -0.45, -0.45, 0);
-                        craneGroup.add(stoneBlock);
+                        craneGroup.position.set(0.3, 0, 0.3);
+                        craneGroup.add(createCyl(0.05, 0.05, 1.0, MATERIALS.wood, 0, 0.5, 0)); // Mast
+                        craneGroup.add(createBox(0.6, 0.05, 0.05, MATERIALS.wood, -0.2, 0.9, 0)); // Jib
+                        // Hanging stone
+                        const rope = createCyl(0.01, 0.01, 0.5, MATERIALS.white, -0.4, 0.65, 0);
+                        craneGroup.add(rope);
+                        const stone = createBox(0.2, 0.2, 0.2, MATERIALS.stone, -0.4, 0.3, 0);
+                        craneGroup.add(stone);
 
-                        craneGroup.userData = { anim: 'rotateY', speed: 0.005 };
+                        craneGroup.rotation.y = -0.5;
                         group.add(craneGroup);
+                    } else {
+                        // Pickaxe / Tools
+                        group.add(createBox(0.05, 0.4, 0.05, MATERIALS.wood, 0.3, 0.2, 0.3, 0.5));
+                    }
+                    break;
+
+                case 'mine': // 鉱山 -> 鉄山 (Iron Mine)
+                    // Ground
+                    group.add(createBox(1.0, 0.1, 1.0, MATERIALS.dirt, 0, 0.05, 0));
+
+                    if (tier === 1) { // Tier 1: Mine Shaft
+                        // Hill shape
+                        group.add(createBox(0.8, 0.6, 0.5, MATERIALS.dirt, 0, 0.3, -0.2));
+                        // Tunnel entrance
+                        group.add(createBox(0.4, 0.4, 0.1, MATERIALS.dark, 0, 0.2, 0.05));
+                        // Supports
+                        group.add(createCyl(0.05, 0.05, 0.5, MATERIALS.wood, 0.25, 0.25, 0.1));
+                        group.add(createCyl(0.05, 0.05, 0.5, MATERIALS.wood, -0.25, 0.25, 0.1));
+                        group.add(createBox(0.6, 0.05, 0.05, MATERIALS.wood, 0, 0.5, 0.1));
+                        // Rails
+                        group.add(createBox(0.6, 0.02, 0.05, MATERIALS.metal, 0, 0.11, 0.3));
+                    } else { // Tier 2: Refinery
+                        // Furnace
+                        group.add(createBox(0.6, 0.6, 0.6, MATERIALS.stone, 0, 0.3, -0.1));
+                        // Fire inside
+                        group.add(createBox(0.3, 0.2, 0.1, MATERIALS.gold, 0, 0.2, 0.21));
+                        // Chimney
+                        group.add(createCyl(0.2, 0.15, 0.8, MATERIALS.stone, 0.2, 0.8, -0.1));
+
+                        // Smoke
+                        const smokeNode = new THREE.Object3D();
+                        smokeNode.position.set(0.2, 1.3, -0.1);
+                        smokeNode.userData = { anim: 'smoke' };
+                        group.add(smokeNode);
                     }
 
-                    if (tier >= 3) {
-                        group.add(createBox(0.8, 0.02, 0.15, MATERIALS.dark, 0, 0.02, 0.4));
+                    // Props (Ore cart)
+                    if (vizLevel >= 15) {
                         const cart = new THREE.Group();
-                        cart.position.set(0, 0.1, 0.4);
-                        cart.add(createBox(0.2, 0.15, 0.2, MATERIALS.wood, 0, 0, 0));
-                        cart.add(createBox(0.15, 0.1, 0.15, MATERIALS.stone, 0, 0.05, 0));
-                        cart.userData = { anim: 'shuttleX', range: 0.3, speed: 0.02 };
+                        cart.position.set(0, 0.15, 0.3);
+                        cart.add(createBox(0.25, 0.15, 0.2, MATERIALS.wood, 0, 0, 0));
+                        cart.add(createBox(0.2, 0.1, 0.15, MATERIALS.dark, 0, 0.05, 0)); // Ore
                         group.add(cart);
                     }
                     break;
 
-                case 'mine':
-                    group.add(createBox(0.6, 0.6, 0.3, MATERIALS.dirt, 0, 0.3, -0.2));
-                    group.add(createBox(0.4, 0.4, 0.1, MATERIALS.dark, 0, 0.2, -0.05)); // 穴
-                    group.add(createCyl(0.05, 0.05, 0.6, MATERIALS.wood, 0.25, 0.3, -0.05));
-                    group.add(createCyl(0.05, 0.05, 0.6, MATERIALS.wood, -0.25, 0.3, -0.05));
-                    group.add(createBox(0.6, 0.1, 0.1, MATERIALS.wood, 0, 0.55, -0.05));
-
-                    if (tier >= 2) {
-                        const lantern = createBox(0.08, 0.12, 0.08, MATERIALS.gold, 0.32, 0.45, 0);
-                        lantern.userData = { anim: 'blink', speed: 0.1 };
-                        group.add(lantern);
-                    }
-
-                    if (tier >= 3) {
-                        const drillGroup = new THREE.Group();
-                        drillGroup.position.set(-0.2, 0.15, 0.3);
-                        drillGroup.add(createBox(0.3, 0.2, 0.3, MATERIALS.metal, 0, 0, 0));
-                        const bit = createCone(0.1, 0.3, MATERIALS.dark, 0, 0, 0.25, -Math.PI / 2);
-                        bit.userData = { anim: 'spinX', speed: 0.5 };
-                        drillGroup.add(bit);
-                        group.add(drillGroup);
-                    }
-                    break;
-
-                case 'market':
-                    const createStall = (x, z, color) => {
+                case 'market': // 市場 -> 市 (Bazaar)
+                    const createStall = (x, z, typeString) => {
                         const g = new THREE.Group();
                         g.position.set(x, 0, z);
-                        g.add(createBox(0.4, 0.3, 0.3, MATERIALS.wood, 0, 0.15, 0)); // 台
-                        const r = createCyl(0, 0.3, 0.2, color, 0, 0.5, 0, 0, 4);
-                        r.rotation.y = Math.PI / 4;
-                        g.add(r);
-                        g.add(createCyl(0.02, 0.02, 0.4, MATERIALS.wood, 0.18, 0.3, 0.13));
-                        g.add(createCyl(0.02, 0.02, 0.4, MATERIALS.wood, -0.18, 0.3, 0.13));
-                        g.add(createCyl(0.02, 0.02, 0.4, MATERIALS.wood, 0.18, 0.3, -0.13));
-                        g.add(createCyl(0.02, 0.02, 0.4, MATERIALS.wood, -0.18, 0.3, -0.13));
+
+                        // Table
+                        g.add(createBox(0.4, 0.3, 0.3, MATERIALS.wood, 0, 0.15, 0));
+
+                        // Roof poles
+                        g.add(createCyl(0.02, 0.02, 0.5, MATERIALS.wood, 0.18, 0.25, 0.13));
+                        g.add(createCyl(0.02, 0.02, 0.5, MATERIALS.wood, -0.18, 0.25, 0.13));
+
+                        if (typeString === 'cloth') {
+                            // Cloth roof
+                            const cloth = createBox(0.45, 0.02, 0.35, MATERIALS.tent, 0, 0.5, 0);
+                            cloth.rotation.x = 0.1;
+                            g.add(cloth);
+                        } else {
+                            // Straw/Mat roof
+                            const mat = createBox(0.45, 0.02, 0.35, MATERIALS.roofStraw, 0, 0.5, 0);
+                            mat.rotation.x = 0.1;
+                            g.add(mat);
+                        }
+
+                        // Wares
+                        g.add(createBox(0.1, 0.1, 0.1, MATERIALS.leaf, 0.1, 0.35, 0));
+                        g.add(createCyl(0.05, 0.05, 0.1, MATERIALS.wood, -0.1, 0.35, 0));
+
                         return g;
                     };
 
-                    group.add(createStall(0, 0, 0, MATERIALS.tent));
+                    // Ground
+                    group.add(createBox(1.0, 0.1, 1.0, MATERIALS.pavingStone, 0, 0.05, 0));
+
+                    // Main Stall
+                    group.add(createStall(0, 0, tier >= 2 ? 'cloth' : 'straw'));
 
                     if (tier >= 2) {
-                        group.add(createStall(0.4, 0.3, MATERIALS.roof));
-                        group.add(createBox(0.15, 0.15, 0.15, MATERIALS.wood, -0.3, 0.075, 0.3));
-                        group.add(createBox(0.15, 0.15, 0.15, MATERIALS.wood, -0.4, 0.075, 0.2));
+                        // Side Stall
+                        group.add(createStall(0.4, 0.3, 'cloth'));
+                        // Lantern
+                        group.add(createLantern(-0.3, 0.6, 0.3));
+                        // Gate/Torii like structure for entrance
+                        group.add(createPillar(0.8, -0.4, 0.4, 0.4));
+                        group.add(createPillar(0.8, 0.4, 0.4, 0.4));
+                        group.add(createBox(1.0, 0.1, 0.1, MATERIALS.woodDark, 0, 0.7, 0.4));
                     }
 
-                    if (tier >= 3) {
-                        group.add(createStall(-0.4, -0.2, MATERIALS.grass));
-                        const fountain = new THREE.Group();
-                        fountain.position.set(0, 0.1, 0.5);
-                        fountain.add(createCyl(0.3, 0.2, 0.1, MATERIALS.stone, 0, 0, 0));
-                        fountain.add(createCyl(0.1, 0.1, 0.3, MATERIALS.stone, 0, 0.15, 0));
-                        const water = createBox(0.05, 0.05, 0.05, MATERIALS.water, 0, 0.35, 0);
-                        water.userData = { anim: 'bounceY', speed: 0.1, range: 0.05 };
-                        fountain.add(water);
-                        group.add(fountain);
+                    // Props
+                    if (vizLevel >= 15) {
+                        addProps(group, vizLevel, 3);
                     }
                     break;
 
-                case 'blacksmith':
-                    group.add(createBox(0.7, 0.5, 0.5, MATERIALS.dark, 0, 0.25, -0.1));
-                    group.add(createBox(0.2, 0.8, 0.2, MATERIALS.stone, 0.3, 0.4, -0.1));
+                case 'blacksmith': // 鍛冶屋 -> 兵器廠 (Arsenal)
+                    // Ground
+                    group.add(createBox(1.0, 0.1, 1.0, MATERIALS.stone, 0, 0.05, 0));
+
+                    // Main Building / Shelter
+                    group.add(createPillar(0.8, -0.4, 0.4, -0.4));
+                    group.add(createPillar(0.8, 0.4, 0.4, -0.4));
+                    group.add(createPillar(0.8, -0.4, 0.4, 0.4));
+                    group.add(createPillar(0.8, 0.4, 0.4, 0.4));
+                    group.add(createChineseRoof(1.0, 1.0, 0.5, MATERIALS.roofTileBlack, 0, 1.0, 0));
+
+                    // Furnace
+                    const furnaceMat = tier >= 2 ? MATERIALS.stone : MATERIALS.dirt;
+                    group.add(createBox(0.4, 0.6, 0.4, furnaceMat, -0.2, 0.3, -0.2));
+                    group.add(createBox(0.2, 0.15, 0.05, MATERIALS.gold, -0.2, 0.2, -0.01)); // Fire
+
+                    // Anvil
+                    group.add(createBox(0.2, 0.3, 0.2, MATERIALS.metal, 0.2, 0.15, 0.2));
+
+                    if (tier >= 2) {
+                        // Weapon Rack
+                        const rack = new THREE.Group();
+                        rack.position.set(0.3, 0, -0.3);
+                        rack.add(createBox(0.4, 0.5, 0.1, MATERIALS.wood, 0, 0.25, 0));
+                        // Spears (Cylinders)
+                        rack.add(createCyl(0.01, 0.01, 0.6, MATERIALS.metal, -0.1, 0.3, 0.05));
+                        rack.add(createCyl(0.01, 0.01, 0.6, MATERIALS.metal, 0.0, 0.3, 0.05));
+                        rack.add(createCyl(0.01, 0.01, 0.6, MATERIALS.metal, 0.1, 0.3, 0.05));
+                        group.add(rack);
+                    }
+
+                    // Smoke
                     const smokeB = new THREE.Object3D();
-                    smokeB.position.set(0.3, 0.9, -0.1);
+                    smokeB.position.set(-0.2, 1.0, -0.2);
                     smokeB.userData = { anim: 'smoke' };
                     group.add(smokeB);
-
-                    if (tier >= 2) {
-                        const furnace = createBox(0.3, 0.3, 0.3, MATERIALS.stone, -0.3, 0.15, 0.3);
-                        group.add(furnace);
-                        const fire = createBox(0.15, 0.1, 0.15, MATERIALS.gold, -0.3, 0.2, 0.35);
-                        fire.userData = { anim: 'blink', speed: 0.2 };
-                        group.add(fire);
-                    }
-
-                    if (tier >= 3) {
-                        const anvil = createBox(0.2, 0.15, 0.1, MATERIALS.metal, 0.1, 0.075, 0.3);
-                        group.add(anvil);
-
-                        const hammerGroup = new THREE.Group();
-                        hammerGroup.position.set(0.25, 0.25, 0.3);
-                        hammerGroup.add(createBox(0.05, 0.2, 0.05, MATERIALS.wood, 0, 0, 0));
-                        hammerGroup.add(createBox(0.1, 0.05, 0.05, MATERIALS.metal, 0, 0.1, 0));
-                        hammerGroup.userData = { anim: 'hammer', speed: 0.1 };
-                        hammerGroup.rotation.z = Math.PI / 4;
-                        group.add(hammerGroup);
-                    }
                     break;
 
-                case 'well':
-                    const wellBase = createCyl(0.3, 0.3, 0.3, MATERIALS.stone, 0, 0.15, 0, 0, 8);
-                    group.add(wellBase);
-                    const waterInside = createCyl(0.25, 0.25, 0.31, MATERIALS.water, 0, 0.15, 0, 0, 8);
-                    group.add(waterInside);
+                case 'well': // 井戸 -> 給水所 (Water Works)
+                    // Ground
+                    group.add(createBox(0.8, 0.1, 0.8, MATERIALS.pavingStone, 0, 0.05, 0));
+
+                    // Well Base
+                    group.add(createCyl(0.3, 0.3, 0.4, MATERIALS.stone, 0, 0.2, 0, 0, 8));
+                    group.add(createCyl(0.25, 0.25, 0.41, MATERIALS.water, 0, 0.2, 0, 0, 8));
 
                     if (tier >= 2) {
-                        // Roof
-                        group.add(createBox(0.1, 0.6, 0.1, MATERIALS.wood, 0.25, 0.4, 0));
-                        group.add(createBox(0.1, 0.6, 0.1, MATERIALS.wood, -0.25, 0.4, 0));
-                        const roof = createCone(0.5, 0.3, MATERIALS.roof, 0, 0.8, 0);
-                        group.add(roof);
+                        // Roof over well
+                        group.add(createPillar(0.8, -0.3, 0.4, 0));
+                        group.add(createPillar(0.8, 0.3, 0.4, 0));
+                        group.add(createChineseRoof(0.8, 0.6, 0.3, MATERIALS.roofTileGreen, 0, 0.9, 0));
+
+                        // Dragon Head (Simplified)
+                        const dragon = createBox(0.1, 0.1, 0.2, MATERIALS.gold, 0, 0.5, -0.2);
+                        group.add(dragon);
                     }
-                    if (tier >= 3) {
-                        // Bucket
+
+                    // Bucket
+                    if (vizLevel >= 15) {
                         const bucket = createCyl(0.1, 0.08, 0.15, MATERIALS.wood, 0, 0.4, 0);
                         bucket.userData = { anim: 'bounceY', speed: 0.15, range: 0.1 };
                         group.add(bucket);
                     }
                     break;
 
-                case 'inn':
-                    // L-shape main building 
-                    group.add(createBox(0.7, 0.5, 0.4, MATERIALS.wall, 0, 0.25, -0.15));
-                    group.add(createBox(0.4, 0.5, 0.5, MATERIALS.wall, 0.15, 0.25, 0.3));
+                case 'inn': // 宿屋 -> 茶館/宿場 (Teahouse/Inn)
+                    // Ground
+                    group.add(createFoundation(0.9, 0.9));
 
-                    // Roofs
-                    const roof1 = createCone(0.8, 0.4, MATERIALS.roof, 0, 0.65, -0.15, Math.PI / 4);
-                    roof1.scale.z = 0.5;
-                    group.add(roof1);
+                    if (tier === 1) { // Tier 1: Teahouse (Simple)
+                        // Main building
+                        group.add(createBox(0.8, 0.5, 0.6, MATERIALS.wallWhite, 0, 0.25, 0));
+                        // Straw roof
+                        const roof = createCone(0.9, 0.6, MATERIALS.roofStraw, 0, 0.8, 0, Math.PI / 4);
+                        roof.scale.z = 0.8;
+                        group.add(roof);
+                        // Bench outside
+                        group.add(createBox(0.3, 0.1, 0.1, MATERIALS.wood, 0.3, 0.05, 0.4));
+                        // Tea banner (Noren)
+                        group.add(createBox(0.2, 0.2, 0.02, MATERIALS.tent, 0, 0.4, 0.31));
+                    } else { // Tier 2: Inn (2-Story)
+                        // 1st Floor
+                        group.add(createBox(0.8, 0.5, 0.8, MATERIALS.woodDark, 0, 0.25, 0));
+                        // 2nd Floor
+                        group.add(createBox(0.8, 0.5, 0.6, MATERIALS.wallWhite, 0, 0.75, 0));
 
-                    if (tier >= 2) {
-                        // 2nd floor on main part
-                        group.add(createBox(0.7, 0.4, 0.4, MATERIALS.wall, 0, 0.7, -0.15));
-                        const roof2 = createCone(0.8, 0.5, MATERIALS.roof, 0, 1.1, -0.15, Math.PI / 4);
-                        roof2.scale.z = 0.5;
-                        // remove old roof1 (complex to remove, just cover it or let it be)
-                        group.add(roof2);
+                        // Roofs
+                        group.add(createChineseRoof(1.0, 1.0, 0.2, MATERIALS.roofTileBlack, 0, 0.5, 0)); // 1st floor roof skirting
+                        group.add(createChineseRoof(0.9, 0.7, 0.5, MATERIALS.roofTileBlack, 0, 1.25, 0)); // Main roof
 
-                        // Sign
-                        const sign = createBox(0.3, 0.15, 0.05, MATERIALS.wood, -0.3, 0.4, 0.1);
-                        sign.rotation.y = -0.3;
-                        group.add(sign);
+                        // Balcony/Railings
+                        group.add(createBox(0.85, 0.2, 0.05, MATERIALS.wood, 0, 0.6, 0.45));
+
+                        // Lanterns
+                        group.add(createLantern(0.45, 0.4, 0.45));
+                        group.add(createLantern(-0.45, 0.4, 0.45));
                     }
 
-                    if (tier >= 3) {
-                        // Extension / Stable
-                        group.add(createBox(0.4, 0.3, 0.3, MATERIALS.wood, -0.4, 0.15, 0.2));
-                        const horse = createBox(0.1, 0.1, 0.2, MATERIALS.dirt, -0.4, 0.1, 0.2);
-                        group.add(horse);
-                    }
-                    break;
-
-                case 'clocktower':
-                    const towerH = tier >= 3 ? 1.8 : tier >= 2 ? 1.4 : 1.0;
-                    group.add(createBox(0.4, towerH, 0.4, MATERIALS.stone, 0, towerH / 2, 0));
-
-                    // Clock face
-                    const clockY = towerH - 0.2;
-                    group.add(createBox(0.42, 0.42, 0.1, MATERIALS.white, 0, clockY, 0));
-                    const hand = createBox(0.05, 0.2, 0.05, MATERIALS.dark, 0, clockY, 0.06);
-                    hand.userData = { anim: 'rotateZ', speed: 0.1 };
-                    group.add(hand);
-
-                    // Roof
-                    const towerRoof = createCone(0.5, 0.6, MATERIALS.dark, 0, towerH + 0.3, 0);
-                    group.add(towerRoof);
-
-                    if (tier >= 3) {
-                        // Decorative base
-                        group.add(createBox(0.6, 0.2, 0.6, MATERIALS.stone, 0, 0.1, 0));
+                    if (vizLevel >= 15) {
+                        // Horse stable / Hitching post
+                        group.add(createBox(0.05, 0.4, 0.05, MATERIALS.wood, -0.4, 0.2, 0.4));
+                        group.add(createBox(0.3, 0.05, 0.05, MATERIALS.wood, -0.4, 0.35, 0.4));
                     }
                     break;
 
-                case 'forest':
-                    // Forest Area (1x2). Slave tile at Z+3.0.
+                case 'clocktower': // 時計塔 -> 鐘楼 (Bell Tower)
+                    // Ground
+                    group.add(createBox(0.6, 0.1, 0.6, MATERIALS.stone, 0, 0.05, 0));
+
+                    const towerH = tier >= 2 ? 1.4 : 1.0;
+
+                    if (tier === 1) { // Tier 1: Watchtower (Wood)
+                        // Legs
+                        group.add(createCyl(0.05, 0.08, towerH, MATERIALS.wood, 0.2, towerH / 2, 0.2));
+                        group.add(createCyl(0.05, 0.08, towerH, MATERIALS.wood, -0.2, towerH / 2, 0.2));
+                        group.add(createCyl(0.05, 0.08, towerH, MATERIALS.wood, 0.2, towerH / 2, -0.2));
+                        group.add(createCyl(0.05, 0.08, towerH, MATERIALS.wood, -0.2, towerH / 2, -0.2));
+                        // Platform
+                        group.add(createBox(0.5, 0.1, 0.5, MATERIALS.wood, 0, towerH, 0));
+                        // Roof
+                        group.add(createCone(0.6, 0.4, MATERIALS.roofStraw, 0, towerH + 0.3, 0));
+                        // Bell/Gong
+                        group.add(createCyl(0.1, 0.15, 0.15, MATERIALS.metal, 0, towerH - 0.2, 0));
+                    } else { // Tier 2: Bell Tower (Stone/Wood base, Green Roof)
+                        // Base
+                        group.add(createBox(0.6, 0.6, 0.6, MATERIALS.stone, 0, 0.3, 0));
+                        // Upper structure (Pillars)
+                        const upperY = 0.6;
+                        group.add(createPillar(0.8, 0.25, upperY + 0.4, 0.25));
+                        group.add(createPillar(0.8, -0.25, upperY + 0.4, 0.25));
+                        group.add(createPillar(0.8, 0.25, upperY + 0.4, -0.25));
+                        group.add(createPillar(0.8, -0.25, upperY + 0.4, -0.25));
+
+                        // Big Bronze Bell
+                        const bell = createCyl(0.2, 0.3, 0.3, MATERIALS.metal, 0, upperY + 0.4, 0);
+                        group.add(bell);
+
+                        // Roof
+                        group.add(createChineseRoof(0.8, 0.8, 0.5, MATERIALS.roofTileGreen, 0, upperY + 0.9, 0, 2));
+                    }
+                    break;
+
+                case 'forest': // 森 -> 竹林 (Bamboo Grove)
+                    // Forest Area (1x2). Slave tile at Z+3.0 equivalent distance logic
+                    // Logic handles rendering at Master pos.
+
                     const addTree = (tx, tz, s) => {
-                        const trunk = createCyl(0.1 * s, 0.15 * s, 0.5 * s, MATERIALS.wood, tx, 0.25 * s, tz);
-                        group.add(trunk);
-                        const l1 = createCone(0.4 * s, 0.6 * s, MATERIALS.darkLeaf, tx, 0.6 * s, tz);
-                        group.add(l1);
-                        const l2 = createCone(0.3 * s, 0.5 * s, MATERIALS.darkLeaf, tx, 0.9 * s, tz);
-                        group.add(l2);
+                        if (tier >= 2) {
+                            // Bamboo
+                            const bamboo = new THREE.Group();
+                            bamboo.position.set(tx, 0, tz);
+                            bamboo.scale.set(s, s * 1.5, s);
+                            // Segments
+                            bamboo.add(createCyl(0.05, 0.06, 0.8, MATERIALS.leaf, 0, 0.4, 0));
+                            // Leaves
+                            bamboo.add(createCone(0.2, 0.3, MATERIALS.leaf, 0, 0.7, 0));
+                            bamboo.userData = { anim: 'sway', speed: 1.0 + Math.random(), offset: Math.random() * 10 };
+                            group.add(bamboo);
+                        } else {
+                            // Normal Tree
+                            const trunk = createCyl(0.1 * s, 0.15 * s, 0.5 * s, MATERIALS.wood, tx, 0.25 * s, tz);
+                            group.add(trunk);
+                            const l1 = createCone(0.4 * s, 0.6 * s, MATERIALS.darkLeaf, tx, 0.6 * s, tz);
+                            group.add(l1);
+                            const l2 = createCone(0.3 * s, 0.5 * s, MATERIALS.darkLeaf, tx, 0.9 * s, tz);
+                            group.add(l2);
+                        }
                     };
 
-                    // Cabin at Master center
-                    group.add(createBox(0.8, 0.5, 0.7, MATERIALS.wood, 0, 0.25, 0.2));
-                    const cabinRoof = createCone(0.9, 0.5, MATERIALS.roof, 0, 0.7, 0.2, Math.PI / 4);
-                    cabinRoof.scale.z = 0.8;
-                    group.add(cabinRoof);
+                    // Cabin (Hut) happens in Tier 1. Tier 2 maybe a small shrine?
+                    if (tier === 1) {
+                        group.add(createBox(0.8, 0.5, 0.7, MATERIALS.wood, 0, 0.25, 0.2));
+                        const cabinRoof = createCone(0.9, 0.5, MATERIALS.roofStraw, 0, 0.7, 0.2, Math.PI / 4);
+                        cabinRoof.scale.z = 0.8;
+                        group.add(cabinRoof);
+                    } else {
+                        // Stone Lantern
+                        group.add(createBox(0.2, 0.4, 0.2, MATERIALS.stone, 0, 0.2, 0.2));
+                        group.add(createBox(0.3, 0.1, 0.3, MATERIALS.stone, 0, 0.45, 0.2));
+                    }
 
                     // Scatter trees
+                    const range = tier >= 2 ? 0.6 : 0.8; // Denser for bamboo
+                    const dens = tier >= 2 ? 1.5 : 1.0;
+
                     // Master area
                     addTree(-0.8, -0.8, 0.9);
                     addTree(0.8, -0.6, 0.8);
                     addTree(0.6, 0.8, 0.7);
+                    if (tier >= 2) addTree(0.2, -0.9, 0.8);
 
                     // Slave area (z around 3.0)
                     addTree(0, 3.0, 1.2);
@@ -2673,177 +2882,164 @@
                     addTree(0.8, 2.5, 0.8);
                     addTree(-0.7, 3.5, 0.7);
                     addTree(0.7, 3.6, 0.8);
-
                     if (tier >= 2) {
-                        addTree(-0.4, 1.5, 0.6); // Gap
-                        addTree(0.4, 1.8, 0.7);
-                        addTree(0.9, 3.0, 0.6);
-                    }
-                    if (tier >= 3) {
-                        addTree(-0.9, 3.0, 0.6);
-                        addTree(0, -1.2, 0.6);
-                    }
-                    if (tier >= 3) {
-                        addTree(-0.9, 3.0, 0.6);
-                        addTree(0, -1.2, 0.6);
+                        addTree(0.3, 2.8, 0.9);
+                        addTree(-0.3, 3.2, 0.8);
                     }
                     break;
 
-                case 'bank':
-                    // Bank: High-class stone building with gold accents
-                    // Main Hall
-                    group.add(createBox(0.8, 0.6, 0.8, MATERIALS.stone, 0, 0.3, 0));
+                case 'bank': // 銀行 -> 金庫 (Vault)
+                    // Ground
+                    group.add(createFoundation(0.9, 0.9));
 
-                    // Pillars (Front)
-                    const pillarGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.6, 8);
-                    const p1 = new THREE.Mesh(pillarGeo, MATERIALS.stone); p1.position.set(0.3, 0.3, 0.45); group.add(p1);
-                    const p2 = new THREE.Mesh(pillarGeo, MATERIALS.stone); p2.position.set(-0.3, 0.3, 0.45); group.add(p2);
-
-                    // Entrance (Gold door)
-                    group.add(createBox(0.3, 0.4, 0.05, MATERIALS.gold, 0, 0.2, 0.42));
-
-                    if (tier >= 2) {
-                        // 2nd Floor / Vault
-                        group.add(createBox(0.7, 0.5, 0.7, MATERIALS.wall, 0, 0.8, 0));
-                        group.add(createBox(0.85, 0.1, 0.85, MATERIALS.stone, 0, 0.6, 0)); // Cornice
-
-                        // Vault Wheel Decoration
-                        const wheel = createCyl(0.15, 0.15, 0.05, MATERIALS.metal, 0, 0.4, 0.45, Math.PI / 2);
-                        group.add(wheel);
-                    } else {
-                        group.add(createBox(0.85, 0.1, 0.85, MATERIALS.stone, 0, 0.6, 0)); // Roof base
+                    if (tier === 1) { // Tier 1: Storehouse (Kurazukuri style)
+                        // White walls, thick
+                        group.add(createBox(0.8, 0.6, 0.8, MATERIALS.wallWhite, 0, 0.3, 0));
+                        // Black base
+                        group.add(createBox(0.82, 0.2, 0.82, MATERIALS.dark, 0, 0.1, 0));
+                        // Roof
+                        group.add(createChineseRoof(0.9, 0.9, 0.5, MATERIALS.roofTileBlack, 0, 0.85, 0));
+                        // Heavy Door
+                        group.add(createBox(0.3, 0.4, 0.05, MATERIALS.metal, 0, 0.3, 0.41));
+                    } else { // Tier 2: Stone Vault
+                        // Stone building
+                        group.add(createBox(0.9, 0.7, 0.9, MATERIALS.stone, 0, 0.35, 0));
+                        // Columns
+                        group.add(createCyl(0.1, 0.1, 0.7, MATERIALS.stone, 0.4, 0.35, 0.4));
+                        group.add(createCyl(0.1, 0.1, 0.7, MATERIALS.stone, -0.4, 0.35, 0.4));
+                        // Roof
+                        group.add(createChineseRoof(1.0, 1.0, 0.6, MATERIALS.roofTileGold, 0, 1.0, 0, 2));
+                        // Gold Doors
+                        group.add(createBox(0.4, 0.5, 0.05, MATERIALS.gold, 0, 0.35, 0.46));
                     }
 
                     if (tier >= 3) {
-                        // Dome Roof
-                        const dome = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2), MATERIALS.gold);
-                        dome.position.set(0, 1.05, 0);
-                        group.add(dome);
-
-                        // Money Signs using thin boxes
-                        const signGroup = new THREE.Group();
-                        signGroup.position.set(0, 1.6, 0);
-                        // Vertical line
-                        signGroup.add(createBox(0.05, 0.3, 0.05, MATERIALS.gold, 0, 0, 0));
-                        // S curves (approximated with small boxes)
-                        signGroup.add(createBox(0.15, 0.05, 0.05, MATERIALS.gold, 0, 0.12, 0));
-                        signGroup.add(createBox(0.15, 0.05, 0.05, MATERIALS.gold, 0, -0.12, 0));
-
-                        signGroup.userData = { anim: 'rotateY', speed: 0.02 };
-                        group.add(signGroup);
+                        // Gold piles
+                        group.add(createBox(0.2, 0.1, 0.2, MATERIALS.gold, 0.3, 0.1, 0.3));
+                        group.add(createBox(0.2, 0.15, 0.2, MATERIALS.gold, -0.3, 0.1, 0.3));
                     }
                     break;
 
-                case 'granary':
-                    // Granary: Cylindrical Silos
-                    // Main Silo
-                    const siloGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.8, 16);
-                    const silo = new THREE.Mesh(siloGeo, MATERIALS.wall);
-                    silo.position.set(0, 0.4, 0);
-                    group.add(silo);
+                case 'granary': // 穀倉 (Granary)
+                    // Ground
+                    group.add(createFoundation(0.9, 0.9));
 
-                    // Dome Roof (Silo)
-                    const siloRoof = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2), MATERIALS.wood);
-                    siloRoof.position.set(0, 0.8, 0);
-                    group.add(siloRoof);
+                    if (tier === 1) { // Tier 1: Raised Floor Granary (Takayuka)
+                        // Stilts
+                        group.add(createCyl(0.05, 0.05, 0.3, MATERIALS.wood, 0.3, 0.15, 0.3));
+                        group.add(createCyl(0.05, 0.05, 0.3, MATERIALS.wood, -0.3, 0.15, 0.3));
+                        group.add(createCyl(0.05, 0.05, 0.3, MATERIALS.wood, 0.3, 0.15, -0.3));
+                        group.add(createCyl(0.05, 0.05, 0.3, MATERIALS.wood, -0.3, 0.15, -0.3));
+                        // Rat guards (Nezumi-gaeshi) - small discs
 
-                    // Wooden Platform base
-                    group.add(createBox(0.9, 0.1, 0.9, MATERIALS.wood, 0, 0.05, 0));
+                        // Main box
+                        group.add(createBox(0.7, 0.5, 0.7, MATERIALS.wood, 0, 0.55, 0));
+                        // Roof
+                        group.add(createChineseRoof(0.8, 0.8, 0.5, MATERIALS.roofStraw, 0, 1.05, 0));
+                        // Ladder
+                        const ladder = createBox(0.2, 0.4, 0.05, MATERIALS.wood, 0, 0.2, 0.35);
+                        ladder.rotation.x = -0.5;
+                        group.add(ladder);
+                    } else { // Tier 2: Large Granary Complex
+                        // Main building
+                        group.add(createBox(0.8, 0.6, 0.8, MATERIALS.wallWhite, 0, 0.3, 0));
+                        // Striped styling
+                        group.add(createBox(0.82, 0.05, 0.82, MATERIALS.woodDark, 0, 0.3, 0));
+                        group.add(createBox(0.82, 0.05, 0.82, MATERIALS.woodDark, 0, 0.5, 0));
 
-                    // Wheat Sheaves (Cones) - Increase check
-                    const wheatGeo = new THREE.ConeGeometry(0.1, 0.3, 8);
-                    const makeWheat = (x, z) => {
-                        const m = new THREE.Mesh(wheatGeo, MATERIALS.gold); // Gold ~ Wheat color
-                        m.position.set(x, 0.2, z);
-                        return m;
-                    };
-                    group.add(makeWheat(0.3, 0.3));
-                    group.add(makeWheat(-0.3, -0.3));
+                        // Roof
+                        group.add(createChineseRoof(0.9, 0.9, 0.6, MATERIALS.roofTileBlack, 0, 0.9, 0));
 
-                    if (tier >= 2) {
-                        // Add Second Silo
-                        const silo2 = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.7, 16), MATERIALS.wall);
-                        silo2.position.set(-0.3, 0.35, 0.3);
-                        group.add(silo2);
-                        const silo2Roof = new THREE.Mesh(new THREE.SphereGeometry(0.25, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2), MATERIALS.wood);
-                        silo2Roof.position.set(-0.3, 0.7, 0.3);
-                        group.add(silo2Roof);
-                    }
-
-                    if (tier >= 3) {
-                        // More Wheat and decoration
-                        group.add(makeWheat(0.35, -0.2));
-                        group.add(makeWheat(-0.35, 0.2));
-
-                        // A crane/lift mechanism
-                        const crane = new THREE.Group();
-                        crane.add(createBox(0.05, 0.8, 0.05, MATERIALS.wood, 0.4, 0.4, 0));
-                        crane.add(createBox(0.3, 0.05, 0.05, MATERIALS.wood, 0.25, 0.8, 0));
-                        group.add(crane);
+                        // Rice Bales (Tawara)
+                        const baleGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.25, 8);
+                        const makeBale = (x, z) => {
+                            const m = new THREE.Mesh(baleGeo, MATERIALS.roofStraw);
+                            m.rotation.z = Math.PI / 2;
+                            m.position.set(x, 0.125, z);
+                            return m;
+                        };
+                        group.add(makeBale(0.3, 0.4));
+                        group.add(makeBale(0.4, 0.4));
+                        if (tier >= 3) {
+                            group.add(makeBale(0.35, 0.4)); // stacked
+                        }
                     }
                     break;
 
-                case 'lumber_hub':
-                    // Lumber Hub: Industrial sawmill
-                    // Base platform
-                    group.add(createBox(0.9, 0.2, 0.9, MATERIALS.stone, 0, 0.1, 0));
+                case 'lumber_hub': // 木材加工所 -> 大工 (Carpenter)
+                    // Ground
+                    group.add(createBox(1.0, 0.1, 1.0, MATERIALS.dirt, 0, 0.05, 0));
 
-                    // Workshop roof (shed style)
-                    const roofGeo = new THREE.ConeGeometry(0.6, 0.3, 4);
-                    const roof = new THREE.Mesh(roofGeo, MATERIALS.wood);
-                    roof.position.set(0, 0.6, -0.2);
-                    roof.rotation.y = Math.PI / 4;
-                    roof.scale.set(1, 1, 0.5);
-                    group.add(roof);
+                    // Main Workshop area
+                    if (tier === 1) { // Workshop
+                        // Open shed
+                        group.add(createPillar(0.6, -0.3, 0.3, -0.3));
+                        group.add(createPillar(0.6, 0.3, 0.3, -0.3));
+                        group.add(createBox(0.8, 0.05, 0.6, MATERIALS.wood, 0, 0.6, -0.2)); // Flat roof
 
-                    // Pillars holding roof
-                    group.add(createBox(0.1, 0.5, 0.1, MATERIALS.wood, -0.3, 0.35, -0.3));
-                    group.add(createBox(0.1, 0.5, 0.1, MATERIALS.wood, 0.3, 0.35, -0.3));
+                        // Workbench
+                        group.add(createBox(0.4, 0.3, 0.2, MATERIALS.wood, 0, 0.15, -0.2));
+                        // Tools
+                        group.add(createBox(0.1, 0.05, 0.05, MATERIALS.metal, 0, 0.32, -0.2));
+                    } else { // Carpenter
+                        // Building
+                        group.add(createBox(0.5, 0.5, 0.5, MATERIALS.wallWhite, -0.2, 0.25, -0.2));
+                        group.add(createChineseRoof(0.6, 0.6, 0.4, MATERIALS.roofTileBlack, -0.2, 0.7, -0.2));
 
-                    // Log Piles
-                    const logGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.4, 6);
-                    const logMat = MATERIALS.wood;
-                    const makeLog = (x, y, z, rotY) => {
-                        const m = new THREE.Mesh(logGeo, logMat);
-                        m.rotation.z = Math.PI / 2;
-                        m.rotation.y = rotY || 0;
-                        m.position.set(x, y, z);
-                        return m;
-                    };
-                    group.add(makeLog(0.2, 0.25, 0.2));
-                    group.add(makeLog(0.2, 0.3, 0.2));
+                        // Working area
+                        group.add(createPillar(0.6, 0.3, 0.3, 0.3));
+                        group.add(createPillar(0.6, -0.2, 0.3, 0.3));
+                        const leanTo = createBox(0.7, 0.05, 0.5, MATERIALS.wood, 0.1, 0.6, 0.2);
+                        leanTo.rotation.x = 0.2;
+                        group.add(leanTo);
 
-                    if (tier >= 2) {
-                        // Big Saw Blade
-                        const sawGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.02, 16);
-                        const saw = new THREE.Mesh(sawGeo, MATERIALS.metal);
+                        // Saw
+                        const saw = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.02, 16), MATERIALS.metal);
                         saw.rotation.x = Math.PI / 2;
-                        saw.position.set(-0.2, 0.3, 0.2);
-                        // Animation data
+                        saw.userData = { anim: 'spinX', speed: 0.3 };
                         const sawGroup = new THREE.Group();
+                        sawGroup.position.set(0.2, 0.3, 0.2);
                         sawGroup.add(saw);
-                        sawGroup.position.set(-0.2, 0.3, 0.2);
-                        saw.position.set(0, 0, 0); // Local
-
-                        // Frame for saw
-                        group.add(createBox(0.05, 0.4, 0.05, MATERIALS.metal, -0.2, 0.3, 0.2));
-
-                        sawGroup.userData = { anim: 'rotateZ', speed: 0.1 };
                         group.add(sawGroup);
                     }
+                    // Logs
+                    group.add(createCyl(0.1, 0.1, 0.5, MATERIALS.wood, 0.3, 0.1, -0.3, Math.PI / 2));
+                    break;
 
-                    if (tier >= 3) {
-                        // Conveyor belt or more logs
-                        group.add(createBox(0.8, 0.05, 0.3, MATERIALS.metal, 0, 0.25, 0.3));
-                        group.add(makeLog(-0.3, 0.3, 0.3));
-                        group.add(makeLog(0, 0.3, 0.3));
-                        group.add(makeLog(0.3, 0.3, 0.3));
+                case 'stone_plant': // 石材加工所 -> 城壁建設現場 (Wall Construction)
+                    // Ground
+                    group.add(createBox(1.0, 0.1, 1.0, MATERIALS.stone, 0, 0.05, 0));
 
-                        // Smoke stack
-                        const stack = createCyl(0.1, 0.08, 0.8, MATERIALS.stone, 0.35, 0.4, -0.35);
-                        group.add(stack);
+                    if (tier === 1) { // Stone Yard
+                        // Piles of stones
+                        for (let i = 0; i < 4; i++) {
+                            group.add(createBox(0.2, 0.15, 0.3, MATERIALS.stone, -0.3 + (i % 2) * 0.6, 0.1, -0.3 + Math.floor(i / 2) * 0.6));
+                        }
+                        // Chisel
+                        group.add(createBox(0.05, 0.2, 0.05, MATERIALS.metal, 0, 0.2, 0));
+                    } else { // Wall Construction Site
+                        // Half-built wall
+                        group.add(createBox(0.8, 0.4, 0.2, MATERIALS.stone, 0, 0.2, -0.3));
+                        group.add(createBox(0.2, 0.4, 0.2, MATERIALS.stone, -0.3, 0.2, -0.1));
+
+                        // Scaffolding
+                        const scaffold = new THREE.Group();
+                        scaffold.position.set(0, 0, 0.1);
+                        scaffold.add(createCyl(0.03, 0.03, 0.8, MATERIALS.wood, -0.4, 0.4, 0));
+                        scaffold.add(createCyl(0.03, 0.03, 0.8, MATERIALS.wood, 0.4, 0.4, 0));
+                        scaffold.add(createBox(0.9, 0.05, 0.2, MATERIALS.wood, 0, 0.5, 0));
+                        group.add(scaffold);
+
+                        // Crane lifting stone
+                        const crane = new THREE.Group();
+                        crane.position.set(0.4, 0, 0.4);
+                        crane.add(createCyl(0.05, 0.05, 1.0, MATERIALS.wood, 0, 0.5, 0));
+                        crane.add(createBox(0.5, 0.05, 0.05, MATERIALS.wood, -0.2, 0.9, 0));
+                        const block = createBox(0.15, 0.15, 0.15, MATERIALS.stone, -0.4, 0.6, 0);
+                        crane.add(block);
+                        crane.userData = { anim: 'rotateY', speed: 0.01 };
+                        group.add(crane);
                     }
-
                     break;
             }
             return group;
