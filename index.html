@@ -2135,11 +2135,11 @@
                 }
 
                 // Walk Cycle
-                const speed = 8.0; // Animation frequency
-                const range = 0.25; // Swing amplitude
+                const speed = 4.0; // Animation frequency (4 = ~2 steps/second)
+                const range = 0.3; // Swing amplitude
 
-                // Use dt directly for animation timing (not this.speed which is too small)
-                this.animTime += dt * 8.0; // 8.0 cycles per second base rate
+                // Use dt directly for animation timing
+                this.animTime += dt * 2.0; // 2.0 base rate for natural walking
 
                 const angle = Math.sin(this.animTime * speed) * range;
 
