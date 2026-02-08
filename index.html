@@ -2135,11 +2135,10 @@
                 }
 
                 // Walk Cycle
-                // Walk Cycle
-                const speed = 5.0;
-                const range = 0.15; // Swing amplitude reduced to 1/4 (0.6 -> 0.15)
+                const speed = 8.0; // Increased from 5.0 for faster limb cycle
+                const range = 0.25; // Slightly increased for more visible movement
 
-                this.animTime += dt * this.speed * 10;
+                this.animTime += dt * this.speed * 15; // Increased multiplier
 
                 const angle = Math.sin(this.animTime * speed) * range;
 
@@ -2160,6 +2159,15 @@
                 const index = Math.round((val - roadStart) / offset);
                 return roadStart + index * offset;
             }
+
+            // Update body rotation to face movement direction
+            updateFacing() {
+                const dx = this.direction.x;
+                const dz = this.direction.z;
+                if (dx !== 0 || dz !== 0) {
+                    this.mesh.rotation.y = Math.atan2(dx, dz);
+                }
+            }
             reset() {
                 const isVertical = Math.random() < 0.5;
                 const size = gameState.gridSize;
@@ -2179,15 +2187,14 @@
                     sx = lane;
                     sz = (Math.random() < 0.5 ? -spawnDist : spawnDist);
                     dx = 0; dz = sz > 0 ? -1 : 1;
-                    this.mesh.rotation.y = (dz > 0) ? 0 : Math.PI; // Face direction
                 } else {
                     sz = lane;
                     sx = (Math.random() < 0.5 ? -spawnDist : spawnDist);
                     dx = sx > 0 ? -1 : 1; dz = 0;
-                    this.mesh.rotation.y = (dx > 0) ? Math.PI / 2 : -Math.PI / 2; // Face direction
                 }
                 this.mesh.position.set(sx, 0, sz);
                 this.direction = new THREE.Vector3(dx, 0, dz);
+                this.updateFacing(); // Sync facing on spawn
                 this.active = true;
                 this.isStopped = false;
                 this.canTurn = true;
@@ -2290,6 +2297,7 @@
                     if (this.isRoadBlocked(nextX, nextZ, isVertical)) {
                         // Reverse direction
                         this.direction.negate();
+                        this.updateFacing(); // Sync facing after reversal
                         // Also move back a bit to prevent sticking
                         this.mesh.position.addScaledVector(this.direction, 0.2);
                         this.updateVisibility();
@@ -2327,11 +2335,13 @@
 
                             if (validDirs.length > 0) {
                                 this.direction = validDirs[Math.floor(Math.random() * validDirs.length)];
+                                this.updateFacing(); // Sync facing after turn
                                 this.mesh.position.x = nearestRoadX;
                                 this.mesh.position.z = nearestRoadZ;
                             } else {
                                 // Dead end? Reverse
                                 this.direction.negate();
+                                this.updateFacing(); // Sync facing after reversal
                             }
                         }
                         this.canTurn = false;
