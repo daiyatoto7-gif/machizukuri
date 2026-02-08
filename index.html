@@ -3518,9 +3518,12 @@
             return group;
         }
 
+        let _lastAnimTime = null; // For delta time calculation
         function animate3D() {
             requestAnimationFrame(animate3D);
             const time = Date.now() * 0.001;
+            const dt = _lastAnimTime ? time - _lastAnimTime : 0.016; // Default to ~60fps
+            _lastAnimTime = time;
 
             tileMeshes.forEach((t, i) => {
                 t.particles.update();
@@ -3576,7 +3579,7 @@
 
             pedestrians.forEach(p => {
                 p.update();
-                p.updateAnimation(time); // Add animation update
+                p.updateAnimation(dt); // Pass delta time for frame-rate independent animation
             });
             if (renderer && scene && camera) {
                 renderer.render(scene, camera);
