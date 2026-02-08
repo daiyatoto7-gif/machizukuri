@@ -2439,6 +2439,10 @@
                         group.add(roof);
                         // Door
                         group.add(createBox(0.2, 0.35, 0.05, MATERIALS.wood, 0, 0.175, 0.4));
+                        // Small straw roof (Hut style)
+                        const hutRoof = createCone(0.8, 0.4, MATERIALS.roofStraw, 0, 0.55, 0);
+                        hutRoof.scale.z = 0.8;
+                        group.add(hutRoof);
                     } else { // Tier 2: 瓦屋 (Tile House)
                         // Pillars
                         group.add(createPillar(0.8, 0.35, 0.4, 0.35));
@@ -2527,8 +2531,8 @@
                         }
                     }
 
-                    // Props: Scarecrow, Fence, Tools (No buildings)
-                    if (vizLevel >= 11) {
+                    // Props: Scarecrow, Fence, Tools (ALWAYS present at Level 1 for identity)
+                    if (vizLevel >= 1) {
                         // Scarecrow
                         const sc = new THREE.Group();
                         sc.position.set(0.4, 0, 0.4);
@@ -2572,6 +2576,10 @@
                         axeGroup.add(createCyl(0.02, 0.02, 0.4, MATERIALS.wood, 0, 0.2, 0));
                         axeGroup.add(createBox(0.1, 0.05, 0.02, MATERIALS.metal, 0, 0.4, 0));
                         group.add(axeGroup);
+
+                        // Vertical standing dead tree (Distinct silhouette)
+                        group.add(createCyl(0.08, 0.1, 1.2, MATERIALS.wood, 0.35, 0.6, -0.35));
+                        group.add(createCyl(0.04, 0.02, 0.4, MATERIALS.wood, 0.35, 1.0, -0.15, Math.PI / 3)); // Branch
 
                         // Vertical standing log/tree being chopped?
                         group.add(createCyl(0.1, 0.12, 0.6, MATERIALS.wood, 0.3, 0.3, -0.2));
@@ -2648,6 +2656,16 @@
 
                         // Rubble
                         group.add(createCone(0.3, 0.2, MATERIALS.stone, 0.3, 0.1, 0.3));
+
+                        // Wheelbarrow (suggests transport)
+                        const barrow = new THREE.Group();
+                        barrow.position.set(-0.3, 0.1, 0.3);
+                        barrow.rotation.y = 0.5;
+                        barrow.add(createBox(0.2, 0.1, 0.3, MATERIALS.wood, 0, 0, 0));
+                        barrow.add(createCyl(0.08, 0.08, 0.05, MATERIALS.woodDark, 0, -0.05, 0.15, 0, 0, Math.PI / 2)); // Wheel
+                        barrow.add(createCyl(0.02, 0.02, 0.4, MATERIALS.wood, -0.08, 0.1, -0.2)); // Handle L
+                        barrow.add(createCyl(0.02, 0.02, 0.4, MATERIALS.wood, 0.08, 0.1, -0.2)); // Handle R
+                        group.add(barrow);
                     }
                     break;
 
@@ -2661,6 +2679,9 @@
                         // Entrance frame
                         group.add(createBox(0.5, 0.4, 0.1, MATERIALS.wood, 0, 0.2, 0.1));
                         group.add(createBox(0.4, 0.35, 0.05, MATERIALS.dark, 0, 0.175, 0.12)); // Hole
+
+                        // Lantern at entrance
+                        group.add(createBox(0.1, 0.15, 0.1, MATERIALS.gold, -0.3, 0.3, 0.15)); // Light
 
                         // Rails coming out
                         group.add(createBox(0.03, 0.03, 0.6, MATERIALS.metal, -0.15, 0.11, 0.3));
@@ -2728,6 +2749,10 @@
                         group.add(createBox(0.1, 0.1, 0.1, MATERIALS.leaf, 0, 0.25, -0.1));
                         group.add(createCyl(0.05, 0.05, 0.1, MATERIALS.gold, 0.1, 0.25, -0.1));
 
+                        // Vertical Sign/Flag
+                        group.add(createCyl(0.02, 0.02, 0.8, MATERIALS.wood, -0.35, 0.4, 0.25));
+                        group.add(createBox(0.2, 0.3, 0.01, MATERIALS.white, -0.35, 0.6, 0.25)); // Banner
+
                     } else { // Tier 2: Tented Stalls (Pavilions)
                         // Structure: 4 Poles + Cloth Roof (No walls)
                         group.add(createPillar(0.6, -0.3, 0.3, -0.3));
@@ -2772,6 +2797,12 @@
                         // Water trough
                         group.add(createBox(0.3, 0.15, 0.15, MATERIALS.wood, 0.2, 0.1, 0));
                         group.add(createBox(0.25, 0.1, 0.1, MATERIALS.water, 0.2, 0.15, 0));
+
+                        // Weapon Rack (Simple)
+                        group.add(createBox(0.05, 0.4, 0.05, MATERIALS.wood, 0.35, 0.2, 0.3));
+                        group.add(createBox(0.05, 0.4, 0.05, MATERIALS.wood, 0.15, 0.2, 0.3));
+                        // Spear
+                        group.add(createCyl(0.01, 0.01, 0.5, MATERIALS.metal, 0.25, 0.25, 0.3));
 
                     } else { // Tier 2: Arsenal (Roof but no walls)
                         // 4 Poles
@@ -2834,9 +2865,16 @@
                         if (tier >= 2) bucket.userData = { anim: 'bounceY', speed: 0.15, range: 0.05 };
                         group.add(bucket);
                     }
-                    // Tier 1 props
-                    if (tier === 1 && vizLevel >= 5) {
-                        group.add(createBox(0.15, 0.05, 0.2, MATERIALS.wood, 0.3, 0.05, 0.3)); // Wash board/platform
+                    // Tier 1 props - Pulley Frame
+                    if (tier === 1) {
+                        // Simple wooden frame over well
+                        group.add(createCyl(0.04, 0.04, 0.6, MATERIALS.wood, -0.25, 0.3, 0));
+                        group.add(createCyl(0.04, 0.04, 0.6, MATERIALS.wood, 0.25, 0.3, 0));
+                        group.add(createCyl(0.03, 0.03, 0.5, MATERIALS.wood, 0, 0.55, 0, 0, 0, Math.PI / 2));
+
+                        if (vizLevel >= 5) {
+                            group.add(createBox(0.15, 0.05, 0.2, MATERIALS.wood, 0.3, 0.05, 0.3)); // Wash board/platform
+                        }
                     }
                     break;
 
@@ -2860,7 +2898,8 @@
 
                         // Tea bench outside
                         group.add(createBox(0.3, 0.1, 0.15, MATERIALS.wood, 0, 0.05, 0.5)); // Bench
-                        group.add(createBox(0.2, 0.2, 0.02, MATERIALS.tent, 0.2, 0.35, 0.31)); // Noren
+                        group.add(createBox(0.3, 0.02, 0.15, MATERIALS.roof, 0, 0.11, 0.5)); // Red Cloth on bench
+                        group.add(createBox(0.2, 0.2, 0.02, MATERIALS.tent, 0.2, 0.35, 0.31)); // Noren (Curtain)
 
                     } else { // Tier 2: Inn (2-Story with balconies)
                         // 1st Floor
