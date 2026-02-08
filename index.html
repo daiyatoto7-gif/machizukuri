@@ -6052,4 +6052,86 @@
                         if (t.type && t.level > 0 && !t.finishTime) {
                             const b = BUILDINGS[t.type];
 
-       
+                            // Stone Plant Offline Simulation
+                            if (t.type === 'stone_plant') {
+                                if (t.isActive) {
+                                    const costScale = t.level * Math.pow(1.05, t.level - 1);
+                                    // Base Cons: M:50, F:20, W:20
+                                    const mCost = (b.consume.money || 0) * costScale;
+                                    const fCost = (b.consume.food || 0) * costScale;
+                                    const wCost = (b.consume.wood || 0) * costScale;
+
+                                    // Max run time limited by resources
+                                    let maxTime = activeSeconds;
+                                    if (mCost > 0) maxTime = Math.min(maxTime, gameState.resources.money / mCost);
+                                    if (fCost > 0) maxTime = Math.min(maxTime, gameState.resources.food / fCost);
+                                    if (wCost > 0) maxTime = Math.min(maxTime, gameState.resources.wood / wCost);
+
+                                    if (maxTime > 0) {
+                                        // Consume
+                                        gameState.resources.money -= mCost * maxTime;
+                                        gameState.resources.food -= fCost * maxTime;
+                                        gameState.resources.wood -= wCost * maxTime;
+
+                                        // Produce Stone (4x spec = 20 base)
+                                        const pVal = (b.prod.stone || 0) * t.level * Math.pow(1.05, t.level - 1);
+                                        const prodTotal = pVal * maxTime;
+
+                                        const caps = getStorageCapacity(t.type, t.level, i, globalBuffs);
+                                        const current = t.stored.stone || 0;
+                                        const space = Math.max(0, caps.stone - current);
+                                        const actualAdd = Math.min(prodTotal, space);
+
+                                        t.stored.stone = current + actualAdd;
+                                        if (!earn.stone) earn.stone = 0;
+                                        earn.stone += actualAdd;
+
+                                        // If ran out of resources (or close enough), turn off
+                                        if (maxTime < activeSeconds - 1) { // -1 tolerance
+                                            t.isActive = false;
+                                        }
+                                    } else {
+                                        t.isActive = false;
+                                    }
+                                }
+                                return; // Skip standard building logic
+                            }
+
+                            // Use index 'i' for adjacency checks. Pass globalBuffs!
+                            const caps = getStorageCapacity(t.type, t.level, i, globalBuffs);
+
+                            // Check Efficiency
+                            const efficiency = getTileProductionMultiplier(i, globalBuffs, true, offlineCtx); // Pass ctx
+
+                            if (efficiency > 0 && activeSeconds > 0) {
+                                for (let r in b.prod) if (b.prod[r] > 0) {
+                                    if (!earn[r]) earn[r] = 0;
+
+                                    let finalMult = efficiency;
+                                    if (r === 'money' && ['house', 'market', 'blacksmith', 'inn'].includes(t.type)) finalMult *= globalBuffs.bank;
+                                    if (r === 'food' && ['farm'].includes(t.type)) finalMult *= globalBuffs.granary;
+                                    if (r === 'wood' && ['lumber', 'forest'].includes(t.type)) finalMult *= globalBuffs.lumber_hub;
+
+                                    // Use activeSeconds for production duration
+                                    const add = Math.min(caps[r] - (t.stored[r] || 0), b.prod[r] * t.level * Math.pow(1.05, t.level - 1) * finalMult * activeSeconds);
+                                    if (add > 0) { t.stored[r] = (t.stored[r] || 0) + add; earn[r] += add; }
+                                }
+                            }
+                        }
+                    });
+                    if (built > 0) rep += `<div>🏗️ ${built}件完了</div>`;
+                    for (let r in earn) if (earn[r] > 1) rep += `<div>+${Math.floor(earn[r]).toLocaleString()} ${r}</div>`;
+                    if (rep) { document.getElementById('offline-report').innerHTML = rep; document.getElementById('modal-offline').style.display = 'flex'; }
+                    addXP(0); // ランクアップチェック
+                    gameState.lastSaveTime = now;
+                    saveGame(); // オフライン経過分を保存
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+    </script>
+</body>
+
+</html>
