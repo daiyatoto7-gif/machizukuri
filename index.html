@@ -2135,10 +2135,10 @@
                 }
 
                 // Walk Cycle
-                const speed = 10.0; // Reduced from 15.0 for slower animation
+                const speed = 5.0; // Reduced to 5.0 for natural walking speed
                 const range = 0.6; // Swing amplitude
 
-                this.animTime += dt * this.speed * 15; // Reduced multiplier from 20 for smoother sync
+                this.animTime += dt * this.speed * 10; // Reduced multiplier to 10 for smoother sync
 
                 const angle = Math.sin(this.animTime * speed) * range;
 
@@ -2744,104 +2744,118 @@
                     }
                     break;
 
-                case 'lumber': // 伐採所 -> 林場 (Logging Camp)
-                    // Ground - minimal or just grass (no box)
+                case 'lumber': // 伐採所 (Lumber Mill)
+                    // Ground - Wood chips / worn dirt
+                    group.add(createBox(1.0, 0.02, 1.0, MATERIALS.dirt, 0, 0.01, 0));
+                    // Wood chips texture (particles)
+                    for (let i = 0; i < 15; i++) {
+                        const s = 0.05 + Math.random() * 0.05;
+                        group.add(createBox(s, 0.01, s, MATERIALS.wood, (Math.random() - 0.5) * 0.8, 0.02, (Math.random() - 0.5) * 0.8));
+                    }
 
-                    if (tier === 1) { // Tier 1: Woodcutter's Clearing (High Detail)
-                        // Sawhorse (Detailed)
-                        const shH = 0.25;
-                        // Legs
-                        group.add(createBox(0.04, 0.3, 0.04, MATERIALS.wood, -0.2, 0.15, 0.2, 0, 0, Math.PI / 4));
-                        group.add(createBox(0.04, 0.3, 0.04, MATERIALS.wood, -0.2, 0.15, 0.2, 0, 0, -Math.PI / 4));
-                        group.add(createBox(0.04, 0.3, 0.04, MATERIALS.wood, 0.2, 0.15, 0.2, 0, 0, Math.PI / 4));
-                        group.add(createBox(0.04, 0.3, 0.04, MATERIALS.wood, 0.2, 0.15, 0.2, 0, 0, -Math.PI / 4));
-                        // Crossbar
-                        group.add(createCyl(0.03, 0.03, 0.5, MATERIALS.woodDark, 0, shH * 0.7, 0.2, Math.PI / 2));
-
-                        // The Log being cut
-                        const mainLog = createCyl(0.12, 0.12, 0.9, MATERIALS.wood, 0, shH + 0.1, 0.2, Math.PI / 2);
-                        group.add(mainLog);
-
-                        // Hand Saw
-                        const saw = new THREE.Group();
-                        saw.position.set(0, shH + 0.22, 0.2);
-                        saw.rotation.z = 0.3;
-                        saw.add(createBox(0.15, 0.06, 0.01, MATERIALS.metal, 0, 0, 0)); // Blade
-                        saw.add(createBox(0.03, 0.03, 0.06, MATERIALS.woodDark, 0.08, 0, 0)); // Handle
-                        group.add(saw);
-
-                        // Wood Chips / Sawdust on ground
-                        group.add(createCone(0.1, 0.05, MATERIALS.gold, 0, 0.025, 0.2));
-                        group.add(createCone(0.08, 0.04, MATERIALS.gold, 0.1, 0.025, 0.25));
-
-                        // Large Stump with Axe
-                        const stump = createCyl(0.2, 0.25, 0.25, MATERIALS.wood, -0.3, 0.125, -0.3);
+                    if (tier === 1) { // Tier 1: Woodcutter's Camp
+                        // 1. The Chopping Area
+                        const stump = createCyl(0.2, 0.25, 0.3, MATERIALS.wood, 0.3, 0.15, 0.3);
                         group.add(stump);
-                        // Axe
-                        const axe = new THREE.Group();
-                        axe.position.set(-0.3, 0.25, -0.3);
-                        axe.rotation.z = 0.8;
-                        axe.rotation.y = 0.5;
-                        axe.add(createCyl(0.015, 0.02, 0.5, MATERIALS.wood, 0, 0.25, 0)); // Handle
-                        const head = createBox(0.02, 0.1, 0.15, MATERIALS.metal, 0, 0.45, 0); // Head
-                        head.geometry = new THREE.BoxGeometry(0.02, 0.1, 0.15); // Could be distinct shape.. trapezoid?
-                        axe.add(head);
-                        group.add(axe);
+                        // Axe embedded
+                        const axeGroup = new THREE.Group();
+                        axeGroup.position.set(0.3, 0.3, 0.3);
+                        axeGroup.rotation.z = 0.6;
+                        axeGroup.rotation.y = 0.5;
+                        axeGroup.add(createCyl(0.02, 0.03, 0.4, MATERIALS.wood, 0, 0.2, 0));
+                        axeGroup.add(createBox(0.15, 0.08, 0.02, MATERIALS.metal, 0, 0.4, 0)); // Blade
+                        group.add(axeGroup);
 
-                        // Standing Dead Tree (For silhouette height)
-                        const treeX = 0.35, treeZ = -0.25;
-                        group.add(createCyl(0.1, 0.15, 1.2, MATERIALS.wood, treeX, 0.6, treeZ)); // Trunk
-                        group.add(createCyl(0.04, 0.03, 0.4, MATERIALS.wood, treeX, 0.9, treeZ + 0.1, Math.PI / 3)); // Branch
-                        group.add(createCyl(0.03, 0.02, 0.3, MATERIALS.wood, treeX - 0.1, 1.0, treeZ, -Math.PI / 4)); // Branch
+                        // 2. Woodcutter's Shack (Small enclosed hut) - Adds mass to building
+                        const shack = new THREE.Group();
+                        shack.position.set(-0.25, 0, -0.25);
+                        // Walls
+                        shack.add(createBox(0.45, 0.4, 0.45, MATERIALS.woodDark, 0, 0.2, 0));
+                        // Doorway
+                        shack.add(createBox(0.15, 0.3, 0.05, MATERIALS.dark, 0.1, 0.15, 0.21));
+                        // Roof (Sloped single shed roof)
+                        const roof = createBox(0.55, 0.05, 0.6, MATERIALS.wood, 0, 0.45, 0);
+                        roof.rotation.x = 0.2;
+                        shack.add(roof);
+                        group.add(shack);
 
-                    } else { // Tier 2: Sawmill Yard (Open Air)
-                        // Simple roof ONLY over the saw, no walls
+                        // 3. Stacked Logs
+                        group.add(createCyl(0.1, 0.1, 0.8, MATERIALS.wood, 0.3, 0.05, -0.2, Math.PI / 2, 0.1));
+                        group.add(createCyl(0.1, 0.1, 0.8, MATERIALS.wood, 0.4, 0.05, -0.3, Math.PI / 2, -0.05));
+                        group.add(createCyl(0.1, 0.1, 0.8, MATERIALS.wood, 0.35, 0.12, -0.25, Math.PI / 2, 0));
+
+                        // Dead Tree / Standing Timber
+                        const deadTree = new THREE.Group();
+                        deadTree.position.set(-0.35, 0, 0.35);
+                        deadTree.add(createCyl(0.08, 0.12, 0.6, MATERIALS.woodDark, 0, 0.3, 0));
+                        deadTree.add(createCyl(0.04, 0.06, 0.3, MATERIALS.woodDark, 0.1, 0.5, 0, 0, 0, -0.5)); // Branch
+                        group.add(deadTree);
+
+                    } else { // Tier 2: Sawmill Yard (Open Air with Roofed Storage)
                         const roofY = 0.8;
-                        // Pillars for roof
-                        group.add(createPillar(0.7, -0.2, 0.35, -0.2));
-                        group.add(createPillar(0.7, 0.2, 0.35, -0.2));
-                        group.add(createPillar(0.7, -0.2, 0.35, 0.2));
-                        group.add(createPillar(0.7, 0.2, 0.35, 0.2));
-                        // Simple wooden roof (not tiled to distinguish from house)
-                        group.add(createBox(0.6, 0.05, 0.6, MATERIALS.wood, 0, roofY, 0));
 
-                        // Reciprocating Frame Saw (Vertical) - Historically more accurate than circular saw
+                        // 1. Saw Mechanism Area (Left side)
+                        const sawGroup = new THREE.Group();
+                        sawGroup.position.set(-0.2, 0, 0);
+
+                        // Roof over saw
+                        sawGroup.add(createPillar(0.7, -0.25, 0.35, -0.25));
+                        sawGroup.add(createPillar(0.7, 0.25, 0.35, -0.25));
+                        sawGroup.add(createPillar(0.7, -0.25, 0.35, 0.25));
+                        sawGroup.add(createPillar(0.7, 0.25, 0.35, 0.25));
+                        sawGroup.add(createBox(0.6, 0.05, 0.6, MATERIALS.wood, 0, roofY, 0)); // Simple roof
+
+                        // Reciprocating Frame Saw (Vertical)
                         const sawBase = createBox(0.4, 0.2, 0.3, MATERIALS.wood, 0, 0.1, 0);
-                        group.add(sawBase);
+                        sawGroup.add(sawBase);
 
                         // The Frame holding the blade
                         const frame = new THREE.Group();
                         frame.position.set(0, 0.4, 0);
-
-                        // Side posts of the frame
+                        // Side posts
                         frame.add(createBox(0.05, 0.4, 0.05, MATERIALS.woodDark, 0, 0, 0.1));
                         frame.add(createBox(0.05, 0.4, 0.05, MATERIALS.woodDark, 0, 0, -0.1));
                         // Top/Bottom bars
                         frame.add(createBox(0.05, 0.05, 0.25, MATERIALS.woodDark, 0, 0.175, 0));
                         frame.add(createBox(0.05, 0.05, 0.25, MATERIALS.woodDark, 0, -0.175, 0));
+                        // Blade
+                        frame.add(createBox(0.02, 0.35, 0.15, MATERIALS.metal, 0, 0, 0));
+                        frame.userData = { anim: 'shuttleY', speed: 1.0, range: 0.15 };
+                        sawGroup.add(frame);
 
-                        // The Blade
-                        const blade = createBox(0.02, 0.35, 0.15, MATERIALS.metal, 0, 0, 0);
-                        frame.add(blade);
+                        // Log being cut
+                        sawGroup.add(createCyl(0.12, 0.12, 0.8, MATERIALS.wood, 0, 0.25, 0, Math.PI / 2));
+                        // Sawdust
+                        sawGroup.add(createCone(0.2, 0.1, MATERIALS.gold, 0.4, 0.05, 0.4));
+                        group.add(sawGroup);
 
-                        // Animation: Move Up/Down rapidly
-                        frame.userData = { anim: 'shuttleY', speed: 1.0, range: 0.15 }; // Speed 10x
-                        group.add(frame);
 
-                        // Log being cut (Stationary for now)
-                        group.add(createCyl(0.12, 0.12, 0.8, MATERIALS.wood, 0, 0.25, 0, Math.PI / 2));
+                        // 2. Timber Storage Shed (Right side) - Adds volume
+                        const shed = new THREE.Group();
+                        shed.position.set(0.35, 0, 0);
+                        // Roof (sloped)
+                        shed.add(createPillar(0.6, 0.2, 0.3, -0.2)); // Back high
+                        shed.add(createPillar(0.6, 0.2, 0.3, 0.2));
+                        shed.add(createPillar(0.5, -0.2, 0.25, -0.2)); // Front low
+                        shed.add(createPillar(0.5, -0.2, 0.25, 0.2));
 
-                        // Sawdust piles
-                        group.add(createCone(0.2, 0.1, MATERIALS.gold, 0.4, 0.05, 0.4)); // Gold as sawdust color
+                        const shedRoof = createBox(0.5, 0.05, 0.6, MATERIALS.wood, 0, 0.65, 0);
+                        shedRoof.rotation.z = 0.2; // Slope
+                        shed.add(shedRoof);
+
+                        // Stacked Timber inside
+                        shed.add(createBox(0.3, 0.3, 0.4, MATERIALS.wood, 0, 0.15, 0));
+                        shed.add(createBox(0.3, 0.3, 0.4, MATERIALS.wood, 0, 0.15, 0)); // just a block of wood for now? No, make it look like planks
+                        // Planks texture
+                        for (let k = 0; k < 5; k++) {
+                            shed.add(createBox(0.35, 0.04, 0.4, MATERIALS.woodDark, 0, 0.05 + k * 0.06, 0));
+                        }
+                        group.add(shed);
                     }
-                    // More Logs scattered around
-                    group.add(createCyl(0.1, 0.1, 0.5, MATERIALS.wood, 0.4, 0.05, -0.4, Math.PI / 2, Math.PI / 3));
-                    if (vizLevel >= 15) group.add(createCyl(0.08, 0.08, 0.4, MATERIALS.wood, -0.4, 0.05, 0.4, Math.PI / 2, -Math.PI / 6));
                     break;
 
                 case 'quarry': // 採石場 -> 石切り場 (Stone Pit)
                     // Ground - Thin stone layer
-                    group.add(createBox(1.0, 0.02, 1.0, MATERIALS.stone, 0, 0.01, 0));
 
                     // Rock Face (Jagged, irregular)
                     const rockScale = tier >= 2 ? 0.8 : 0.6;
@@ -3022,24 +3036,35 @@
                     if (tier >= 2) group.add(createBox(1.0, 0.02, 1.0, MATERIALS.stone, 0, 0.01, 0));
 
                     if (tier === 1) { // Tier 1: Field Smithy
-                        // Simple open-air furnace
-                        group.add(createBox(0.3, 0.3, 0.3, MATERIALS.stone, 0, 0.15, -0.2));
-                        group.add(createBox(0.15, 0.1, 0.15, MATERIALS.gold, 0, 0.2, -0.15)); // Fire
+                        // 1. Large Open Furnace (Stone)
+                        group.add(createBox(0.5, 0.4, 0.4, MATERIALS.stone, 0, 0.2, -0.2));
+                        // Fire Heart
+                        group.add(createBox(0.25, 0.2, 0.2, MATERIALS.gold, 0, 0.2, -0.15));
+                        // Chimney/Vent hint
+                        group.add(createBox(0.3, 0.2, 0.1, MATERIALS.stone, 0, 0.5, -0.3));
 
-                        // Anvil on log
-                        group.add(createCyl(0.15, 0.15, 0.2, MATERIALS.wood, -0.2, 0.1, 0));
-                        group.add(createBox(0.15, 0.1, 0.1, MATERIALS.metal, -0.2, 0.25, 0));
+                        // 2. Anvil on Stump (Prominent)
+                        group.add(createCyl(0.2, 0.25, 0.25, MATERIALS.wood, -0.25, 0.125, 0.1)); // Stump
+                        // Anvil Shape (T-shape)
+                        const anvilGroup = new THREE.Group();
+                        anvilGroup.position.set(-0.25, 0.3, 0.1);
+                        anvilGroup.add(createBox(0.12, 0.15, 0.25, MATERIALS.metal, 0, 0, 0)); // Base
+                        anvilGroup.add(createBox(0.18, 0.08, 0.3, MATERIALS.metal, 0, 0.1, 0)); // Top
+                        // Hammer resting
+                        anvilGroup.add(createBox(0.03, 0.03, 0.2, MATERIALS.wood, 0, 0.15, 0, 0, 0, 0.2));
+                        group.add(anvilGroup);
 
-                        // Water trough
-                        group.add(createBox(0.3, 0.15, 0.15, MATERIALS.wood, 0.2, 0.1, 0));
-                        group.add(createBox(0.25, 0.1, 0.1, MATERIALS.water, 0.2, 0.15, 0));
+                        // 3. Water Trough
+                        group.add(createBox(0.25, 0.15, 0.15, MATERIALS.wood, 0.25, 0.075, 0.2));
+                        group.add(createBox(0.2, 0.1, 0.1, MATERIALS.water, 0.25, 0.1, 0.2));
 
-                        // Weapon Rack (Simple)
-                        group.add(createBox(0.05, 0.4, 0.05, MATERIALS.wood, 0.35, 0.2, 0.3));
-                        group.add(createBox(0.05, 0.4, 0.05, MATERIALS.wood, 0.15, 0.2, 0.3));
+                        // 4. Weapon Rack (Spears)
+                        const rack = new THREE.Group();
+                        rack.position.set(0.35, 0.2, -0.1);
+                        rack.add(createBox(0.1, 0.4, 0.05, MATERIALS.wood, 0, 0, 0));
                         // Spear
-                        group.add(createCyl(0.01, 0.01, 0.5, MATERIALS.metal, 0.25, 0.25, 0.3));
-
+                        rack.add(createCyl(0.02, 0.02, 0.6, MATERIALS.metal, 0, 0.1, 0.05, 0.2));
+                        group.add(rack);
                     } else { // Tier 2: Arsenal (Roof but no walls)
                         // 4 Poles
                         const h = 0.8;
@@ -3372,15 +3397,29 @@
 
                     // Main Workshop area
                     // Main Workshop area
-                    if (tier === 1) { // Workshop - Open Air
-                        // Just a workbench and wood piles
-                        group.add(createBox(0.4, 0.3, 0.2, MATERIALS.wood, 0, 0.15, -0.1)); // Bench
-                        // Tools on bench
-                        group.add(createBox(0.1, 0.05, 0.05, MATERIALS.metal, 0, 0.32, -0.1));
-                        group.add(createCyl(0.02, 0.02, 0.2, MATERIALS.wood, 0.1, 0.32, -0.1, 0, 0, 1.5)); // Hammer handle?
+                    if (tier === 1) { // Workshop - Carpentry Shed
+                        // 1. Simple Roof Structure (Distinguishes from Open Air Lumber Mill)
+                        group.add(createPillar(0.7, -0.3, 0.3, -0.2));
+                        group.add(createPillar(0.7, 0.3, 0.3, -0.2));
+                        group.add(createPillar(0.7, -0.3, 0.3, 0.2));
+                        group.add(createPillar(0.7, 0.3, 0.3, 0.2));
+                        // Lattice Roof / Open Rafters
+                        group.add(createBox(0.7, 0.05, 0.5, MATERIALS.wood, 0, 0.7, 0));
 
-                        // Saw horse
-                        group.add(createBox(0.2, 0.2, 0.1, MATERIALS.wood, -0.3, 0.1, 0.2));
+                        // 2. Workbench (Under roof)
+                        group.add(createBox(0.4, 0.25, 0.2, MATERIALS.wood, 0, 0.125, -0.1)); // Bench
+                        // Planer/Tools
+                        group.add(createBox(0.05, 0.03, 0.08, MATERIALS.metal, 0, 0.26, -0.1));
+
+                        // 3. Neat Stacks of Planks (Processed wood)
+                        const plankL = 0.5;
+                        const plankW = 0.3;
+                        const stackH = 0.2;
+                        // Stack 1
+                        group.add(createBox(plankW, stackH, plankL, MATERIALS.wood, -0.2, stackH / 2, 0.2));
+                        // Detail lines for planks
+                        group.add(createBox(plankW + 0.01, 0.02, plankL, MATERIALS.woodDark, -0.2, 0.05, 0.2));
+                        group.add(createBox(plankW + 0.01, 0.02, plankL, MATERIALS.woodDark, -0.2, 0.15, 0.2));
 
                     } else { // Carpenter - Large Shed (Roof, no walls)
                         // 4 Tall Pillars
@@ -3418,13 +3457,34 @@
                     // Ground - stone dust
                     if (tier >= 2) group.add(createBox(1.0, 0.02, 1.0, MATERIALS.stone, 0, 0.01, 0));
 
-                    if (tier === 1) { // Stone Yard
-                        // Piles of stones
-                        for (let i = 0; i < 4; i++) {
-                            group.add(createBox(0.2, 0.15, 0.3, MATERIALS.stone, -0.3 + (i % 2) * 0.6, 0.1, -0.3 + Math.floor(i / 2) * 0.6));
-                        }
-                        // Chisel
-                        group.add(createBox(0.05, 0.2, 0.05, MATERIALS.metal, 0, 0.2, 0));
+                    if (tier === 1) { // Stone Yard (Processing)
+                        // Paved Work Area
+                        group.add(createBox(0.8, 0.05, 0.6, MATERIALS.stone, 0, 0.025, 0));
+
+                        // 1. Large Worked Stone Block (Centerpiece)
+                        group.add(createBox(0.3, 0.25, 0.3, MATERIALS.stoneWhite, 0, 0.15, 0));
+                        // Chips around it
+                        group.add(createCone(0.1, 0.05, MATERIALS.stoneWhite, 0.2, 0.05, 0.2));
+                        group.add(createCone(0.08, 0.04, MATERIALS.stoneWhite, -0.2, 0.05, 0.15));
+
+                        // 2. Simple Wooden Hoist (Crane)
+                        const hoist = new THREE.Group();
+                        hoist.position.set(-0.3, 0, -0.2);
+                        // A-Frame legs
+                        hoist.add(createCyl(0.04, 0.04, 0.8, MATERIALS.wood, 0, 0.4, 0.15, 0, 0, 0.3));
+                        hoist.add(createCyl(0.04, 0.04, 0.8, MATERIALS.wood, 0, 0.4, -0.15, 0, 0, -0.3));
+                        // Crossbar
+                        hoist.add(createCyl(0.03, 0.03, 0.4, MATERIALS.wood, 0, 0.7, 0, Math.PI / 2));
+                        // Rope
+                        hoist.add(createCyl(0.01, 0.01, 0.5, MATERIALS.white, 0, 0.5, 0));
+                        // Hook/Stone suspended?
+                        hoist.add(createBox(0.15, 0.1, 0.15, MATERIALS.stone, 0, 0.3, 0));
+                        group.add(hoist);
+
+                        // 3. Chisel Bench
+                        group.add(createBox(0.3, 0.05, 0.15, MATERIALS.wood, 0.3, 0.1, 0.3)); // Low Bench
+                        group.add(createBox(0.02, 0.15, 0.02, MATERIALS.metal, 0.3, 0.2, 0.3)); // Chisel
+                        group.add(createBox(0.05, 0.03, 0.1, MATERIALS.wood, 0.35, 0.14, 0.3)); // Mallet
                     } else { // Wall Construction Site
                         // A larger stone wall section (looks like a wall, not a building)
                         group.add(createBox(0.9, 0.6, 0.3, MATERIALS.stone, 0, 0.3, -0.2));
