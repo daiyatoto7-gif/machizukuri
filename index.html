@@ -1549,6 +1549,7 @@
             lanternRed: new THREE.MeshStandardMaterial({ color: 0xe74c3c, emissive: 0x990000, emissiveIntensity: 0.5 }), // 提灯
             woodDark: new THREE.MeshStandardMaterial({ color: 0x5d4037, roughness: 0.9 }), // 暗い木
             pavingStone: new THREE.MeshStandardMaterial({ color: 0x95a5a6, roughness: 0.8 }), // 石畳
+            dirtRoad: new THREE.MeshStandardMaterial({ color: 0x9B7B5A, roughness: 1.0 }), // 土の道（黄土）
             // cobblestone と grassLocked は init3D 内で追加
         };
 
@@ -3794,8 +3795,14 @@
                         overlay.innerHTML = "";
                     }
                 } else {
-                    // 開拓地（石畳）
-                    ground.material = MATERIALS.cobblestone;
+                    // 開拓地 - 地面素材を建物の有無で分ける
+                    if (tile.type) {
+                        // 建物あり → 石畳
+                        ground.material = MATERIALS.cobblestone;
+                    } else {
+                        // 建物なし（道路） → 土の道
+                        ground.material = MATERIALS.dirtRoad;
+                    }
 
                     if (tile.type) {
                         tObj.buildingGroup.visible = true;
