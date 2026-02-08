@@ -3897,9 +3897,17 @@
                 // 選択時のハイライト (地面を光らせる)
                 let isHighlight = (selectedTileIndex === i) || (moveMode.active && moveMode.sourceIndex === i);
 
-                if (isHighlight) {
+                // 地面が非表示の場合はハイライト処理をスキップ
+                if (!ground.visible) {
+                    // 選択時は一時的に表示してハイライト
+                    if (isHighlight) {
+                        ground.visible = true;
+                        ground.material = MATERIALS.dirtRoad.clone();
+                        ground.material.emissive.setHex(moveMode.active && moveMode.sourceIndex === i ? 0xe74c3c : 0x3498db);
+                        ground.material.emissiveIntensity = 0.4;
+                    }
+                } else if (isHighlight) {
                     // マテリアルが共有されているので一時的にクローンして光らせる
-                    // 注意: パフォーマンス最適化のためには別途SelectionBoxを使うのが良いが、簡易実装として
                     if (ground.material.uuid === MATERIALS.cobblestone.uuid || ground.material.uuid === MATERIALS.grassLocked.uuid) {
                         ground.material = ground.material.clone();
                     }
@@ -3911,11 +3919,12 @@
                     ground.material.emissiveIntensity = 0.4;
                 } else {
                     // 光っていない状態に戻す（共有マテリアルを再割り当て）
-                    if (tile.unlocked && ground.material.uuid !== MATERIALS.cobblestone.uuid) {
-                        ground.material = MATERIALS.cobblestone;
-                    } else if (!tile.unlocked && ground.material.uuid !== MATERIALS.grassLocked.uuid) {
+                    if (!tile.unlocked) {
                         ground.material = MATERIALS.grassLocked;
+                    } else if (tile.type) {
+                        ground.material = MATERIALS.cobblestone;
                     }
+                    // 空きタイルは既にvisible=falseなのでここには来ない
                 }
             });
 
