@@ -908,7 +908,16 @@
                 }
 
                 if (data) {
+                    // Deep merge for resources to preserve new keys added in code
+                    const savedResources = data.resources || {};
+                    const currentResources = gameState.resources || {};
+
+                    // Merge: Use saved value if exists, otherwise keep current (default) value
+                    const mergedResources = { ...currentResources, ...savedResources };
+
                     gameState = { ...gameState, ...data };
+                    gameState.resources = mergedResources; // Apply merged resources
+
                     processOfflineProgress();
                     console.log(`Loaded game from: ${loadedFrom}`);
                     saveGameToCloud(true);
@@ -940,13 +949,15 @@
 
                 if (!offlineMode && currentUser && userDocRef) {
                     await setDoc(userDocRef, dataToSave);
-                    if (!silent) showToast("☁️ 保存しました");
+                    // if (!silent) showToast("☁️ 保存しました"); // Suppressed
                 } else {
-                    if (!silent) showToast("💾 保存しました (オフライン)");
+                    // if (!silent) showToast("💾 保存しました (オフライン)"); // Suppressed
                 }
             } catch (e) {
                 console.error("Save failed:", e);
-                if (!silent && !offlineMode) showToast("⚠️ クラウド保存失敗(ローカルに保存)");
+                // Always show error, ignoring silent flag for critical failure (or keep logic)
+                // User requirement: "Only show if failed"
+                if (!offlineMode) showToast("⚠️ クラウド保存失敗(ローカルに保存)");
             }
         }
 
@@ -5664,6 +5675,28 @@
                             stats[r].base += rawAmount;
                         }
                     }
+
+                    // Handles Consumption (e.g. Stone Plant)
+                    if (b.consume && isActive) {
+                        // Check if specific conditions met (e.g. stone_plant isActive flag)
+                        // For stone_plant, it needs to be toggled ON
+                        let isConsuming = true;
+                        if (tile.type === 'stone_plant' && !tile.isActive) isConsuming = false;
+
+                        if (isConsuming) {
+                            const costScale = level * Math.pow(1.05, level - 1);
+                            for (let r in b.consume) {
+                                if (b.consume[r] > 0) {
+                                    const amount = b.consume[r] * costScale;
+                                    // Consumption is negative production
+                                    if (!stats[r]) stats[r] = { prod: 0, mult: 1, base: 0 };
+                                    stats[r].prod -= amount;
+                                    // We don't touch 'base' or 'mult' for consumption typically, or maybe base negative?
+                                    // Let's just affect the final prod total.
+                                }
+                            }
+                        }
+                    }
                 }
             });
 
@@ -5695,8 +5728,8 @@
 
             resKeys.forEach(key => {
                 const s = stats[key];
-                // Show if base > 0 (producing) OR if it's money (always show money)
-                if (s.base > 0 || key === 'money') {
+                // Show if producing (base > 0), consuming (prod < 0), or if it's money (always show)
+                if (s.base > 0 || s.prod !== 0 || key === 'money') {
                     // Logic Change: Display effective GLOBAL multiplier, not average.
                     // For Money: globalSpeed * bankMult
                     // For Food: globalSpeed * granaryMult
