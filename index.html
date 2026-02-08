@@ -2040,26 +2040,103 @@
             constructor(scene) {
                 this.scene = scene;
                 this.mesh = new THREE.Group();
-                const bodyColor = Math.random() * 0xffffff;
-                const bodyGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.25, 8);
-                const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor });
-                const body = new THREE.Mesh(bodyGeo, bodyMat);
-                body.position.y = 0.125;
-                this.mesh.add(body);
-                const headGeo = new THREE.SphereGeometry(0.1, 8, 8);
-                const headMat = new THREE.MeshStandardMaterial({ color: 0xffccaa });
-                const head = new THREE.Mesh(headGeo, headMat);
-                head.position.y = 0.35;
-                this.mesh.add(head);
                 this.mesh.castShadow = true;
+
+                // Materials
+                const shirtColor = Math.random() * 0xffffff;
+                const pantsColor = Math.random() * 0x555555;
+                const skinColor = 0xffccaa;
+
+                const matShirt = new THREE.MeshStandardMaterial({ color: shirtColor });
+                const matPants = new THREE.MeshStandardMaterial({ color: pantsColor });
+                const matSkin = new THREE.MeshStandardMaterial({ color: skinColor });
+
+                // Container for Scale/Rotation local
+                this.bodyGroup = new THREE.Group();
+                this.mesh.add(this.bodyGroup);
+
+                // --- Body Parts ---
+                // Torso (0.15 width, 0.25 height)
+                const torsoGeo = new THREE.BoxGeometry(0.15, 0.25, 0.08);
+                this.torso = new THREE.Mesh(torsoGeo, matShirt);
+                this.torso.position.y = 0.25; // Center of torso
+                this.torso.castShadow = true;
+                this.bodyGroup.add(this.torso);
+
+                // Head
+                const headGeo = new THREE.BoxGeometry(0.12, 0.12, 0.12); // Boxy head for low poly style
+                this.head = new THREE.Mesh(headGeo, matSkin);
+                this.head.position.y = 0.43;
+                this.head.castShadow = true;
+                this.bodyGroup.add(this.head);
+
+                // Helper for Limbs (pivot at top)
+                const createLimb = (w, h, d, mat, ox, oy, oz) => {
+                    const g = new THREE.Group();
+                    g.position.set(ox, oy, oz);
+                    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+                    mesh.position.y = -h / 2; // pivot at top
+                    mesh.castShadow = true;
+                    g.add(mesh);
+                    return g;
+                };
+
+                // Arms (Pivot at shoulder: y=0.35)
+                this.leftArm = createLimb(0.06, 0.22, 0.06, matShirt, 0.11, 0.35, 0);
+                this.rightArm = createLimb(0.06, 0.22, 0.06, matShirt, -0.11, 0.35, 0);
+                this.bodyGroup.add(this.leftArm);
+                this.bodyGroup.add(this.rightArm);
+
+                // Legs (Pivot at hip: y=0.125)
+                this.leftLeg = createLimb(0.065, 0.25, 0.065, matPants, 0.05, 0.125, 0);
+                this.rightLeg = createLimb(0.065, 0.25, 0.065, matPants, -0.05, 0.125, 0);
+                this.bodyGroup.add(this.leftLeg);
+                this.bodyGroup.add(this.rightLeg);
+
+
                 scene.add(this.mesh);
                 this.active = false;
                 this.mesh.visible = false;
                 this.isStopped = false;
                 this.stopTimer = 0;
                 this.canTurn = true;
+
+                // Animation State
+                this.animTime = Math.random() * 100;
+
                 this.reset();
             }
+
+            updateAnimation(dt) {
+                if (!this.active || !this.mesh.visible) return;
+
+                if (this.isStopped) {
+                    // Reset pose Lerp
+                    const lerpFactor = 0.1;
+                    this.leftArm.rotation.x += (0 - this.leftArm.rotation.x) * lerpFactor;
+                    this.rightArm.rotation.x += (0 - this.rightArm.rotation.x) * lerpFactor;
+                    this.leftLeg.rotation.x += (0 - this.leftLeg.rotation.x) * lerpFactor;
+                    this.rightLeg.rotation.x += (0 - this.rightLeg.rotation.x) * lerpFactor;
+                    return;
+                }
+
+                // Walk Cycle
+                const speed = 15.0; // Arm swing frequency
+                const range = 0.6; // Swing amplitude
+
+                this.animTime += dt * this.speed * 20; // Scale with movement speed
+
+                const angle = Math.sin(this.animTime * speed) * range;
+
+                // Arms (Opposite to legs)
+                this.leftArm.rotation.x = angle;
+                this.rightArm.rotation.x = -angle;
+
+                // Legs
+                this.leftLeg.rotation.x = -angle;
+                this.rightLeg.rotation.x = angle;
+            }
+
             getNearestRoadCoord(val) {
                 const size = gameState.gridSize;
                 const offset = 3;
@@ -2087,10 +2164,12 @@
                     sx = lane;
                     sz = (Math.random() < 0.5 ? -spawnDist : spawnDist);
                     dx = 0; dz = sz > 0 ? -1 : 1;
+                    this.mesh.rotation.y = (dz > 0) ? 0 : Math.PI; // Face direction
                 } else {
                     sz = lane;
                     sx = (Math.random() < 0.5 ? -spawnDist : spawnDist);
                     dx = sx > 0 ? -1 : 1; dz = 0;
+                    this.mesh.rotation.y = (dx > 0) ? Math.PI / 2 : -Math.PI / 2; // Face direction
                 }
                 this.mesh.position.set(sx, 0, sz);
                 this.direction = new THREE.Vector3(dx, 0, dz);
@@ -3420,7 +3499,10 @@
                 }
             });
 
-            pedestrians.forEach(p => p.update());
+            pedestrians.forEach(p => {
+                p.update();
+                p.updateAnimation(time); // Add animation update
+            });
             if (renderer && scene && camera) {
                 renderer.render(scene, camera);
             }
@@ -5970,86 +6052,4 @@
                         if (t.type && t.level > 0 && !t.finishTime) {
                             const b = BUILDINGS[t.type];
 
-                            // Stone Plant Offline Simulation
-                            if (t.type === 'stone_plant') {
-                                if (t.isActive) {
-                                    const costScale = t.level * Math.pow(1.05, t.level - 1);
-                                    // Base Cons: M:50, F:20, W:20
-                                    const mCost = (b.consume.money || 0) * costScale;
-                                    const fCost = (b.consume.food || 0) * costScale;
-                                    const wCost = (b.consume.wood || 0) * costScale;
-
-                                    // Max run time limited by resources
-                                    let maxTime = activeSeconds;
-                                    if (mCost > 0) maxTime = Math.min(maxTime, gameState.resources.money / mCost);
-                                    if (fCost > 0) maxTime = Math.min(maxTime, gameState.resources.food / fCost);
-                                    if (wCost > 0) maxTime = Math.min(maxTime, gameState.resources.wood / wCost);
-
-                                    if (maxTime > 0) {
-                                        // Consume
-                                        gameState.resources.money -= mCost * maxTime;
-                                        gameState.resources.food -= fCost * maxTime;
-                                        gameState.resources.wood -= wCost * maxTime;
-
-                                        // Produce Stone (4x spec = 20 base)
-                                        const pVal = (b.prod.stone || 0) * t.level * Math.pow(1.05, t.level - 1);
-                                        const prodTotal = pVal * maxTime;
-
-                                        const caps = getStorageCapacity(t.type, t.level, i, globalBuffs);
-                                        const current = t.stored.stone || 0;
-                                        const space = Math.max(0, caps.stone - current);
-                                        const actualAdd = Math.min(prodTotal, space);
-
-                                        t.stored.stone = current + actualAdd;
-                                        if (!earn.stone) earn.stone = 0;
-                                        earn.stone += actualAdd;
-
-                                        // If ran out of resources (or close enough), turn off
-                                        if (maxTime < activeSeconds - 1) { // -1 tolerance
-                                            t.isActive = false;
-                                        }
-                                    } else {
-                                        t.isActive = false;
-                                    }
-                                }
-                                return; // Skip standard building logic
-                            }
-
-                            // Use index 'i' for adjacency checks. Pass globalBuffs!
-                            const caps = getStorageCapacity(t.type, t.level, i, globalBuffs);
-
-                            // Check Efficiency
-                            const efficiency = getTileProductionMultiplier(i, globalBuffs, true, offlineCtx); // Pass ctx
-
-                            if (efficiency > 0 && activeSeconds > 0) {
-                                for (let r in b.prod) if (b.prod[r] > 0) {
-                                    if (!earn[r]) earn[r] = 0;
-
-                                    let finalMult = efficiency;
-                                    if (r === 'money' && ['house', 'market', 'blacksmith', 'inn'].includes(t.type)) finalMult *= globalBuffs.bank;
-                                    if (r === 'food' && ['farm'].includes(t.type)) finalMult *= globalBuffs.granary;
-                                    if (r === 'wood' && ['lumber', 'forest'].includes(t.type)) finalMult *= globalBuffs.lumber_hub;
-
-                                    // Use activeSeconds for production duration
-                                    const add = Math.min(caps[r] - (t.stored[r] || 0), b.prod[r] * t.level * Math.pow(1.05, t.level - 1) * finalMult * activeSeconds);
-                                    if (add > 0) { t.stored[r] = (t.stored[r] || 0) + add; earn[r] += add; }
-                                }
-                            }
-                        }
-                    });
-                    if (built > 0) rep += `<div>🏗️ ${built}件完了</div>`;
-                    for (let r in earn) if (earn[r] > 1) rep += `<div>+${Math.floor(earn[r]).toLocaleString()} ${r}</div>`;
-                    if (rep) { document.getElementById('offline-report').innerHTML = rep; document.getElementById('modal-offline').style.display = 'flex'; }
-                    addXP(0); // ランクアップチェック
-                    gameState.lastSaveTime = now;
-                    saveGame(); // オフライン経過分を保存
-                }
-            } catch (e) {
-                console.error(e);
-            }
-        }
-
-    </script>
-</body>
-
-</html>
+       
