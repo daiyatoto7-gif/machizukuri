@@ -2329,11 +2329,55 @@
                 return m;
             };
             const createCone = (r, h, mat, x, y, z, rotY = 0) => {
-                const m = new THREE.Mesh(new THREE.ConeGeometry(r, h, 4), mat);
+                const geom = new THREE.ConeGeometry(r, h, 8); // Smoother cones (8 segments)
+                const m = new THREE.Mesh(geom, mat);
                 m.position.set(x, y, z);
-                m.rotation.y = rotY;
+                if (rotY) m.rotation.y = rotY;
                 m.castShadow = true;
                 return m;
+            };
+
+            // Enhanced Helper: Box with "noise" or distinct look
+            const createDetailedBox = (w, h, d, mat, x, y, z) => {
+                const g = new THREE.Group();
+                g.position.set(x, y, z);
+                // Main mesh
+                const main = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+                main.castShadow = true;
+                main.receiveShadow = true;
+                g.add(main);
+                // Detail (Trim/Top) - random slightly larger plate on top for texture
+                if (h > 0.2) {
+                    const plate = new THREE.Mesh(new THREE.BoxGeometry(w + 0.02, 0.05, d + 0.02), mat);
+                    plate.position.y = h / 2;
+                    plate.castShadow = true;
+                    // g.add(plate); // Maybe too much noise for everything
+                }
+                return g;
+            };
+
+            // Helper: Fence Segment
+            const createFence = (x1, z1, x2, z2, h = 0.2) => {
+                const len = Math.sqrt((x2 - x1) ** 2 + (z2 - z1) ** 2);
+                const angle = Math.atan2(z2 - z1, x2 - x1);
+
+                const g = new THREE.Group();
+                const centerx = (x1 + x2) / 2;
+                const centerz = (z1 + z2) / 2;
+                g.position.set(centerx, h / 2, centerz);
+                g.rotation.y = -angle; // Three.js rotation is CCW from X+? Check
+
+                // Posts
+                const p1 = createBox(0.05, h + 0.1, 0.05, MATERIALS.wood, -len / 2, 0, 0);
+                const p2 = createBox(0.05, h + 0.1, 0.05, MATERIALS.wood, len / 2, 0, 0);
+                g.add(p1); g.add(p2);
+
+                // Rails
+                const r1 = createBox(len, 0.03, 0.02, MATERIALS.wood, 0, 0.05, 0);
+                const r2 = createBox(len, 0.03, 0.02, MATERIALS.wood, 0, -0.05, 0);
+                g.add(r1); g.add(r2);
+
+                return g;
             };
 
             // --- Helper Functions for Chinese Architecture ---
@@ -2430,19 +2474,47 @@
                     // 土台
                     if (tier >= 2) group.add(createFoundation(0.9, 0.9));
 
-                    if (tier === 1) { // Tier 1: 茅屋 (Hut)
-                        // Earth Wall
-                        group.add(createBox(0.8, 0.5, 0.8, MATERIALS.wallEarth, 0, 0.25, 0));
-                        // Straw Roof
-                        const roof = createCone(0.9, 0.6, MATERIALS.roofStraw, 0, 0.8, 0, Math.PI / 4);
-                        roof.scale.z = 0.8;
+                    if (tier === 1) { // Tier 1: Thatched Hut (Straw Roof)
+                        // Main walls - slightly tapered look? (Trapezoid logic hard, use box)
+                        const houseW = 0.6;
+                        const houseD = 0.5;
+                        const houseH = 0.4;
+
+                        group.add(createBox(houseW, houseH, houseD, MATERIALS.wallWhite, 0, houseH / 2, 0));
+
+                        // Wooden beams/framing (Timber frame look)
+                        // Corners
+                        const beamW = 0.06;
+                        group.add(createBox(beamW, houseH, beamW, MATERIALS.wood, houseW / 2, houseH / 2, houseD / 2));
+                        group.add(createBox(beamW, houseH, beamW, MATERIALS.wood, -houseW / 2, houseH / 2, houseD / 2));
+                        group.add(createBox(beamW, houseH, beamW, MATERIALS.wood, houseW / 2, houseH / 2, -houseD / 2));
+                        group.add(createBox(beamW, houseH, beamW, MATERIALS.wood, -houseW / 2, houseH / 2, -houseD / 2));
+
+                        // Roof (Straw - Conical/Pyramidal)
+                        const roofH = 0.5;
+                        const roof = createCone(0.55, roofH, MATERIALS.roofStraw, 0, houseH + roofH / 2 - 0.1, 0, Math.PI / 4); // 8-segment cone
+                        roof.scale.set(1, 1, 0.8);
                         group.add(roof);
-                        // Door
-                        group.add(createBox(0.2, 0.35, 0.05, MATERIALS.wood, 0, 0.175, 0.4));
-                        // Small straw roof (Hut style)
-                        const hutRoof = createCone(0.8, 0.4, MATERIALS.roofStraw, 0, 0.55, 0);
-                        hutRoof.scale.z = 0.8;
-                        group.add(hutRoof);
+
+                        // Door (Detailed)
+                        const doorH = 0.3;
+                        const doorW = 0.2;
+                        group.add(createBox(doorW + 0.04, doorH + 0.04, 0.04, MATERIALS.woodDark, 0, doorH / 2 + 0.02, houseD / 2)); // Frame
+                        group.add(createBox(doorW, doorH, 0.06, MATERIALS.wood, 0, doorH / 2, houseD / 2)); // Door
+                        group.add(createBox(0.03, 0.03, 0.08, MATERIALS.metal, 0.06, 0.2, houseD / 2)); // Knob
+
+                        // Window (Side)
+                        const winSize = 0.15;
+                        group.add(createBox(winSize + 0.04, winSize + 0.04, 0.04, MATERIALS.woodDark, houseW / 2, 0.25, 0)); // Frame
+                        group.add(createBox(winSize, winSize, 0.05, MATERIALS.wallWhite, houseW / 2, 0.25, 0)); // "Paper"
+                        // Window Bars
+                        group.add(createBox(winSize, 0.02, 0.06, MATERIALS.woodDark, houseW / 2, 0.25, 0));
+                        group.add(createBox(0.02, winSize, 0.06, MATERIALS.woodDark, houseW / 2, 0.25, 0));
+
+                        // Small Garden patch
+                        group.add(createBox(0.2, 0.05, 0.15, MATERIALS.leaf, -0.3, 0.05, 0.35));
+                        group.add(createCone(0.05, 0.1, MATERIALS.gold, -0.3, 0.1, 0.35)); // Flower?
+
                     } else { // Tier 2: 瓦屋 (Tile House)
                         // Pillars
                         group.add(createPillar(0.8, 0.35, 0.4, 0.35));
@@ -2488,45 +2560,65 @@
                     break;
 
                 case 'farm': // 畑 -> 農地 (Farmland)
-                    // Ground - Thin layer to look like soil, not a block foundation
-                    group.add(createBox(1.0, 0.02, 1.0, MATERIALS.dirt, 0, 0.01, 0));
+                    // Ground - Soil Texture (Rows)
+                    const soilW = 0.9;
+                    const soilD = 0.9;
+                    // Base soil
+                    group.add(createBox(soilW, 0.02, soilD, MATERIALS.dirt, 0, 0.01, 0));
 
-                    if (tier >= 2) {
-                        // Water channel for irrigation
-                        group.add(createBox(1.0, 0.05, 0.2, MATERIALS.water, 0, 0.05, 0)); // Lower water
-                        // Wooden borders for channel
-                        group.add(createBox(1.0, 0.08, 0.05, MATERIALS.wood, 0, 0.06, 0.12));
-                        group.add(createBox(1.0, 0.08, 0.05, MATERIALS.wood, 0, 0.06, -0.12));
+                    // Add distinctive Furrows (3 Rows)
+                    for (let i = -1; i <= 1; i++) {
+                        group.add(createCyl(0.05, 0.08, soilW, MATERIALS.dirt, i * 0.25, 0.02, 0, Math.PI / 2));
                     }
 
+                    if (tier >= 2) {
+                        // Water channel (High detail)
+                        const channelW = 0.25;
+                        group.add(createBox(1.0, 0.05, channelW, MATERIALS.water, 0, 0.03, 0));
+                        // Stone edging
+                        group.add(createBox(1.0, 0.06, 0.05, MATERIALS.stone, 0, 0.04, channelW / 2 + 0.02));
+                        group.add(createBox(1.0, 0.06, 0.05, MATERIALS.stone, 0, 0.04, -channelW / 2 - 0.02));
+                    }
+
+                    // Fence around the farm (Partial)
+                    group.add(createFence(-0.45, -0.45, -0.45, 0.45));
+                    group.add(createFence(-0.45, 0.45, 0.45, 0.45));
+                    if (tier === 1) group.add(createFence(0.45, 0.45, 0.45, -0.45)); // Open front for tier 2 channel
+
+                    // Crops (Detailed)
                     const rows = 3;
-                    const cols = tier >= 2 ? 2 : 3; // Tier 2 has channel in middle
+                    const cols = tier >= 2 ? 2 : 3;
 
                     for (let i = 0; i < rows; i++) {
                         for (let j = 0; j < cols; j++) {
-                            // Skip middle z for tier 2 (channel)
-                            let zPos = (j - 1) * 0.3;
-                            if (tier >= 2) {
-                                zPos = (j === 0 ? -0.3 : 0.3);
-                            }
+                            // Position relative to furrows
+                            let xPos = (i - 1) * 0.25; // Match furrow X
+                            let zPos = (j - 1) * 0.25;
+                            if (tier >= 2) zPos = (j === 0 ? -0.3 : 0.3); // Avoid channel
 
-                            const cx = (i - 1) * 0.3;
                             const cropGroup = new THREE.Group();
-                            cropGroup.position.set(cx, 0.1, zPos);
-
-                            const cropScale = 1.0 + Math.random() * 0.3;
-                            cropGroup.scale.set(cropScale, cropScale, cropScale);
+                            cropGroup.position.set(xPos, 0.05, zPos);
+                            const s = 0.8 + Math.random() * 0.4;
+                            cropGroup.scale.set(s, s, s);
+                            cropGroup.rotation.y = Math.random() * Math.PI;
 
                             if (tier === 1) {
-                                // Simple crops (Wheat-like)
-                                cropGroup.add(createCone(0.05, 0.2, MATERIALS.leaf, 0, 0.1, 0));
+                                // Turnip/Vegetable (Leafy)
+                                cropGroup.add(createCone(0.08, 0.15, MATERIALS.leaf, 0, 0.05, 0));
+                                cropGroup.add(createCone(0.06, 0.12, MATERIALS.leaf, 0.02, 0.04, 0, 0.2));
+                                cropGroup.add(createCone(0.06, 0.12, MATERIALS.leaf, -0.02, 0.04, 0, -0.2));
+                                // The veg itself peeking out
+                                cropGroup.add(createCyl(0.03, 0.01, 0.05, MATERIALS.white, 0, -0.01, 0));
                             } else {
-                                // Rich crops (Vegetables/Gold Wheat)
-                                cropGroup.add(createCyl(0.02, 0.02, 0.2, MATERIALS.wood, 0, 0.1, 0)); // Stalk
-                                cropGroup.add(createBox(0.12, 0.12, 0.12, MATERIALS.gold, 0, 0.25, 0)); // Vegetable/Fruit
+                                // Wheat/Rice Stalks
+                                for (let k = 0; k < 3; k++) {
+                                    const stalk = createCyl(0.01, 0.01, 0.3, MATERIALS.wood, (Math.random() - 0.5) * 0.05, 0.15, (Math.random() - 0.5) * 0.05);
+                                    cropGroup.add(stalk);
+                                    const grain = createBox(0.03, 0.08, 0.03, MATERIALS.gold, stalk.position.x, 0.28, stalk.position.z);
+                                    cropGroup.add(grain);
+                                }
                             }
-
-                            cropGroup.userData = { anim: 'sway', speed: 1.5 + Math.random(), offset: Math.random() * 10 };
+                            cropGroup.userData = { anim: 'sway', speed: 2.0 + Math.random(), offset: Math.random() };
                             group.add(cropGroup);
                         }
                     }
@@ -2551,40 +2643,52 @@
                 case 'lumber': // 伐採所 -> 林場 (Logging Camp)
                     // Ground - minimal or just grass (no box)
 
-                    if (tier === 1) { // Tier 1: Woodcutter's Clearing
-                        // Action visual: Large log on a sawhorse
-                        const sawHorseH = 0.2;
-                        // X-legs
-                        group.add(createBox(0.05, 0.3, 0.05, MATERIALS.wood, -0.2, 0.15, 0.2, 0, 0, Math.PI / 4));
-                        group.add(createBox(0.05, 0.3, 0.05, MATERIALS.wood, -0.2, 0.15, 0.2, 0, 0, -Math.PI / 4));
-                        group.add(createBox(0.05, 0.3, 0.05, MATERIALS.wood, 0.2, 0.15, 0.2, 0, 0, Math.PI / 4));
-                        group.add(createBox(0.05, 0.3, 0.05, MATERIALS.wood, 0.2, 0.15, 0.2, 0, 0, -Math.PI / 4));
+                    if (tier === 1) { // Tier 1: Woodcutter's Clearing (High Detail)
+                        // Sawhorse (Detailed)
+                        const shH = 0.25;
+                        // Legs
+                        group.add(createBox(0.04, 0.3, 0.04, MATERIALS.wood, -0.2, 0.15, 0.2, 0, 0, Math.PI / 4));
+                        group.add(createBox(0.04, 0.3, 0.04, MATERIALS.wood, -0.2, 0.15, 0.2, 0, 0, -Math.PI / 4));
+                        group.add(createBox(0.04, 0.3, 0.04, MATERIALS.wood, 0.2, 0.15, 0.2, 0, 0, Math.PI / 4));
+                        group.add(createBox(0.04, 0.3, 0.04, MATERIALS.wood, 0.2, 0.15, 0.2, 0, 0, -Math.PI / 4));
+                        // Crossbar
+                        group.add(createCyl(0.03, 0.03, 0.5, MATERIALS.woodDark, 0, shH * 0.7, 0.2, Math.PI / 2));
 
                         // The Log being cut
-                        group.add(createCyl(0.12, 0.12, 0.8, MATERIALS.wood, 0, sawHorseH + 0.05, 0.2, Math.PI / 2));
+                        const mainLog = createCyl(0.12, 0.12, 0.9, MATERIALS.wood, 0, shH + 0.1, 0.2, Math.PI / 2);
+                        group.add(mainLog);
 
-                        // Hand Saw stuck in log
-                        const saw = createBox(0.1, 0.05, 0.01, MATERIALS.metal, 0, sawHorseH + 0.15, 0.2);
-                        saw.rotation.z = 0.2;
+                        // Hand Saw
+                        const saw = new THREE.Group();
+                        saw.position.set(0, shH + 0.22, 0.2);
+                        saw.rotation.z = 0.3;
+                        saw.add(createBox(0.15, 0.06, 0.01, MATERIALS.metal, 0, 0, 0)); // Blade
+                        saw.add(createBox(0.03, 0.03, 0.06, MATERIALS.woodDark, 0.08, 0, 0)); // Handle
                         group.add(saw);
 
-                        // Tree Stump with axe
-                        group.add(createCyl(0.15, 0.15, 0.2, MATERIALS.wood, -0.3, 0.1, -0.3));
-                        const axeGroup = new THREE.Group();
-                        axeGroup.position.set(-0.3, 0.2, -0.3);
-                        axeGroup.rotation.z = 0.5;
-                        axeGroup.add(createCyl(0.02, 0.02, 0.4, MATERIALS.wood, 0, 0.2, 0));
-                        axeGroup.add(createBox(0.1, 0.05, 0.02, MATERIALS.metal, 0, 0.4, 0));
-                        group.add(axeGroup);
+                        // Wood Chips / Sawdust on ground
+                        group.add(createCone(0.1, 0.05, MATERIALS.gold, 0, 0.025, 0.2));
+                        group.add(createCone(0.08, 0.04, MATERIALS.gold, 0.1, 0.025, 0.25));
 
-                        // Vertical standing dead tree (Distinct silhouette)
-                        group.add(createCyl(0.08, 0.1, 1.2, MATERIALS.wood, 0.35, 0.6, -0.35));
-                        group.add(createCyl(0.04, 0.02, 0.4, MATERIALS.wood, 0.35, 1.0, -0.15, Math.PI / 3)); // Branch
+                        // Large Stump with Axe
+                        const stump = createCyl(0.2, 0.25, 0.25, MATERIALS.wood, -0.3, 0.125, -0.3);
+                        group.add(stump);
+                        // Axe
+                        const axe = new THREE.Group();
+                        axe.position.set(-0.3, 0.25, -0.3);
+                        axe.rotation.z = 0.8;
+                        axe.rotation.y = 0.5;
+                        axe.add(createCyl(0.015, 0.02, 0.5, MATERIALS.wood, 0, 0.25, 0)); // Handle
+                        const head = createBox(0.02, 0.1, 0.15, MATERIALS.metal, 0, 0.45, 0); // Head
+                        head.geometry = new THREE.BoxGeometry(0.02, 0.1, 0.15); // Could be distinct shape.. trapezoid?
+                        axe.add(head);
+                        group.add(axe);
 
-                        // Vertical standing log/tree being chopped?
-                        group.add(createCyl(0.1, 0.12, 0.6, MATERIALS.wood, 0.3, 0.3, -0.2));
-                        // Cut mark
-                        group.add(createBox(0.1, 0.05, 0.08, MATERIALS.dark, 0.3, 0.2, -0.18));
+                        // Standing Dead Tree (For silhouette height)
+                        const treeX = 0.35, treeZ = -0.25;
+                        group.add(createCyl(0.1, 0.15, 1.2, MATERIALS.wood, treeX, 0.6, treeZ)); // Trunk
+                        group.add(createCyl(0.04, 0.03, 0.4, MATERIALS.wood, treeX, 0.9, treeZ + 0.1, Math.PI / 3)); // Branch
+                        group.add(createCyl(0.03, 0.02, 0.3, MATERIALS.wood, treeX - 0.1, 1.0, treeZ, -Math.PI / 4)); // Branch
 
                     } else { // Tier 2: Sawmill Yard (Open Air)
                         // Simple roof ONLY over the saw, no walls
@@ -2729,29 +2833,40 @@
                         group.add(createBox(0.8, 0.02, 0.6, MATERIALS.roofStraw, 0, 0.01, 0));
 
                         // Simple Stall Structure (Crates + Board + Sunshade)
-                        // Table improvised
-                        group.add(createBox(0.4, 0.2, 0.2, MATERIALS.wood, 0, 0.1, -0.1));
-                        group.add(createBox(0.4, 0.05, 0.25, MATERIALS.wood, 0, 0.2, -0.1));
+                        const tableH = 0.2;
+                        // Table improvised (Crates)
+                        group.add(createBox(0.15, tableH, 0.15, MATERIALS.woodDark, -0.15, tableH / 2, -0.1));
+                        group.add(createBox(0.15, tableH, 0.15, MATERIALS.woodDark, 0.15, tableH / 2, -0.1));
+                        // Table Top
+                        group.add(createBox(0.5, 0.02, 0.25, MATERIALS.wood, 0, tableH, -0.1));
 
-                        // Sunshade / Umbrella
+                        // Sunshade / Umbrella (Striped)
                         const umbrella = new THREE.Group();
                         umbrella.position.set(0.3, 0, 0.2);
-                        umbrella.add(createCyl(0.02, 0.02, 0.6, MATERIALS.wood, 0, 0.3, 0)); // Pole
-                        const shade = createCone(0.3, 0.1, MATERIALS.tent, 0, 0.55, 0); // Shade
-                        shade.scale.z = 0.5; // Elliptical
+                        umbrella.add(createCyl(0.03, 0.03, 0.7, MATERIALS.wood, 0, 0.35, 0)); // Pole
+
+                        // Shade (Red/White stripes improvised by overlapped cones?)
+                        // Just use Tent material which is reddish
+                        const shade = createCone(0.35, 0.15, MATERIALS.tent, 0, 0.7, 0);
                         umbrella.add(shade);
                         group.add(umbrella);
 
                         // Seat
-                        group.add(createCyl(0.1, 0.1, 0.05, MATERIALS.wood, -0.2, 0.025, 0.2));
+                        group.add(createCyl(0.1, 0.1, 0.08, MATERIALS.wood, -0.2, 0.04, 0.2));
 
-                        // Wares
-                        group.add(createBox(0.1, 0.1, 0.1, MATERIALS.leaf, 0, 0.25, -0.1));
-                        group.add(createCyl(0.05, 0.05, 0.1, MATERIALS.gold, 0.1, 0.25, -0.1));
+                        // Wares (Detailed)
+                        // Pot
+                        const pot = createCyl(0.06, 0.04, 0.08, MATERIALS.stone, 0.15, tableH + 0.04, -0.08);
+                        group.add(pot);
+                        // Apples? (Red spheres/boxes)
+                        group.add(createBox(0.04, 0.04, 0.04, MATERIALS.tent, -0.1, tableH + 0.02, -0.1));
+                        group.add(createBox(0.04, 0.04, 0.04, MATERIALS.tent, -0.05, tableH + 0.02, -0.08));
 
                         // Vertical Sign/Flag
                         group.add(createCyl(0.02, 0.02, 0.8, MATERIALS.wood, -0.35, 0.4, 0.25));
-                        group.add(createBox(0.2, 0.3, 0.01, MATERIALS.white, -0.35, 0.6, 0.25)); // Banner
+                        group.add(createBox(0.2, 0.4, 0.01, MATERIALS.white, -0.35, 0.6, 0.25)); // Banner
+                        // Text on banner? (Texture not avail, use red box trick)
+                        group.add(createBox(0.05, 0.2, 0.015, MATERIALS.tent, -0.35, 0.6, 0.25));
 
                     } else { // Tier 2: Tented Stalls (Pavilions)
                         // Structure: 4 Poles + Cloth Roof (No walls)
@@ -5881,6 +5996,91 @@
             }
         }
 
+    </script>
+    <script>
+        // Gallery Mode Injection
+        window.addEventListener('load', function () {
+            // Stop existing loops if any
+            // Overwrite initGame to do nothing if it hasn't run yet
+            window.initGame = function () { };
+
+            // Setup Basic Scene
+            const container = document.getElementById('game-container');
+            container.innerHTML = '';
+
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); // Sky blue background
+
+            // Orthographic Camera to see everything
+            const d = 40;
+            const aspect = width / height;
+            camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 1, 1000);
+            camera.position.set(50, 50, 50); // High angle
+            camera.lookAt(0, 0, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(width, height);
+            renderer.shadowMap.enabled = true;
+            container.appendChild(renderer.domElement);
+
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(20, 50, 20);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            scene.add(dirLight);
+
+            // Ground Plane
+            const plane = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: 0x90EE90 }));
+            plane.rotation.x = -Math.PI / 2;
+            plane.receiveShadow = true;
+            // scene.add(plane); // Optional, maybe distracting
+
+            // Generate Buildings
+            const types = ['house', 'farm', 'lumber', 'quarry', 'mine', 'market', 'blacksmith', 'well', 'inn', 'clocktower', 'forest', 'granary', 'bank', 'lumber_hub', 'stone_plant'];
+            const levels = [1, 5, 10, 20, 30];
+
+            const startX = -((levels.length - 1) * 3) / 2;
+            const startZ = -((types.length - 1) * 4) / 2;
+
+            types.forEach((type, ti) => {
+                levels.forEach((lv, li) => {
+                    const mesh = createBuildingMesh(type, lv);
+                    mesh.position.set(startX + li * 4, 0, startZ + ti * 5);
+                    scene.add(mesh);
+                });
+            });
+
+            // Render Interaction
+            function animateGallery() {
+                requestAnimationFrame(animateGallery);
+                renderer.render(scene, camera);
+            }
+            animateGallery();
+
+            // Setup Camera Controls (OrbitControls script not included, so basic fixed view)
+            // Or simple mouse drag
+            let isDragging = false;
+            let previousMousePosition = { x: 0, y: 0 };
+
+            renderer.domElement.addEventListener('mousedown', function (e) { isDragging = true; });
+            renderer.domElement.addEventListener('mousemove', function (e) {
+                if (isDragging) {
+                    const deltaMove = { x: e.offsetX - previousMousePosition.x, y: e.offsetY - previousMousePosition.y };
+                    camera.position.x -= deltaMove.x * 0.1;
+                    camera.position.z -= deltaMove.y * 0.1;
+                    camera.lookAt(camera.position.x - 50, 0, camera.position.z - 50); // Keep looking relative
+                }
+                previousMousePosition = { x: e.offsetX, y: e.offsetY };
+            });
+            renderer.domElement.addEventListener('mouseup', function (e) { isDragging = false; });
+        });
     </script>
 </body>
 
