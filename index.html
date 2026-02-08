@@ -2135,10 +2135,11 @@
                 }
 
                 // Walk Cycle
-                const speed = 5.0; // Reduced to 5.0 for natural walking speed
-                const range = 0.6; // Swing amplitude
+                // Walk Cycle
+                const speed = 5.0;
+                const range = 0.15; // Swing amplitude reduced to 1/4 (0.6 -> 0.15)
 
-                this.animTime += dt * this.speed * 10; // Reduced multiplier to 10 for smoother sync
+                this.animTime += dt * this.speed * 10;
 
                 const angle = Math.sin(this.animTime * speed) * range;
 
