@@ -2042,9 +2042,23 @@
                 this.mesh = new THREE.Group();
                 this.mesh.castShadow = true;
 
-                // Materials
-                const shirtColor = Math.random() * 0xffffff;
-                const pantsColor = Math.random() * 0x555555;
+                // Materials - Historical Palette (Earth tones, Indigo, Unbleached)
+                const getHistoricalColor = () => {
+                    const palette = [
+                        0x8B4513, // SaddleBrown
+                        0x556B2F, // DarkOliveGreen
+                        0x708090, // SlateGray
+                        0x2F4F4F, // DarkSlateGray
+                        0x4682B4, // SteelBlue (faded indigo)
+                        0xCD853F, // Peru (tan)
+                        0xA0522D, // Sienna
+                        0xD2B48C  // Tan
+                    ];
+                    return palette[Math.floor(Math.random() * palette.length)];
+                };
+
+                const shirtColor = getHistoricalColor();
+                const pantsColor = getHistoricalColor();
                 const skinColor = 0xffccaa;
 
                 const matShirt = new THREE.MeshStandardMaterial({ color: shirtColor });
@@ -2121,10 +2135,10 @@
                 }
 
                 // Walk Cycle
-                const speed = 15.0; // Arm swing frequency
+                const speed = 10.0; // Reduced from 15.0 for slower animation
                 const range = 0.6; // Swing amplitude
 
-                this.animTime += dt * this.speed * 20; // Scale with movement speed
+                this.animTime += dt * this.speed * 15; // Reduced multiplier from 20 for smoother sync
 
                 const angle = Math.sin(this.animTime * speed) * range;
 
