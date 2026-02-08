@@ -2101,9 +2101,9 @@
                 this.bodyGroup.add(this.leftArm);
                 this.bodyGroup.add(this.rightArm);
 
-                // Legs (Pivot at hip: y=0.125)
-                this.leftLeg = createLimb(0.065, 0.25, 0.065, matPants, 0.05, 0.125, 0);
-                this.rightLeg = createLimb(0.065, 0.25, 0.065, matPants, -0.05, 0.125, 0);
+                // Legs (Pivot at hip: y=0.25 so feet touch ground at y=0)
+                this.leftLeg = createLimb(0.065, 0.25, 0.065, matPants, 0.05, 0.25, 0);
+                this.rightLeg = createLimb(0.065, 0.25, 0.065, matPants, -0.05, 0.25, 0);
                 this.bodyGroup.add(this.leftLeg);
                 this.bodyGroup.add(this.rightLeg);
 
@@ -2172,42 +2172,57 @@
 
             // Spawn pedestrian inside the road grid (for initial load)
             resetInside() {
-                const isVertical = Math.random() < 0.5;
                 const size = gameState.gridSize;
                 const offset = 3;
                 const tileStart = -offset * (size - 1) / 2;
                 const roadStart = tileStart + 1;
                 const roadCount = Math.max(1, size - 1);
 
-                // Pick random road lane
-                const roadIndex = Math.floor(Math.random() * roadCount);
-                const laneCenter = roadStart + roadIndex * offset;
-                const jitter = (Math.random() - 0.5) * 0.4;
-                const lane = laneCenter + jitter;
+                // Try up to 20 times to find a valid (non-blocked) spawn position
+                for (let attempt = 0; attempt < 20; attempt++) {
+                    const isVertical = Math.random() < 0.5;
 
-                // Pick random position ALONG the road (inside grid)
-                const posAlongRoad = roadStart + Math.random() * (roadCount - 1) * offset;
+                    // Pick random road lane
+                    const roadIndex = Math.floor(Math.random() * roadCount);
+                    const laneCenter = roadStart + roadIndex * offset;
+                    const jitter = (Math.random() - 0.5) * 0.4;
+                    const lane = laneCenter + jitter;
 
-                this.baseSpeed = (0.02 + Math.random() * 0.02) * 0.25;
-                this.speed = this.baseSpeed;
-                let sx, sz, dx, dz;
+                    // Pick random position ALONG the road (inside grid)
+                    const posAlongRoad = roadStart + Math.random() * (roadCount - 1) * offset;
 
-                if (isVertical) {
-                    sx = lane;
-                    sz = posAlongRoad;
-                    dx = 0; dz = Math.random() < 0.5 ? -1 : 1;
-                } else {
-                    sz = lane;
-                    sx = posAlongRoad;
-                    dx = Math.random() < 0.5 ? -1 : 1; dz = 0;
+                    let sx, sz;
+                    if (isVertical) {
+                        sx = lane;
+                        sz = posAlongRoad;
+                    } else {
+                        sz = lane;
+                        sx = posAlongRoad;
+                    }
+
+                    // Check if this road position is blocked by a multi-tile building
+                    if (this.isRoadBlocked(sx, sz, isVertical)) {
+                        continue; // Try another position
+                    }
+
+                    // Valid position found
+                    this.baseSpeed = (0.02 + Math.random() * 0.02) * 0.25;
+                    this.speed = this.baseSpeed;
+                    const dx = isVertical ? 0 : (Math.random() < 0.5 ? -1 : 1);
+                    const dz = isVertical ? (Math.random() < 0.5 ? -1 : 1) : 0;
+
+                    this.mesh.position.set(sx, 0, sz);
+                    this.direction = new THREE.Vector3(dx, 0, dz);
+                    this.updateFacing();
+                    this.active = true;
+                    this.isStopped = false;
+                    this.canTurn = true;
+                    this.updateVisibility();
+                    return; // Successfully spawned
                 }
-                this.mesh.position.set(sx, 0, sz);
-                this.direction = new THREE.Vector3(dx, 0, dz);
-                this.updateFacing();
-                this.active = true;
-                this.isStopped = false;
-                this.canTurn = true;
-                this.updateVisibility();
+
+                // Fallback: if no valid position found, use regular reset (spawn from outside)
+                this.reset();
             }
             reset() {
                 const isVertical = Math.random() < 0.5;
