@@ -2139,7 +2139,7 @@
                 const range = 0.3; // Swing amplitude
 
                 // Use dt directly for animation timing
-                this.animTime += dt * 2.0; // 2.0 base rate for natural walking
+                this.animTime += dt * 0.25; // 0.25 base rate for slow natural walking
 
                 const angle = Math.sin(this.animTime * speed) * range;
 
@@ -2168,6 +2168,46 @@
                 if (dx !== 0 || dz !== 0) {
                     this.mesh.rotation.y = Math.atan2(dx, dz);
                 }
+            }
+
+            // Spawn pedestrian inside the road grid (for initial load)
+            resetInside() {
+                const isVertical = Math.random() < 0.5;
+                const size = gameState.gridSize;
+                const offset = 3;
+                const tileStart = -offset * (size - 1) / 2;
+                const roadStart = tileStart + 1;
+                const roadCount = Math.max(1, size - 1);
+
+                // Pick random road lane
+                const roadIndex = Math.floor(Math.random() * roadCount);
+                const laneCenter = roadStart + roadIndex * offset;
+                const jitter = (Math.random() - 0.5) * 0.4;
+                const lane = laneCenter + jitter;
+
+                // Pick random position ALONG the road (inside grid)
+                const posAlongRoad = roadStart + Math.random() * (roadCount - 1) * offset;
+
+                this.baseSpeed = (0.02 + Math.random() * 0.02) * 0.25;
+                this.speed = this.baseSpeed;
+                let sx, sz, dx, dz;
+
+                if (isVertical) {
+                    sx = lane;
+                    sz = posAlongRoad;
+                    dx = 0; dz = Math.random() < 0.5 ? -1 : 1;
+                } else {
+                    sz = lane;
+                    sx = posAlongRoad;
+                    dx = Math.random() < 0.5 ? -1 : 1; dz = 0;
+                }
+                this.mesh.position.set(sx, 0, sz);
+                this.direction = new THREE.Vector3(dx, 0, dz);
+                this.updateFacing();
+                this.active = true;
+                this.isStopped = false;
+                this.canTurn = true;
+                this.updateVisibility();
             }
             reset() {
                 const isVertical = Math.random() < 0.5;
@@ -2373,10 +2413,14 @@
 
         function initPedestrians() {
             if (pedestrians.length === 0) {
+                // Initial load: spawn pedestrians inside existing roads
                 for (let i = 0; i < 15; i++) {
-                    pedestrians.push(new Person(scene));
+                    const p = new Person(scene);
+                    p.resetInside(); // Spawn inside the grid
+                    pedestrians.push(p);
                 }
             } else {
+                // Respawn: use outside spawn (normal reset)
                 pedestrians.forEach(p => p.reset());
             }
         }
