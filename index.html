@@ -1447,6 +1447,49 @@
             saveGame(true);
         }
 
+        // 土の道テクスチャを生成（暗い黄土色、ムラあり）
+        function createDirtRoadTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+
+            // ベース色（暗い黄土色）
+            ctx.fillStyle = '#7B6B4A';
+            ctx.fillRect(0, 0, 128, 128);
+
+            // ノイズ・ムラを追加
+            for (let i = 0; i < 300; i++) {
+                const x = Math.random() * 128;
+                const y = Math.random() * 128;
+                const size = 2 + Math.random() * 4;
+                const r = 90 + Math.floor(Math.random() * 40);
+                const g = 80 + Math.floor(Math.random() * 35);
+                const b = 50 + Math.floor(Math.random() * 30);
+                const alpha = 0.3 + Math.random() * 0.4;
+                ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+                ctx.beginPath();
+                ctx.arc(x, y, size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // 細い線（轍のような効果）
+            ctx.strokeStyle = 'rgba(60, 50, 35, 0.3)';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < 5; i++) {
+                ctx.beginPath();
+                ctx.moveTo(Math.random() * 128, 0);
+                ctx.lineTo(Math.random() * 128, 128);
+                ctx.stroke();
+            }
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(8, 8);
+            return texture;
+        }
+
         function init3D() {
             const container = document.getElementById('game-container');
             if (!container) throw new Error("Game container not found");
@@ -1497,6 +1540,13 @@
             });
             MATERIALS.grassLocked = new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 1.0 });
             MATERIALS.white = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 });
+
+            // 土の道テクスチャ生成
+            MATERIALS.dirtRoad = new THREE.MeshStandardMaterial({
+                map: createDirtRoadTexture(),
+                roughness: 1.0,
+                color: 0xffffff
+            });
 
             raycaster = new THREE.Raycaster();
             mouse = new THREE.Vector2();
@@ -1549,7 +1599,7 @@
             lanternRed: new THREE.MeshStandardMaterial({ color: 0xe74c3c, emissive: 0x990000, emissiveIntensity: 0.5 }), // 提灯
             woodDark: new THREE.MeshStandardMaterial({ color: 0x5d4037, roughness: 0.9 }), // 暗い木
             pavingStone: new THREE.MeshStandardMaterial({ color: 0x95a5a6, roughness: 0.8 }), // 石畳
-            dirtRoad: new THREE.MeshStandardMaterial({ color: 0xC4A574, roughness: 1.0 }), // 土の道（明るい黄土色）
+            dirtRoad: null, // init3Dでテクスチャ付きで初期化
             // cobblestone と grassLocked は init3D 内で追加
         };
 
@@ -1564,9 +1614,8 @@
             }
 
             // Use full tile offset for barrier size to reach tile edges (road boundaries)
-            // Previously unitSize=2.4 left gaps; now matching 3.0 offset ensures full coverage
-            const offsetStep = 3.0; // Tile offset
-            const unitSize = 3.0;   // Changed from 2.4 to 3.0 to fill entire tile
+            const offsetStep = 3.4; // Tile offset (updated for wider roads)
+            const unitSize = 3.4;   // Match tile offset
 
             const totalW = unitSize + (dimW - 1) * offsetStep;
             const totalH = unitSize + (dimH - 1) * offsetStep; // Depth (Z)
@@ -2051,7 +2100,7 @@
             const geometry = new THREE.BoxGeometry(2.1, 0.75, 2.1);
             const invisibleMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0 });
 
-            const offset = 3;
+            const offset = 3.4; // 道幅4倍のため拡張（元3.0→3.4）
             const size = gameState.gridSize;
             const start = -offset * (size - 1) / 2;
 
@@ -2065,8 +2114,8 @@
             baseRoadMesh.receiveShadow = true;
             scene.add(baseRoadMesh);
 
-            // 施設タイル用の地面（石畳、施設がある場所のみ表示）
-            const groundGeo = new THREE.PlaneGeometry(2.9, 2.9); // タイルより少し小さく、道路が見えるように
+            // 施設タイル用の地面（石畳、サイズ維持）
+            const groundGeo = new THREE.PlaneGeometry(2.9, 2.9);
 
             for (let i = 0; i < size * size; i++) {
                 const row = Math.floor(i / size);
@@ -2235,7 +2284,7 @@
 
             getNearestRoadCoord(val) {
                 const size = gameState.gridSize;
-                const offset = 3;
+                const offset = 3.4;
                 const tileStart = -offset * (size - 1) / 2;
                 const roadStart = tileStart + 1;
                 const index = Math.round((val - roadStart) / offset);
@@ -2254,7 +2303,7 @@
             // Spawn pedestrian inside the road grid (for initial load)
             resetInside() {
                 const size = gameState.gridSize;
-                const offset = 3;
+                const offset = 3.4;
                 const tileStart = -offset * (size - 1) / 2;
                 const roadStart = tileStart + 1;
                 const roadCount = Math.max(1, size - 1);
@@ -2308,7 +2357,7 @@
             reset() {
                 const isVertical = Math.random() < 0.5;
                 const size = gameState.gridSize;
-                const offset = 3;
+                const offset = 3.4;
                 const tileStart = -offset * (size - 1) / 2;
                 const roadStart = tileStart + 1;
                 const roadCount = Math.max(1, size - 1);
@@ -2339,7 +2388,7 @@
             }
             isRoadBlocked(x, z, isVertical) {
                 const size = gameState.gridSize;
-                const offset = 3;
+                const offset = 3.4;
                 const start = -offset * (size - 1) / 2;
 
                 const getTileIdx = (wx, wz) => {
