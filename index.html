@@ -1549,7 +1549,7 @@
             lanternRed: new THREE.MeshStandardMaterial({ color: 0xe74c3c, emissive: 0x990000, emissiveIntensity: 0.5 }), // 提灯
             woodDark: new THREE.MeshStandardMaterial({ color: 0x5d4037, roughness: 0.9 }), // 暗い木
             pavingStone: new THREE.MeshStandardMaterial({ color: 0x95a5a6, roughness: 0.8 }), // 石畳
-            dirtRoad: new THREE.MeshStandardMaterial({ color: 0x9B7B5A, roughness: 1.0 }), // 土の道（黄土）
+            dirtRoad: new THREE.MeshStandardMaterial({ color: 0xC4A574, roughness: 1.0 }), // 土の道（明るい黄土色）
             // cobblestone と grassLocked は init3D 内で追加
         };
 
@@ -2037,6 +2037,7 @@
 
         // 道路メッシュ管理
         let roadMeshes = [];
+        let baseRoadMesh = null; // ベースの道路レイヤー
 
         function createTiles() {
             tileMeshes.forEach(t => {
@@ -2050,13 +2051,22 @@
             const geometry = new THREE.BoxGeometry(2.1, 0.75, 2.1);
             const invisibleMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0 });
 
-            // 地面を少し大きくして隙間をなくす
-            const groundGeo = new THREE.PlaneGeometry(3.1, 3.1);
-            // groundMatは個別インスタンスとして生成
-
             const offset = 3;
             const size = gameState.gridSize;
             const start = -offset * (size - 1) / 2;
+
+            // ベースの道路レイヤー（地面全体を覆う）
+            const totalGridSize = size * offset + 1; // グリッド全体 + 余白
+            const baseRoadGeo = new THREE.PlaneGeometry(totalGridSize, totalGridSize);
+            if (baseRoadMesh) scene.remove(baseRoadMesh);
+            baseRoadMesh = new THREE.Mesh(baseRoadGeo, MATERIALS.dirtRoad);
+            baseRoadMesh.rotation.x = -Math.PI / 2;
+            baseRoadMesh.position.set(0, -0.08, 0); // タイル地面より下に配置
+            baseRoadMesh.receiveShadow = true;
+            scene.add(baseRoadMesh);
+
+            // 施設タイル用の地面（石畳、施設がある場所のみ表示）
+            const groundGeo = new THREE.PlaneGeometry(2.9, 2.9); // タイルより少し小さく、道路が見えるように
 
             for (let i = 0; i < size * size; i++) {
                 const row = Math.floor(i / size);
@@ -2094,45 +2104,12 @@
                     groundMesh: ground,
                     buildingGroup: bGroup,
                     overlayEl: overlay,
-                    particles: particles,
-                    currentType: null
                 });
             }
 
-            // 道路メッシュを作成（タイル間の通路）
-            // 道路はタイル境界に沿って配置される
-            const roadWidth = 0.6; // タイル間の道幅
-            const roadGeo = new THREE.PlaneGeometry(roadWidth, 3.1); // オフセット3.0に合わせる
-            roadMeshes = []; // グローバル配列
-
-            for (let row = 0; row < size; row++) {
-                for (let col = 0; col < size; col++) {
-                    const x = start + col * offset;
-                    const z = start + row * offset;
-
-                    // 右側の道路（各タイルの右端、最右列以外）
-                    if (col < size - 1) {
-                        const roadRight = new THREE.Mesh(roadGeo, MATERIALS.dirtRoad.clone());
-                        roadRight.rotation.x = -Math.PI / 2;
-                        roadRight.rotation.z = Math.PI / 2; // 縦向き
-                        roadRight.position.set(x + offset / 2, -0.04, z);
-                        roadRight.receiveShadow = true;
-                        scene.add(roadRight);
-                        roadMeshes.push({ mesh: roadRight, rowA: row, colA: col, rowB: row, colB: col + 1, isVertical: true });
-                    }
-
-                    // 下側の道路（各タイルの下端、最下行以外）
-                    if (row < size - 1) {
-                        const roadDown = new THREE.Mesh(roadGeo, MATERIALS.dirtRoad.clone());
-                        roadDown.rotation.x = -Math.PI / 2;
-                        // 横向き（デフォルト）
-                        roadDown.position.set(x, -0.04, z + offset / 2);
-                        roadDown.receiveShadow = true;
-                        scene.add(roadDown);
-                        roadMeshes.push({ mesh: roadDown, rowA: row, colA: col, rowB: row + 1, colB: col, isVertical: false });
-                    }
-                }
-            }
+            // 道路は別メッシュではなく、タイル地面素材で区別
+            // sync3DStateで施設有無に応じて地面素材を切り替え  
+            roadMeshes = []; // 未使用（互換性のため空配列）
 
             sync3DState();
             createSurroundingEnvironment(); // タイル生成時にも環境を更新（サイズ拡張対応）
@@ -3834,13 +3811,14 @@
                         overlay.innerHTML = "";
                     }
                 } else {
-                    // 開拓地 - 地面素材を建物の有無で分ける
+                    // 開拓地 - 建物がある場所は石畳で覆う、空きは道路（ベースレイヤー）が見える
                     if (tile.type) {
-                        // 建物あり → 石畳
+                        // 建物あり → 石畳を表示
+                        ground.visible = true;
                         ground.material = MATERIALS.cobblestone;
                     } else {
-                        // 建物なし（道路） → 土の道
-                        ground.material = MATERIALS.dirtRoad;
+                        // 建物なし → 地面を非表示にしてベースの道路を見せる
+                        ground.visible = false;
                     }
 
                     if (tile.type) {
