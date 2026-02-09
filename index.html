@@ -2457,6 +2457,35 @@
                 }
                 return (!t1_unlocked && !t2_unlocked);
             }
+            // 石畳（建物があるタイル）の上かどうかをチェック
+            isOnCobblestone(x, z) {
+                const size = gameState.gridSize;
+                const offset = 3.4;
+                const start = -offset * (size - 1) / 2;
+                const tileHalfSize = 1.45; // 石畳タイルのサイズ 2.9 / 2
+
+                for (let i = 0; i < size * size; i++) {
+                    const row = Math.floor(i / size);
+                    const col = i % size;
+                    const tileX = start + col * offset;
+                    const tileZ = start + row * offset;
+
+                    const tile = gameState.tiles[i];
+                    // 建物がある（施設が建設されている）タイルの石畳範囲内かチェック
+                    if (tile && tile.type && !tile.type.endsWith('_part')) {
+                        if (Math.abs(x - tileX) < tileHalfSize && Math.abs(z - tileZ) < tileHalfSize) {
+                            return true;
+                        }
+                    }
+                    // マルチタイル建物のパーツ部分もチェック
+                    if (tile && tile.type && tile.type.endsWith('_part')) {
+                        if (Math.abs(x - tileX) < tileHalfSize && Math.abs(z - tileZ) < tileHalfSize) {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
             update() {
                 if (!this.active) {
                     if (Math.random() < 0.01) this.reset();
@@ -2548,7 +2577,9 @@
             }
             updateVisibility() {
                 const isVertical = (this.direction.z !== 0);
-                if (this.isOnGreenRoad(this.mesh.position.x, this.mesh.position.z, isVertical)) {
+                // 緑ロード（未解放タイル間）または石畳（建物があるタイル）の上にいる場合は非表示
+                if (this.isOnGreenRoad(this.mesh.position.x, this.mesh.position.z, isVertical) ||
+                    this.isOnCobblestone(this.mesh.position.x, this.mesh.position.z)) {
                     this.mesh.visible = false;
                 } else {
                     this.mesh.visible = true;
