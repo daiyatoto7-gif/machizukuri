@@ -1613,9 +1613,9 @@
                 dimW = s.w; dimH = s.h;
             }
 
-            // Use full tile offset for barrier size to reach tile edges (road boundaries)
+            // Use cobblestone size for barrier to stay within tile bounds (not road)
             const offsetStep = 3.4; // Tile offset (updated for wider roads)
-            const unitSize = 3.4;   // Match tile offset
+            const unitSize = 2.9;   // Cobblestone tile size (within tile bounds)
 
             const totalW = unitSize + (dimW - 1) * offsetStep;
             const totalH = unitSize + (dimH - 1) * offsetStep; // Depth (Z)
