@@ -2462,7 +2462,8 @@
                 const size = gameState.gridSize;
                 const offset = 3.4;
                 const start = -offset * (size - 1) / 2;
-                const tileHalfSize = 1.45; // 石畳タイルのサイズ 2.9 / 2
+                const baseHalfSize = 1.45; // 石畳タイルのサイズ 2.9 / 2
+                const expandAmount = (3.4 - 2.9) / 2; // 片側拡張量 = 0.25
 
                 for (let i = 0; i < size * size; i++) {
                     const row = Math.floor(i / size);
@@ -2471,17 +2472,71 @@
                     const tileZ = start + row * offset;
 
                     const tile = gameState.tiles[i];
-                    // 建物がある（施設が建設されている）タイルの石畳範囲内かチェック
-                    if (tile && tile.type && !tile.type.endsWith('_part')) {
-                        if (Math.abs(x - tileX) < tileHalfSize && Math.abs(z - tileZ) < tileHalfSize) {
-                            return true;
+                    if (!tile || !tile.type) continue;
+
+                    // タイルの石畳の実際の範囲を計算（片側のみ拡張）
+                    let minX = tileX - baseHalfSize;
+                    let maxX = tileX + baseHalfSize;
+                    let minZ = tileZ - baseHalfSize;
+                    let maxZ = tileZ + baseHalfSize;
+
+                    if (tile.type.endsWith('_part')) {
+                        // パーツタイル: マスターの方向に拡張
+                        const masterIdx = tile.masterIndex;
+                        if (masterIdx !== undefined) {
+                            const masterRow = Math.floor(masterIdx / size);
+                            const masterCol = masterIdx % size;
+
+                            if (masterRow < row) {
+                                // マスターが上（-Z方向）
+                                minZ -= expandAmount * 2;
+                            } else if (masterRow > row) {
+                                // マスターが下（+Z方向）
+                                maxZ += expandAmount * 2;
+                            }
+
+                            if (masterCol < col) {
+                                // マスターが左（-X方向）
+                                minX -= expandAmount * 2;
+                            } else if (masterCol > col) {
+                                // マスターが右（+X方向）
+                                maxX += expandAmount * 2;
+                            }
+                        }
+                    } else {
+                        // マスタータイルかチェック
+                        const buildCfg = BUILDINGS[tile.type];
+                        if (buildCfg && ((buildCfg.w || 1) > 1 || (buildCfg.h || 1) > 1)) {
+                            const bw = buildCfg.w || 1;
+                            const bh = buildCfg.h || 1;
+                            const rot = tile.rotation || 0;
+
+                            let effectiveW = bw, effectiveH = bh;
+                            if (rot === 1 || rot === 3) {
+                                effectiveW = bh;
+                                effectiveH = bw;
+                            }
+
+                            if (effectiveW > 1) {
+                                if (rot === 0 || rot === 3) {
+                                    maxX += expandAmount * 2; // 右方向
+                                } else {
+                                    minX -= expandAmount * 2; // 左方向
+                                }
+                            }
+                            if (effectiveH > 1) {
+                                if (rot === 0 || rot === 1) {
+                                    maxZ += expandAmount * 2; // 下方向
+                                } else {
+                                    minZ -= expandAmount * 2; // 上方向
+                                }
+                            }
                         }
                     }
-                    // マルチタイル建物のパーツ部分もチェック
-                    if (tile && tile.type && tile.type.endsWith('_part')) {
-                        if (Math.abs(x - tileX) < tileHalfSize && Math.abs(z - tileZ) < tileHalfSize) {
-                            return true;
-                        }
+
+                    // 石畳範囲内かチェック
+                    if (x >= minX && x <= maxX && z >= minZ && z <= maxZ) {
+                        return true;
                     }
                 }
                 return false;
@@ -3899,14 +3954,103 @@
                         let isMultiTilePart = tile.type.endsWith('_part');
                         let isMultiTileMaster = false;
                         if (!isMultiTilePart && tile.type) {
-                            const buildSize = getBuildingSize(tile.type);
-                            isMultiTileMaster = buildSize.w > 1 || buildSize.h > 1;
+                            const buildCfg = BUILDINGS[tile.type];
+                            if (buildCfg && ((buildCfg.w || 1) > 1 || (buildCfg.h || 1) > 1)) {
+                                isMultiTileMaster = true;
+                            }
                         }
+
+                        // 地面の基準位置を取得
+                        const size = gameState.gridSize;
+                        const offset = 3.4;
+                        const tileStart = -offset * (size - 1) / 2;
+                        const row = Math.floor(i / size);
+                        const col = i % size;
+                        const baseX = tileStart + col * offset;
+                        const baseZ = tileStart + row * offset;
+
                         if (isMultiTilePart || isMultiTileMaster) {
-                            // 地面スケールを拡大（2.9→3.4でギャップなし）
-                            ground.scale.set(3.4 / 2.9, 3.4 / 2.9, 1);
+                            // 片側のみに拡大するため、スケールと位置オフセットを計算
+                            const expandRatio = 3.4 / 2.9;
+                            const expandAmount = (3.4 - 2.9) / 2; // 片側に追加する量 = 0.25
+
+                            let scaleX = 1;
+                            let scaleZ = 1;
+                            let offsetX = 0;
+                            let offsetZ = 0;
+
+                            if (isMultiTilePart) {
+                                // パーツタイル: マスターの方向に向かって拡大
+                                const masterIdx = tile.masterIndex;
+                                if (masterIdx !== undefined) {
+                                    const masterRow = Math.floor(masterIdx / size);
+                                    const masterCol = masterIdx % size;
+
+                                    if (masterRow < row) {
+                                        // マスターが上にある → 上方向（-Z）に拡大
+                                        scaleZ = expandRatio;
+                                        offsetZ = -expandAmount;
+                                    } else if (masterRow > row) {
+                                        // マスターが下にある → 下方向（+Z）に拡大
+                                        scaleZ = expandRatio;
+                                        offsetZ = expandAmount;
+                                    }
+
+                                    if (masterCol < col) {
+                                        // マスターが左にある → 左方向（-X）に拡大
+                                        scaleX = expandRatio;
+                                        offsetX = -expandAmount;
+                                    } else if (masterCol > col) {
+                                        // マスターが右にある → 右方向（+X）に拡大
+                                        scaleX = expandRatio;
+                                        offsetX = expandAmount;
+                                    }
+                                }
+                            } else if (isMultiTileMaster) {
+                                // マスタータイル: パーツの方向を判定して拡大
+                                const buildCfg = BUILDINGS[tile.type];
+                                const bw = buildCfg.w || 1;
+                                const bh = buildCfg.h || 1;
+                                const rot = tile.rotation || 0;
+
+                                // 回転を考慮した実効サイズ
+                                let effectiveW = bw, effectiveH = bh;
+                                if (rot === 1 || rot === 3) {
+                                    effectiveW = bh;
+                                    effectiveH = bw;
+                                }
+
+                                // パーツの方向を計算（マスターから見てどちらに伸びるか）
+                                // 回転0: 右(+X)と下(+Z)方向に伸びる
+                                // 回転1: 下(+Z)と左(-X)方向
+                                // 回転2: 左(-X)と上(-Z)方向
+                                // 回転3: 上(-Z)と右(+X)方向
+
+                                if (effectiveW > 1) {
+                                    scaleX = expandRatio;
+                                    // 回転によりパーツがどちら側にあるか
+                                    if (rot === 0 || rot === 3) {
+                                        offsetX = expandAmount; // 右方向
+                                    } else {
+                                        offsetX = -expandAmount; // 左方向
+                                    }
+                                }
+                                if (effectiveH > 1) {
+                                    scaleZ = expandRatio;
+                                    // 回転によりパーツがどちら側にあるか
+                                    if (rot === 0 || rot === 1) {
+                                        offsetZ = expandAmount; // 下方向
+                                    } else {
+                                        offsetZ = -expandAmount; // 上方向
+                                    }
+                                }
+                            }
+
+                            ground.scale.set(scaleX, scaleZ, 1);
+                            ground.position.set(baseX + offsetX, -0.05, baseZ + offsetZ);
                         } else {
                             ground.scale.set(1, 1, 1);
+                            ground.position.set(baseX, -0.05, baseZ);
                         }
                     } else {
                         // 建物なし → 地面を非表示にしてベースの道路を見せる
