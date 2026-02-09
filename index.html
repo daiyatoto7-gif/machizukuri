@@ -3864,9 +3864,14 @@
                         ground.visible = true;
                         ground.material = MATERIALS.cobblestone;
 
-                        // マルチタイル施設の場合、地面を拡大して隙間を埋める
-                        const isMultiTile = tile.type.endsWith('_part') || tile.mas;
-                        if (isMultiTile) {
+                        // マルチタイル施設の場合のみ、地面を拡大して隙間を埋める
+                        let isMultiTilePart = tile.type.endsWith('_part');
+                        let isMultiTileMaster = false;
+                        if (!isMultiTilePart && tile.type) {
+                            const buildSize = getBuildingSize(tile.type);
+                            isMultiTileMaster = buildSize.w > 1 || buildSize.h > 1;
+                        }
+                        if (isMultiTilePart || isMultiTileMaster) {
                             // 地面スケールを拡大（2.9→3.4でギャップなし）
                             ground.scale.set(3.4 / 2.9, 3.4 / 2.9, 1);
                         } else {
