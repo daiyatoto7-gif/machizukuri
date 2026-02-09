@@ -1659,7 +1659,7 @@
                 group.add(sheet);
             });
 
-            // Helper: Create detailed worker model with full body animation
+            // Helper: Create detailed worker model with natural hammering animation
             const createWorker = (posX, posZ, rotY, animOffset = 0) => {
                 const worker = new THREE.Group();
                 worker.position.set(posX, 0, posZ);
@@ -1671,7 +1671,7 @@
                 const matSkin = new THREE.MeshStandardMaterial({ color: 0xffccaa });
                 const matStraw = new THREE.MeshStandardMaterial({ color: 0xD4B896 }); // Straw color for hat
 
-                // 上半身グループ（前傾アニメーション用）
+                // 上半身グループ（わずかな前傾のみ）
                 const upperBody = new THREE.Group();
                 upperBody.position.set(0, 0.25, 0); // 腰の位置を基準点に
                 upperBody.userData = { anim: 'workerBow', speed: 1.0, offset: animOffset };
@@ -1679,7 +1679,7 @@
 
                 // Torso (brown work tunic)
                 const torso = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.25, 0.08), matTunic);
-                torso.position.y = 0.10; // 腰からの相対位置
+                torso.position.y = 0.10;
                 torso.castShadow = true;
                 upperBody.add(torso);
 
@@ -1695,41 +1695,64 @@
                 hat.castShadow = true;
                 upperBody.add(hat);
 
-                // Limb helper
-                const createLimb = (w, h, d, mat, ox, oy, oz) => {
-                    const g = new THREE.Group();
-                    g.position.set(ox, oy, oz);
-                    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-                    mesh.position.y = -h / 2;
-                    mesh.castShadow = true;
-                    g.add(mesh);
-                    return g;
+                // 腕のグループ（肩から回転する）
+                const createArmWithPivot = (side, hasHammer = false, offset = 0) => {
+                    const armGroup = new THREE.Group();
+                    const xPos = side === 'left' ? 0.11 : -0.11;
+                    armGroup.position.set(xPos, 0.20, 0); // 肩の位置
+
+                    // 腕本体
+                    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.22, 0.06), matTunic);
+                    arm.position.y = -0.11; // 肩から下に
+                    arm.castShadow = true;
+                    armGroup.add(arm);
+
+                    if (hasHammer) {
+                        // ハンマー（腕の先端に取り付け）
+                        const hammer = new THREE.Group();
+                        hammer.position.set(0, -0.22, 0.05); // 手の位置
+
+                        const handle = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.20, 0.02), MATERIALS.wood);
+                        handle.position.y = -0.10;
+                        hammer.add(handle);
+
+                        const hammerHead = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.05, 0.05), MATERIALS.metal);
+                        hammerHead.position.set(0, -0.20, 0);
+                        hammer.add(hammerHead);
+
+                        armGroup.add(hammer);
+
+                        // ハンマーを持つ腕のアニメーション
+                        armGroup.userData = { anim: 'armSwing', speed: 1.0, offset: offset };
+                    }
+
+                    return armGroup;
                 };
 
-                // Arms （上半身に追加）
-                const leftArm = createLimb(0.06, 0.22, 0.06, matTunic, 0.11, 0.20, 0);
-                const rightArm = createLimb(0.06, 0.22, 0.06, matTunic, -0.11, 0.20, 0);
+                // 左腕（補助、少し動く）
+                const leftArm = createArmWithPivot('left', false);
+                leftArm.userData = { anim: 'armAssist', speed: 1.0, offset: animOffset };
                 upperBody.add(leftArm);
+
+                // 右腕（ハンマー持ち、大きく振る）
+                const rightArm = createArmWithPivot('right', true, animOffset);
                 upperBody.add(rightArm);
 
-                // Legs （下半身は動かない）
-                const leftLeg = createLimb(0.065, 0.25, 0.065, matPants, 0.05, 0.25, 0);
-                const rightLeg = createLimb(0.065, 0.25, 0.065, matPants, -0.05, 0.25, 0);
+                // Legs（肩幅に開いた姿勢）
+                const createLeg = (xPos) => {
+                    const legGroup = new THREE.Group();
+                    legGroup.position.set(xPos, 0.25, 0);
+                    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.25, 0.065), matPants);
+                    leg.position.y = -0.125;
+                    leg.castShadow = true;
+                    legGroup.add(leg);
+                    return legGroup;
+                };
+
+                const leftLeg = createLeg(0.08);  // 足を広げる
+                const rightLeg = createLeg(-0.08);
                 worker.add(leftLeg);
                 worker.add(rightLeg);
-
-                // Hammer tool
-                const hammer = new THREE.Group();
-                hammer.position.set(0.15, 0.10, 0.1); // 上半身内の相対位置
-                const handle = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.18, 0.02), MATERIALS.wood);
-                handle.position.y = 0.09;
-                hammer.add(handle);
-                const hammerHead = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.06, 0.06), MATERIALS.metal);
-                hammerHead.position.set(0, 0.18, 0);
-                hammer.add(hammerHead);
-                hammer.rotation.z = -Math.PI / 4;
-                hammer.userData = { anim: 'hammerSwing', speed: 1.0, offset: animOffset };
-                upperBody.add(hammer);
 
                 return worker;
             };
@@ -3850,15 +3873,25 @@
                                     obj.rotation.z = -Math.PI / 4 + Math.abs(Math.sin(time * 10)) * 1.5;
                                     break;
                                 case 'workerBow':
-                                    // 上半身が前傾する動き（ハンマーを振り下ろす時に前傾）
+                                    // 上半身のわずかな動き（腕の動きに連動）
                                     const bowCycle = Math.sin(time * 5 + (data.offset || 0));
-                                    obj.rotation.x = bowCycle * 0.3; // 前傾 0~0.3 rad
+                                    obj.rotation.x = bowCycle * 0.08; // 軽い前傾のみ
                                     break;
                                 case 'hammerSwing':
-                                    // ハンマーが振り下ろされる動き（上半身と連動）
-                                    const swingCycle = Math.sin(time * 5 + (data.offset || 0));
-                                    // 振り上げ→振り下ろし
-                                    obj.rotation.z = -Math.PI / 4 - swingCycle * 0.8;
+                                    // 旧アニメーション（互換性のため残す）
+                                    const swingCycleLegacy = Math.sin(time * 5 + (data.offset || 0));
+                                    obj.rotation.z = -Math.PI / 4 - swingCycleLegacy * 0.8;
+                                    break;
+                                case 'armSwing':
+                                    // ハンマーを持つ腕の振り（肩を中心にX軸回転）
+                                    // 振り上げ（後ろ） → 振り下ろし（前）
+                                    const armCycle = Math.sin(time * 5 + (data.offset || 0));
+                                    obj.rotation.x = -0.3 + armCycle * 0.8; // -1.1 ~ 0.5 rad
+                                    break;
+                                case 'armAssist':
+                                    // 補助腕の小さな動き（メイン腕と逆方向）
+                                    const assistCycle = Math.sin(time * 5 + (data.offset || 0));
+                                    obj.rotation.x = assistCycle * 0.15; // 小さな動き
                                     break;
                             }
                         }
