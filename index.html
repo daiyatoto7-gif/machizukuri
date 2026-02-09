@@ -2286,7 +2286,7 @@
                 const size = gameState.gridSize;
                 const offset = 3.4;
                 const tileStart = -offset * (size - 1) / 2;
-                const roadStart = tileStart + 1;
+                const roadStart = tileStart + offset / 2; // 道路はタイル間
                 const index = Math.round((val - roadStart) / offset);
                 return roadStart + index * offset;
             }
@@ -2305,7 +2305,7 @@
                 const size = gameState.gridSize;
                 const offset = 3.4;
                 const tileStart = -offset * (size - 1) / 2;
-                const roadStart = tileStart + 1;
+                const roadStart = tileStart + offset / 2; // 道路はタイル間にある
                 const roadCount = Math.max(1, size - 1);
 
                 // Try up to 20 times to find a valid (non-blocked) spawn position
@@ -2359,7 +2359,7 @@
                 const size = gameState.gridSize;
                 const offset = 3.4;
                 const tileStart = -offset * (size - 1) / 2;
-                const roadStart = tileStart + 1;
+                const roadStart = tileStart + offset / 2; // 道路はタイル間にある
                 const roadCount = Math.max(1, size - 1);
                 const roadIndex = Math.floor(Math.random() * roadCount);
                 const laneCenter = roadStart + roadIndex * offset;
@@ -2437,7 +2437,7 @@
 
             isOnGreenRoad(x, z, isVertical) {
                 const size = gameState.gridSize;
-                const offset = 3; // Fixed from 2
+                const offset = 3.4; // Fixed from 2
                 const start = -offset * (size - 1) / 2;
                 const checkTile = (wx, wz) => {
                     const col = Math.round((wx - start) / offset);
