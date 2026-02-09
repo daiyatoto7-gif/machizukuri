@@ -1708,16 +1708,18 @@
                     armGroup.add(arm);
 
                     if (hasHammer) {
-                        // ハンマー（腕の先端に取り付け）
+                        // ハンマー（腕の先端に取り付け、前方を向く）
                         const hammer = new THREE.Group();
-                        hammer.position.set(0, -0.22, 0.05); // 手の位置
+                        hammer.position.set(0, -0.22, 0); // 手の位置
 
-                        const handle = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.20, 0.02), MATERIALS.wood);
-                        handle.position.y = -0.10;
+                        // ハンマーの柄（手から後方に伸びる）
+                        const handle = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.20), MATERIALS.wood);
+                        handle.position.z = -0.10; // 後方に
                         hammer.add(handle);
 
-                        const hammerHead = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.05, 0.05), MATERIALS.metal);
-                        hammerHead.position.set(0, -0.20, 0);
+                        // ハンマーヘッド（前方、振り下ろす時に当たる部分）
+                        const hammerHead = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.10), MATERIALS.metal);
+                        hammerHead.position.set(0, 0, 0.05); // 手の前方
                         hammer.add(hammerHead);
 
                         armGroup.add(hammer);
@@ -3884,9 +3886,12 @@
                                     break;
                                 case 'armSwing':
                                     // ハンマーを持つ腕の振り（肩を中心にX軸回転）
-                                    // 振り上げ（後ろ） → 振り下ろし（前）
-                                    const armCycle = Math.sin(time * 5 + (data.offset || 0));
-                                    obj.rotation.x = -0.3 + armCycle * 0.8; // -1.1 ~ 0.5 rad
+                                    // 上（後ろに振りかぶる） → 下（前に振り下ろす）
+                                    // 正のX回転 = 腕が後ろに上がる、負のX回転 = 腕が前に下がる
+                                    const armPhase = time * 5 + (data.offset || 0);
+                                    // 振りかぶり → 振り下ろしのサイクル
+                                    const armCycle = Math.cos(armPhase); // cos: 1→-1→1
+                                    obj.rotation.x = 0.5 + armCycle * 0.7; // 1.2(振りかぶり) → -0.2(振り下ろし)
                                     break;
                                 case 'armAssist':
                                     // 補助腕の小さな動き（メイン腕と逆方向）
