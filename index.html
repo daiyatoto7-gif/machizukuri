@@ -1855,12 +1855,12 @@
 
                 // 奥側（北側）には山を多めに配置
                 if (z < -10 && Math.random() > 0.6) {
-                    const h = 3 + Math.random() * 5; // 高さを抑える
-                    const r = 2 + Math.random() * 3; // 幅を抑える
+                    const h = (3 + Math.random() * 5) * 2.0; // Scale up 2.0
+                    const r = (2 + Math.random() * 3) * 2.0; // Scale up 2.0
                     environmentGroup.add(createMountain(x, z, h, r));
                 } else {
                     // 木を配置
-                    const scale = 0.8 + Math.random() * 0.8; // サイズを小さくする
+                    const scale = (0.8 + Math.random() * 0.8) * 2.0; // Scale up 2.0
                     const tree = createTree(x, z, scale);
                     // ランダムに少し傾ける
                     tree.rotation.z = (Math.random() - 0.5) * 0.1;
@@ -2105,6 +2105,132 @@
 
         // Click to resume
         window.SoundManager = SoundManager;
+
+        // --- Pedestrian Visual Upgrade ---
+        const TextureGenerator = {
+            createCanvas: function () {
+                const cvs = document.createElement('canvas');
+                cvs.width = 64; cvs.height = 64;
+                return cvs;
+            },
+            generateFace: function (role) {
+                const cvs = this.createCanvas();
+                const ctx = cvs.getContext('2d');
+                ctx.fillStyle = '#fcc'; ctx.fillRect(0, 0, 64, 64); // Skin
+                ctx.fillStyle = '#330'; // Features
+
+                if (role === 'soldier' || role === 'official') {
+                    ctx.fillRect(16, 24, 10, 4); ctx.fillRect(38, 24, 10, 4); // Eyes
+                    ctx.beginPath(); ctx.moveTo(14, 20); ctx.lineTo(28, 22); ctx.moveTo(50, 20); ctx.lineTo(36, 22); ctx.stroke(); // Brows
+                } else {
+                    ctx.beginPath(); ctx.arc(21, 26, 3, 0, Math.PI * 2); ctx.arc(43, 26, 3, 0, Math.PI * 2); ctx.fill(); // Eyes
+                }
+
+                if (role === 'villager') {
+                    ctx.strokeStyle = '#a66'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(32, 45, 8, 0, Math.PI); ctx.stroke(); // Smile
+                } else {
+                    ctx.fillStyle = '#a66'; ctx.fillRect(24, 45, 16, 2); // Neutral
+                }
+                const tex = new THREE.CanvasTexture(cvs);
+                tex.magFilter = THREE.NearestFilter;
+                return tex;
+            },
+            generateClothing: function (role, colorHex) {
+                const cvs = this.createCanvas();
+                const ctx = cvs.getContext('2d');
+                ctx.fillStyle = '#' + colorHex.toString(16).padStart(6, '0'); ctx.fillRect(0, 0, 64, 64); // Base
+
+                ctx.fillStyle = 'rgba(255,255,255,0.1)';
+                if (role === 'merchant' || role === 'official') {
+                    for (let i = 0; i < 64; i += 8) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + 4, 4); ctx.lineTo(i, 8); ctx.fill(); } // Silk
+                    ctx.fillStyle = '#222'; ctx.fillRect(28, 0, 8, 64); ctx.fillRect(0, 0, 64, 4); // Trim
+                } else if (role === 'soldier') {
+                    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                    for (let y = 0; y < 64; y += 8) for (let x = 0; x < 64; x += 8) ctx.strokeRect(x, y, 8, 8); // Scales
+                    ctx.strokeStyle = '#b22'; ctx.lineWidth = 4; ctx.strokeRect(0, 0, 64, 64); // Red trim
+                } else { // Villager
+                    ctx.fillStyle = 'rgba(0,0,0,0.05)';
+                    for (let i = 0; i < 200; i++) ctx.fillRect(Math.random() * 64, Math.random() * 64, 2, 2); // Noise
+                    ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.moveTo(32, 0); ctx.lineTo(0, 32); ctx.moveTo(32, 0); ctx.lineTo(64, 32); ctx.stroke(); // Collar
+                }
+                const tex = new THREE.CanvasTexture(cvs);
+                tex.magFilter = THREE.NearestFilter;
+                return tex;
+            }
+        };
+
+        function createAdvancedPedestrian(role) {
+            const group = new THREE.Group();
+
+            // Textures
+            const faceTex = TextureGenerator.generateFace(role);
+            let color = 0x8B4513;
+            if (role === 'merchant') color = 0x4682B4;
+            if (role === 'official') color = 0x800000;
+            if (role === 'soldier') color = 0x555555;
+            if (role === 'villager') color = [0x8B4513, 0x556B2F, 0xD2B48C][Math.floor(Math.random() * 3)];
+
+            const clothesTex = TextureGenerator.generateClothing(role, color);
+            const matSkin = new THREE.MeshStandardMaterial({ map: faceTex });
+            const matClothes = new THREE.MeshStandardMaterial({ map: clothesTex });
+            const matDark = new THREE.MeshStandardMaterial({ color: 0x333333 });
+
+            // Body
+            const torsoGeo = (role === 'official' || role === 'merchant') ? new THREE.CylinderGeometry(0.1, 0.15, 0.25, 8) : new THREE.BoxGeometry(0.15, 0.25, 0.08);
+            const torso = new THREE.Mesh(torsoGeo, matClothes);
+            torso.position.y = 0.25; torso.castShadow = true;
+            group.add(torso);
+
+            // Head
+            const head = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.12), matSkin);
+            head.position.y = 0.43; head.castShadow = true;
+            group.add(head);
+
+            // Hat
+            const hatGroup = new THREE.Group(); hatGroup.position.y = 0.5;
+            if (role === 'official') {
+                const guan = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.1), matDark); guan.position.y = 0.02; hatGroup.add(guan);
+            } else if (role === 'soldier') {
+                const helm = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.08, 8), new THREE.MeshStandardMaterial({ color: 0x888888 })); hatGroup.add(helm);
+            } else if (role === 'villager') {
+                if (Math.random() > 0.5) {
+                    const hat = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.05, 8), new THREE.MeshStandardMaterial({ color: 0xDAA520 })); hatGroup.add(hat);
+                } else {
+                    const bun = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.06), matDark); hatGroup.add(bun);
+                }
+            } else {
+                const cap = new THREE.Mesh(new THREE.DodecahedronGeometry(0.07), new THREE.MeshStandardMaterial({ color: 0x222222 })); cap.position.y = 0.02; hatGroup.add(cap);
+            }
+            group.add(hatGroup);
+
+            // Limbs
+            const createLimb = (w, h, mat, x, y) => {
+                const g = new THREE.Group(); g.position.set(x, y, 0);
+                const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, w), mat); m.position.y = -h / 2; m.castShadow = true;
+                g.add(m); return g;
+            };
+
+            group.userData.leftArm = createLimb(0.05, 0.2, matClothes, 0.11, 0.38);
+            group.userData.rightArm = createLimb(0.05, 0.2, matClothes, -0.11, 0.38);
+            group.add(group.userData.leftArm); group.add(group.userData.rightArm);
+
+            const pantsMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+            group.userData.leftLeg = createLimb(0.06, 0.25, pantsMat, 0.05, 0.2);
+            group.userData.rightLeg = createLimb(0.06, 0.25, pantsMat, -0.05, 0.2);
+            group.add(group.userData.leftLeg); group.add(group.userData.rightLeg);
+
+            // Accessories
+            if (role === 'soldier') {
+                const spear = new THREE.Group();
+                spear.add(new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 1.2), new THREE.MeshStandardMaterial({ color: 0x654321 }))); // Shaft
+                const tip = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.1, 4), new THREE.MeshStandardMaterial({ color: 0xaaaaaa })); tip.position.y = 0.6; spear.add(tip);
+                spear.rotation.x = -Math.PI / 2; spear.position.set(0, -0.1, 0.3);
+                group.userData.rightArm.add(spear);
+            }
+
+            return group;
+        }
         const initAudio = () => { SoundManager.resume(); };
         document.addEventListener('click', initAudio, { once: true });
         document.addEventListener('touchstart', initAudio, { once: true });
@@ -2192,85 +2318,24 @@
         }
 
         class Person {
-            constructor(scene) {
+            constructor(scene, role) {
                 this.scene = scene;
-                this.mesh = new THREE.Group();
+                this.role = role || 'villager';
+                this.mesh = createAdvancedPedestrian(this.role);
                 this.mesh.castShadow = true;
 
-                // Materials - Historical Palette (Earth tones, Indigo, Unbleached)
-                const getHistoricalColor = () => {
-                    const palette = [
-                        0x8B4513, // SaddleBrown
-                        0x556B2F, // DarkOliveGreen
-                        0x708090, // SlateGray
-                        0x2F4F4F, // DarkSlateGray
-                        0x4682B4, // SteelBlue (faded indigo)
-                        0xCD853F, // Peru (tan)
-                        0xA0522D, // Sienna
-                        0xD2B48C  // Tan
-                    ];
-                    return palette[Math.floor(Math.random() * palette.length)];
-                };
+                // Animation handles
+                this.leftArm = this.mesh.userData.leftArm;
+                this.rightArm = this.mesh.userData.rightArm;
+                this.leftLeg = this.mesh.userData.leftLeg;
+                this.rightLeg = this.mesh.userData.rightLeg;
 
-                const shirtColor = getHistoricalColor();
-                const pantsColor = getHistoricalColor();
-                const skinColor = 0xffccaa;
-
-                const matShirt = new THREE.MeshStandardMaterial({ color: shirtColor });
-                const matPants = new THREE.MeshStandardMaterial({ color: pantsColor });
-                const matSkin = new THREE.MeshStandardMaterial({ color: skinColor });
-
-                // Container for Scale/Rotation local
-                this.bodyGroup = new THREE.Group();
-                this.mesh.add(this.bodyGroup);
-
-                // --- Body Parts ---
-                // Torso (0.15 width, 0.25 height)
-                const torsoGeo = new THREE.BoxGeometry(0.15, 0.25, 0.08);
-                this.torso = new THREE.Mesh(torsoGeo, matShirt);
-                this.torso.position.y = 0.25; // Center of torso
-                this.torso.castShadow = true;
-                this.bodyGroup.add(this.torso);
-
-                // Head
-                const headGeo = new THREE.BoxGeometry(0.12, 0.12, 0.12); // Boxy head for low poly style
-                this.head = new THREE.Mesh(headGeo, matSkin);
-                this.head.position.y = 0.43;
-                this.head.castShadow = true;
-                this.bodyGroup.add(this.head);
-
-                // Helper for Limbs (pivot at top)
-                const createLimb = (w, h, d, mat, ox, oy, oz) => {
-                    const g = new THREE.Group();
-                    g.position.set(ox, oy, oz);
-                    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-                    mesh.position.y = -h / 2; // pivot at top
-                    mesh.castShadow = true;
-                    g.add(mesh);
-                    return g;
-                };
-
-                // Arms (Pivot at shoulder: y=0.35)
-                this.leftArm = createLimb(0.06, 0.22, 0.06, matShirt, 0.11, 0.35, 0);
-                this.rightArm = createLimb(0.06, 0.22, 0.06, matShirt, -0.11, 0.35, 0);
-                this.bodyGroup.add(this.leftArm);
-                this.bodyGroup.add(this.rightArm);
-
-                // Legs (Pivot at hip: y=0.25 so feet touch ground at y=0)
-                this.leftLeg = createLimb(0.065, 0.25, 0.065, matPants, 0.05, 0.25, 0);
-                this.rightLeg = createLimb(0.065, 0.25, 0.065, matPants, -0.05, 0.25, 0);
-                this.bodyGroup.add(this.leftLeg);
-                this.bodyGroup.add(this.rightLeg);
-
-
-                scene.add(this.mesh);
+                this.scene.add(this.mesh);
                 this.active = false;
                 this.mesh.visible = false;
                 this.isStopped = false;
                 this.stopTimer = 0;
                 this.canTurn = true;
-
-                // Animation State
                 this.animTime = Math.random() * 100;
 
                 this.reset();
@@ -2670,8 +2735,14 @@
         function initPedestrians() {
             if (pedestrians.length === 0) {
                 // Initial load: spawn pedestrians inside existing roads
-                for (let i = 0; i < 15; i++) {
-                    const p = new Person(scene);
+                for (let i = 0; i < 20; i++) {
+                    let role = 'villager';
+                    const r = Math.random();
+                    if (r < 0.1) role = 'official';
+                    else if (r < 0.25) role = 'merchant';
+                    else if (r < 0.4) role = 'soldier';
+
+                    const p = new Person(scene, role);
                     p.resetInside(); // Spawn inside the grid
                     pedestrians.push(p);
                 }
@@ -2723,9 +2794,9 @@
             // ベーススケール調整
             // Cap level at 30 for visuals
             const vizLevel = Math.min(level, 30);
-            // Grid is 3.4, Cobblestone is 2.9. Standard model is ~1.0. 
-            // Scale up to ~2.5 to fit nicely.
-            const baseScale = 2.5;
+            // Grid is 3.4, Cobblestone is 2.9. Standard model is ~1.0.
+            // Scale up to ~2.0 to fit nicely without overlapping (User Feedback).
+            const baseScale = 2.0;
             const scale = baseScale * (1.0 + (vizLevel * 0.01));
             group.scale.set(scale, scale, scale);
 
