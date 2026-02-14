@@ -5523,9 +5523,7 @@
                 return false;
             }
 
-            if ((now - (t.lastCollectTime || 0)) < CONFIG.collectCooldown) {
-                return false;
-            }
+
 
             // Special: Directorate (Time Reduction)
             if (t.type === 'directorate' && t.stored && t.stored.time_reduction > 0) {
@@ -5567,10 +5565,14 @@
 
             let total = 0;
             let txt = "";
+            const validResources = ['money', 'food', 'wood', 'stone', 'iron', 'water'];
 
             for (let r in t.stored) {
+                if (!validResources.includes(r)) continue;
+
                 const val = Math.floor(t.stored[r]);
                 if (val > 0) {
+                    if (gameState.resources[r] === undefined) gameState.resources[r] = 0;
                     gameState.resources[r] += val;
                     t.stored[r] = 0;
                     total += val;
