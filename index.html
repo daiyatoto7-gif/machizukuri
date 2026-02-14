@@ -1855,12 +1855,12 @@
 
                 // 奥側（北側）には山を多めに配置
                 if (z < -10 && Math.random() > 0.6) {
-                    const h = (3 + Math.random() * 5) * 2.0; // Scale up 2.0
-                    const r = (2 + Math.random() * 3) * 2.0; // Scale up 2.0
+                    const h = (3 + Math.random() * 5) * 1.6; // Scale up 1.6
+                    const r = (2 + Math.random() * 3) * 1.6; // Scale up 1.6
                     environmentGroup.add(createMountain(x, z, h, r));
                 } else {
                     // 木を配置
-                    const scale = (0.8 + Math.random() * 0.8) * 2.0; // Scale up 2.0
+                    const scale = (0.8 + Math.random() * 0.8) * 1.6; // Scale up 1.6
                     const tree = createTree(x, z, scale);
                     // ランダムに少し傾ける
                     tree.rotation.z = (Math.random() - 0.5) * 0.1;
@@ -2117,20 +2117,7 @@
                 const cvs = this.createCanvas();
                 const ctx = cvs.getContext('2d');
                 ctx.fillStyle = '#fcc'; ctx.fillRect(0, 0, 64, 64); // Skin
-                ctx.fillStyle = '#330'; // Features
-
-                if (role === 'soldier' || role === 'official') {
-                    ctx.fillRect(16, 24, 10, 4); ctx.fillRect(38, 24, 10, 4); // Eyes
-                    ctx.beginPath(); ctx.moveTo(14, 20); ctx.lineTo(28, 22); ctx.moveTo(50, 20); ctx.lineTo(36, 22); ctx.stroke(); // Brows
-                } else {
-                    ctx.beginPath(); ctx.arc(21, 26, 3, 0, Math.PI * 2); ctx.arc(43, 26, 3, 0, Math.PI * 2); ctx.fill(); // Eyes
-                }
-
-                if (role === 'villager') {
-                    ctx.strokeStyle = '#a66'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(32, 45, 8, 0, Math.PI); ctx.stroke(); // Smile
-                } else {
-                    ctx.fillStyle = '#a66'; ctx.fillRect(24, 45, 16, 2); // Neutral
-                }
+                // Faceless style (No eyes/mouth)
                 const tex = new THREE.CanvasTexture(cvs);
                 tex.magFilter = THREE.NearestFilter;
                 return tex;
@@ -2795,8 +2782,9 @@
             // Cap level at 30 for visuals
             const vizLevel = Math.min(level, 30);
             // Grid is 3.4, Cobblestone is 2.9. Standard model is ~1.0.
-            // Scale up to ~2.0 to fit nicely without overlapping (User Feedback).
-            const baseScale = 2.0;
+            // Grid is 3.4, Cobblestone is 2.9. Standard model is ~1.0.
+            // Scale up to ~1.6 to fit nicely without overlapping (User Feedback 20% reduced).
+            const baseScale = 1.6;
             const scale = baseScale * (1.0 + (vizLevel * 0.01));
             group.scale.set(scale, scale, scale);
 
