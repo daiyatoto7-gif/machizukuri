@@ -3831,21 +3831,22 @@
                     const range = tier >= 2 ? 0.6 : 0.8; // Denser for bamboo
                     const dens = tier >= 2 ? 1.5 : 1.0;
 
-                    // Master area
+                    // Master area (Local Z: -0.9 to 0.9)
                     addTree(-0.8, -0.8, 0.9);
                     addTree(0.8, -0.6, 0.8);
                     addTree(0.6, 0.8, 0.7);
                     if (tier >= 2) addTree(0.2, -0.9, 0.8);
 
-                    // Slave area (z around 3.0)
-                    addTree(0, 3.0, 1.2);
-                    addTree(-0.8, 2.5, 0.9);
-                    addTree(0.8, 2.5, 0.8);
-                    addTree(-0.7, 3.5, 0.7);
-                    addTree(0.7, 3.6, 0.8);
+                    // Slave area (Target Center Z: ~2.125 for baseScale 1.6)
+                    // Previous values were > 3.0 which caused overflow (3.0 * 1.6 = 4.8, close to limit 4.85)
+                    addTree(0, 2.1, 1.2);
+                    addTree(-0.8, 1.8, 0.9);
+                    addTree(0.8, 1.7, 0.8);
+                    addTree(-0.7, 2.4, 0.7);
+                    addTree(0.7, 2.5, 0.8);
                     if (tier >= 2) {
-                        addTree(0.3, 2.8, 0.9);
-                        addTree(-0.3, 3.2, 0.8);
+                        addTree(0.3, 1.9, 0.9);
+                        addTree(-0.3, 2.3, 0.8);
                     }
                     break;
 
