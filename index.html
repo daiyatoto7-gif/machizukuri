@@ -2723,7 +2723,10 @@
             // ベーススケール調整
             // Cap level at 30 for visuals
             const vizLevel = Math.min(level, 30);
-            const scale = 1.0 + (vizLevel * 0.02);
+            // Grid is 3.4, Cobblestone is 2.9. Standard model is ~1.0. 
+            // Scale up to ~2.5 to fit nicely.
+            const baseScale = 2.5;
+            const scale = baseScale * (1.0 + (vizLevel * 0.01));
             group.scale.set(scale, scale, scale);
 
             // Tier 1: 1-20, Tier 2: 21+
