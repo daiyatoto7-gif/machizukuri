@@ -2870,6 +2870,58 @@
 
             // --- End Helpers ---
 
+            // Specialized Han Helpers
+
+            // Rammed Earth Wall (Layered texture effect using stacked boxes)
+            const createRammedEarthWall = (w, h, d, x, y, z) => {
+                const g = new THREE.Group();
+                g.position.set(x, y, z);
+                const layers = 3;
+                const layerH = h / layers;
+                for (let i = 0; i < layers; i++) {
+                    // Alternating slightly different colored earth
+                    const mat = i % 2 === 0 ? MATERIALS.dirt : MATERIALS.dirtDark;
+                    // Actually MATERIALS.dirt is brown, dirtDark is... darker. 
+                    // Let's just use dirt for now, maybe scale slightly to show seam
+                    g.add(createBox(w, layerH, d, mat, 0, (i - 1) * layerH, 0));
+                }
+                return g;
+            };
+
+            // Shadoof (Well Sweep) - Animated
+            const createShadoof = (x, z) => {
+                const g = new THREE.Group();
+                g.position.set(x, 0, z);
+
+                // Pivot Post
+                g.add(createCyl(0.04, 0.04, 0.5, MATERIALS.woodDark, 0, 0.25, 0));
+
+                // Beam (The sweep)
+                const beam = new THREE.Group();
+                beam.position.set(0, 0.5, 0);
+                beam.add(createCyl(0.03, 0.02, 1.2, MATERIALS.wood, 0, 0, 0, 0, 0, Math.PI / 2)); // Horizontal-ish
+
+                // Counterweight (Stone) at one end
+                beam.add(createBox(0.15, 0.15, 0.15, MATERIALS.stone, -0.6, 0, 0));
+
+                // Bucket Rope at other end
+                beam.add(createCyl(0.01, 0.01, 0.4, MATERIALS.woodDark, 0.6, -0.2, 0));
+                beam.add(createCyl(0.1, 0.08, 0.1, MATERIALS.wood, 0.6, -0.45, 0)); // Bucket
+
+                // Animation: Rocking
+                beam.userData = { anim: 'sawMove', speed: 0.5 }; // Re-using sawMove (z-axis move) logic? 
+                // Wait, sawMove modifies z position. We want rotation.
+                // We don't have a generic "rocking" anim. 'sway' rotates Z. 
+                // Let's use 'sway' but we need to rotate around Z axis?
+                // Beam is aligned along X (cylinder rotation Z 90deg -> aligned X).
+                // So rotating around Z (sway) will tilt it up/down. Correct.
+                beam.userData = { anim: 'sway', speed: 1.0, offset: 0, range: 0.2 };
+
+                g.add(beam);
+                return g;
+            };
+
+
             switch (type) {
                 case 'wild': // 未開拓地
                     // 草
@@ -2974,84 +3026,209 @@
                     group.add(createBox(0.3, 0.05, 0.2, MATERIALS.stone, 0, 0.025, 0.4));
                     break;
 
-                case 'farm': // 畑 -> 農地 (Farmland)
-                    // Ground - Soil Texture (Rows)
-                    const soilW = 0.9;
-                    const soilD = 0.9;
-                    // Base soil
-                    group.add(createBox(soilW, 0.02, soilD, MATERIALS.dirt, 0, 0.01, 0));
+                case 'farm': // 畑 (Farm) - Historical Han Style
+                    // TIER 1: Daitian Fa (Ridge & Furrow) - Dry Farming (Millet)
+                    if (vizLevel <= 10) {
+                        // Ground: Daitian pattern (Deep alternating Furrows and Ridges)
+                        group.add(createBox(0.95, 0.05, 0.95, MATERIALS.dirt, 0, 0.025, 0));
 
-                    // Add distinctive Furrows (3 Rows)
-                    for (let i = -1; i <= 1; i++) {
-                        group.add(createCyl(0.05, 0.08, soilW, MATERIALS.dirt, i * 0.25, 0.02, 0, Math.PI / 2));
-                    }
-
-                    if (tier >= 2) {
-                        // Water channel (High detail)
-                        const channelW = 0.25;
-                        group.add(createBox(1.0, 0.05, channelW, MATERIALS.water, 0, 0.03, 0));
-                        // Stone edging
-                        group.add(createBox(1.0, 0.06, 0.05, MATERIALS.stone, 0, 0.04, channelW / 2 + 0.02));
-                        group.add(createBox(1.0, 0.06, 0.05, MATERIALS.stone, 0, 0.04, -channelW / 2 - 0.02));
-                    }
-
-                    // Fence around the farm (Partial)
-                    group.add(createFence(-0.45, -0.45, -0.45, 0.45));
-                    group.add(createFence(-0.45, 0.45, 0.45, 0.45));
-                    if (tier === 1) group.add(createFence(0.45, 0.45, 0.45, -0.45)); // Open front for tier 2 channel
-
-                    // Crops (Detailed)
-                    const rows = 3;
-                    const cols = tier >= 2 ? 2 : 3;
-
-                    for (let i = 0; i < rows; i++) {
-                        for (let j = 0; j < cols; j++) {
-                            // Position relative to furrows
-                            let xPos = (i - 1) * 0.25; // Match furrow X
-                            let zPos = (j - 1) * 0.25;
-                            if (tier >= 2) zPos = (j === 0 ? -0.3 : 0.3); // Avoid channel
-
-                            const cropGroup = new THREE.Group();
-                            cropGroup.position.set(xPos, 0.05, zPos);
-                            const s = 0.8 + Math.random() * 0.4;
-                            cropGroup.scale.set(s, s, s);
-                            cropGroup.rotation.y = Math.random() * Math.PI;
-
-                            if (tier === 1) {
-                                // Turnip/Vegetable (Leafy)
-                                cropGroup.add(createCone(0.08, 0.15, MATERIALS.leaf, 0, 0.05, 0));
-                                cropGroup.add(createCone(0.06, 0.12, MATERIALS.leaf, 0.02, 0.04, 0, 0.2));
-                                cropGroup.add(createCone(0.06, 0.12, MATERIALS.leaf, -0.02, 0.04, 0, -0.2));
-                                // The veg itself peeking out
-                                cropGroup.add(createCyl(0.03, 0.01, 0.05, MATERIALS.white, 0, -0.01, 0));
-                            } else {
-                                // Wheat/Rice Stalks
-                                for (let k = 0; k < 3; k++) {
-                                    const stalk = createCyl(0.01, 0.01, 0.3, MATERIALS.wood, (Math.random() - 0.5) * 0.05, 0.15, (Math.random() - 0.5) * 0.05);
-                                    cropGroup.add(stalk);
-                                    const grain = createBox(0.03, 0.08, 0.03, MATERIALS.gold, stalk.position.x, 0.28, stalk.position.z);
-                                    cropGroup.add(grain);
-                                }
-                            }
-                            cropGroup.userData = { anim: 'sway', speed: 2.0 + Math.random(), offset: Math.random() };
-                            group.add(cropGroup);
+                        // Create 3 High Ridges
+                        for (let i = -1; i <= 1; i++) {
+                            // Ridge
+                            group.add(createBox(0.2, 0.1, 0.9, MATERIALS.dirtDark, i * 0.3, 0.05, 0));
                         }
-                    }
 
-                    // Props: Scarecrow, Fence, Tools (ALWAYS present at Level 1 for identity)
-                    if (vizLevel >= 1) {
-                        // Scarecrow
-                        const sc = new THREE.Group();
-                        sc.position.set(0.4, 0, 0.4);
-                        sc.add(createCyl(0.03, 0.03, 0.6, MATERIALS.wood, 0, 0.3, 0));
-                        sc.add(createBox(0.3, 0.03, 0.03, MATERIALS.wood, 0, 0.4, 0));
-                        sc.add(createBox(0.1, 0.1, 0.1, MATERIALS.white, 0, 0.5, 0)); // Head
-                        sc.rotation.y = 0.5;
-                        group.add(sc);
-                    }
-                    if (tier >= 2) {
-                        // Water bucket next to channel
-                        group.add(createCyl(0.1, 0.08, 0.12, MATERIALS.wood, -0.4, 0.15, -0.1));
+                        // Crops: Foxtail Millet (Setaria italica) - Drooping yellow spikes
+                        // Planted in the furrows (between ridges)
+                        const createMillet = (x, z) => {
+                            const g = new THREE.Group();
+                            g.position.set(x, 0.05, z); // In furrow
+                            const scale = 0.8 + Math.random() * 0.4;
+                            g.scale.set(scale, scale, scale);
+                            g.rotation.y = Math.random() * Math.PI;
+
+                            // Stalk
+                            g.add(createCyl(0.015, 0.015, 0.5, MATERIALS.leaf, 0, 0.25, 0));
+                            // Leaves (Long, grass-like)
+                            g.add(createCyl(0.2, 0.01, 0.01, MATERIALS.leaf, 0.1, 0.1, 0, 0, 0, -0.5));
+                            g.add(createCyl(0.2, 0.01, 0.01, MATERIALS.leaf, -0.1, 0.15, 0, 0, 0, 0.5));
+
+                            // Head (Thick, drooping spike)
+                            const head = new THREE.Group();
+                            head.position.set(0, 0.48, 0);
+                            head.rotation.z = 2.0; // Heavy droop
+                            const spike = createCyl(0.03, 0.04, 0.15, MATERIALS.gold, 0, 0.07, 0);
+                            head.add(spike);
+                            g.add(head);
+
+                            g.userData = { anim: 'sway', speed: 2.0 + Math.random(), offset: Math.random() };
+                            return g;
+                        };
+
+                        // Plant in furrows (x = -0.15, +0.15)
+                        for (let z = -0.35; z <= 0.35; z += 0.15) {
+                            group.add(createMillet(-0.15, z));
+                            group.add(createMillet(0.15, z));
+                        }
+
+                        // Structure: Rammed Earth Hut (Mud-Wattle)
+                        // Simple texture, thatched roof
+                        const hut = new THREE.Group();
+                        hut.position.set(-0.3, 0.05, 0.3);
+                        // Walls
+                        hut.add(createRammedEarthWall(0.3, 0.25, 0.3, 0, 0.125, 0));
+                        // Entrance
+                        hut.add(createBox(0.1, 0.15, 0.05, MATERIALS.woodDark, 0, 0.075, 0.13));
+                        // Roof (Conical Thatch)
+                        hut.add(createCone(0.35, 0.2, MATERIALS.roofStraw, 0, 0.35, 0));
+                        group.add(hut);
+
+                        // Props: Si/Lei (Farm Tools)
+                        const tool = new THREE.Group();
+                        tool.position.set(-0.1, 0.05, 0.3);
+                        tool.rotation.z = -0.3;
+                        tool.add(createCyl(0.02, 0.02, 0.4, MATERIALS.wood, 0, 0.2, 0)); // Handle
+                        tool.add(createBox(0.08, 0.08, 0.01, MATERIALS.metal, 0, 0.04, 0)); // Spade head
+                        group.add(tool);
+
+                    } else if (vizLevel <= 20) {
+                        // TIER 2: Well Irrigation System (Wheat/Soy)
+                        // Ground: Flat with irrigation channels
+                        group.add(createBox(0.95, 0.05, 0.95, MATERIALS.dirt, 0, 0.025, 0));
+                        // Small channels
+                        group.add(createBox(0.95, 0.02, 0.2, MATERIALS.water, 0, 0.026, 0.15)); // Channel near well
+
+                        // Well (Lathe-turned pottery style)
+                        const well = new THREE.Group();
+                        well.position.set(0.3, 0.05, 0.3);
+                        well.add(createCyl(0.2, 0.2, 0.15, MATERIALS.stone, 0, 0.075, 0)); // Well head
+                        well.add(createCyl(0.15, 0.15, 0.1, MATERIALS.water, 0, 0.06, 0)); // Water
+                        group.add(well);
+
+                        // Machinery: Shadoof (Well Sweep)
+                        // Positioned to dip into the well
+                        const shadoof = createShadoof(0.3, 0.3);
+                        shadoof.rotation.y = Math.PI / 4; // Angle towards well
+                        group.add(shadoof);
+
+                        // Structure: Stilt Granary (Liang Cang)
+                        const granary = new THREE.Group();
+                        granary.position.set(-0.25, 0.05, -0.25);
+                        // Stilts
+                        const stiltH = 0.15;
+                        granary.add(createCyl(0.03, 0.03, stiltH, MATERIALS.wood, -0.15, stiltH / 2, -0.15));
+                        granary.add(createCyl(0.03, 0.03, stiltH, MATERIALS.wood, 0.15, stiltH / 2, -0.15));
+                        granary.add(createCyl(0.03, 0.03, stiltH, MATERIALS.wood, -0.15, stiltH / 2, 0.15));
+                        granary.add(createCyl(0.03, 0.03, stiltH, MATERIALS.wood, 0.15, stiltH / 2, 0.15));
+                        // Floor/Rat guard
+                        granary.add(createBox(0.35, 0.02, 0.35, MATERIALS.woodDark, 0, stiltH, 0));
+                        // Body (Plank walls)
+                        granary.add(createBox(0.32, 0.25, 0.32, MATERIALS.wood, 0, stiltH + 0.125, 0));
+                        // Roof (Hipped Tile)
+                        granary.add(createChineseRoof(0.45, 0.45, 0.2, MATERIALS.roofTileBlack, 0, stiltH + 0.3, 0));
+                        group.add(granary);
+
+                        // Crops: Winter Wheat (Straight, organized)
+                        const createWheat = (x, z) => {
+                            const g = new THREE.Group();
+                            g.position.set(x, 0.05, z);
+                            g.scale.set(0.8, 0.8, 0.8);
+                            // Multiple straight stalks
+                            for (let k = 0; k < 3; k++) {
+                                g.add(createCyl(0.01, 0.01, 0.4, MATERIALS.leaf, (k - 1) * 0.02, 0.2, 0));
+                                g.add(createBox(0.02, 0.1, 0.02, MATERIALS.gold, (k - 1) * 0.02, 0.4, 0)); // Ear
+                            }
+                            g.userData = { anim: 'sway', speed: 1.5, offset: Math.random() };
+                            return g;
+                        };
+
+                        // Planting rows
+                        for (let x = -0.3; x <= 0.2; x += 0.15) {
+                            for (let z = -0.3; z <= 0.2; z += 0.15) {
+                                if (x > 0.1 && z > 0.1) continue; // Avoid well
+                                if (x < -0.1 && z < -0.1) continue; // Avoid granary
+                                group.add(createWheat(x, z));
+                            }
+                        }
+
+                    } else {
+                        // TIER 3: Manor Rice Paddy (Rice + Chain Pump + Watchtower)
+
+                        // Ground: Flooded Paddy
+                        group.add(createBox(0.95, 0.05, 0.95, MATERIALS.dirtDark, 0, 0.025, 0)); // Mud base
+                        group.add(createBox(0.9, 0.02, 0.9, MATERIALS.water, 0, 0.06, 0)); // Water layer
+
+                        // Structure: Han Watchtower (Wang Lou) - 2 Stories
+                        const tower = new THREE.Group();
+                        tower.position.set(-0.25, 0.05, -0.25);
+
+                        // 1st Floor (Earthen base/walls)
+                        tower.add(createRammedEarthWall(0.25, 0.3, 0.25, 0, 0.15, 0));
+                        // 1st Floor Roof (Pent roof)
+                        const roof1 = createChineseRoof(0.35, 0.35, 0.1, MATERIALS.roofTileBlack, 0, 0.3, 0);
+                        roof1.scale.y = 0.5;
+                        tower.add(roof1);
+
+                        // 2nd Floor (Wood, slightly smaller)
+                        const f2w = 0.2;
+                        tower.add(createBox(f2w, 0.2, f2w, MATERIALS.wood, 0, 0.45, 0));
+                        // Balcony/Railing
+                        tower.add(createBox(0.28, 0.05, 0.28, MATERIALS.woodDark, 0, 0.35, 0));
+
+                        // Main Roof (Hipped-Gable)
+                        tower.add(createChineseRoof(0.4, 0.4, 0.25, MATERIALS.roofTileBlack, 0, 0.6, 0, 2)); // Tier 2 roof (ridge)
+
+                        group.add(tower);
+
+                        // Machinery: Dragon Backbone Machine (Chain Pump)
+                        const pump = new THREE.Group();
+                        pump.position.set(0.3, 0.1, 0.3);
+                        // Trough (The long part)
+                        const trough = createBox(0.15, 0.05, 0.6, MATERIALS.wood, 0, 0, 0);
+                        trough.rotation.x = -0.5; // Sloped down into water
+                        pump.add(trough);
+
+                        // Chain Blades (Animated)
+                        // Simple workaround: Rotate tiny blocks along the trough length? 
+                        // Just use a wheel at the top for now as "motion"
+
+                        // Pedal Mechanism / Wheel at top
+                        const mech = new THREE.Group();
+                        mech.position.set(0, 0.15, 0.25); // Top of trough
+                        // Axle
+                        mech.add(createCyl(0.2, 0.02, 0.02, MATERIALS.woodDark, 0, 0, 0, 0, 0, Math.PI / 2));
+                        // Pedals/Spokes
+                        const pedals = new THREE.Group();
+                        pedals.add(createBox(0.02, 0.2, 0.02, MATERIALS.wood, 0, 0, 0));
+                        pedals.add(createBox(0.02, 0.2, 0.02, MATERIALS.wood, 0, 0, 0, Math.PI / 2));
+                        pedals.userData = { anim: 'rotateX', speed: 2.0 };
+                        mech.add(pedals);
+                        pump.add(mech);
+
+                        group.add(pump);
+
+                        // Crops: Rice (Paddy)
+                        // Clusters in water
+                        const createRice = (x, z) => {
+                            const g = new THREE.Group();
+                            g.position.set(x, 0.06, z); // Above water
+                            // Green blades
+                            for (let i = 0; i < 4; i++) {
+                                const blade = createBox(0.02, 0.2 + Math.random() * 0.1, 0.01, MATERIALS.leaf, (Math.random() - 0.5) * 0.1, 0.1, (Math.random() - 0.5) * 0.1);
+                                blade.rotation.y = Math.random();
+                                g.add(blade);
+                            }
+                            g.userData = { anim: 'sway', speed: 1.0, offset: Math.random() };
+                            return g;
+                        };
+
+                        for (let x = -0.3; x <= 0.2; x += 0.2) {
+                            for (let z = -0.3; z <= 0.2; z += 0.2) {
+                                if (x > 0 && z > 0) continue; // Pump area
+                                if (x < -0.1 && z < -0.1) continue; // Tower area
+                                group.add(createRice(x, z));
+                            }
+                        }
                     }
                     break;
 
@@ -5363,11 +5540,6 @@
                             target.finishTime -= reduceSec * 1000;
                             if (target.finishTime < now) target.finishTime = now; // Finish immediately on next tick
                             affectedCount++;
-
-                            // Visual effect on target?
-                            // Maybe add floating text to target
-                            // We can't easily access overlays of others here without iteration, 
-                            // but let's try to add a global toast or simple effect
                         }
                     }
                 });
@@ -5392,6 +5564,10 @@
                 }
                 return false;
             }
+
+            let total = 0;
+            let txt = "";
+
             for (let r in t.stored) {
                 const val = Math.floor(t.stored[r]);
                 if (val > 0) {
