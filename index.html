@@ -1086,6 +1086,13 @@
                 cost: { money: 2000000, wood: 500000, iron: 100000 },
                 baseTime: 86400000 // 24 hours
             },
+            masonry_hub: {
+                name: "石匠工房", icon: "🧱",
+                desc: "【工業】伝説の石工たちが集う工房。高度な石材管理技術により、全採石場の生産効率を高めます(Lv1: 1.3倍)。",
+                prod: {},
+                cost: { money: 8000000, food: 3000000, wood: 3000000, stone: 5000000, iron: 1500000 },
+                baseTime: 129600000 // 36 hours
+            },
             directorate: {
                 name: "造営司", icon: "📜",
                 desc: "【国家事業】工部直轄の建設指揮所。指示書(時間短縮力)を溜め、タップで工事中の全施設の時間を短縮します(Lv1: 8hごとに3h12m短縮)。",
@@ -1105,8 +1112,8 @@
         }
 
         function checkBuildingLimit(type) {
-            // 特別制限: 井戸・宿屋・時計塔・銀行・穀倉・製材所は2つまで
-            if (['well', 'inn', 'clocktower', 'bank', 'granary', 'lumber_hub', 'stone_plant'].includes(type)) {
+            // 特別制限: 井戸・宿屋・時計塔・銀行・穀倉・製材所・石工所は2つまで
+            if (['well', 'inn', 'clocktower', 'bank', 'granary', 'lumber_hub', 'stone_plant', 'masonry_hub'].includes(type)) {
                 if (getBuildingCount(type) >= 2) return false;
             }
 
@@ -2143,6 +2150,122 @@
                 }
                 const tex = new THREE.CanvasTexture(cvs);
                 tex.magFilter = THREE.NearestFilter;
+                return tex;
+            },
+            // --- High Fidelity Textures ---
+            generateStoneBrick: function (baseColor = '#7a7a7a') {
+                const cvs = this.createCanvas();
+                const ctx = cvs.getContext('2d');
+
+                // Base
+                ctx.fillStyle = baseColor;
+                ctx.fillRect(0, 0, 64, 64);
+
+                // Noise / Grit
+                for (let i = 0; i < 400; i++) {
+                    ctx.fillStyle = Math.random() < 0.5 ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.1)';
+                    ctx.fillRect(Math.random() * 64, Math.random() * 64, 1, 1);
+                }
+
+                // Bricks pattern
+                ctx.strokeStyle = 'rgba(40,40,40,0.4)';
+                ctx.lineWidth = 2;
+                // Rows
+                for (let y = 0; y <= 64; y += 16) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(64, y);
+                    ctx.stroke();
+                }
+                // Cols (Staggered)
+                for (let y = 0; y < 64; y += 16) {
+                    const offset = (y / 16) % 2 === 0 ? 0 : 16;
+                    for (let x = offset; x <= 64; x += 32) {
+                        ctx.beginPath();
+                        ctx.moveTo(x, y);
+                        ctx.lineTo(x, y + 16);
+                        ctx.stroke();
+                    }
+                }
+
+                // Highlight/Shadow edges for depth
+                ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+                ctx.lineWidth = 1;
+                for (let y = 0; y < 64; y += 16) {
+                    const offset = (y / 16) % 2 === 0 ? 0 : 16;
+                    for (let x = offset; x <= 64; x += 32) {
+                        ctx.beginPath(); ctx.moveTo(x + 2, y + 2); ctx.lineTo(x + 30, y + 2); ctx.stroke();
+                        ctx.beginPath(); ctx.moveTo(x + 2, y + 2); ctx.lineTo(x + 2, y + 14); ctx.stroke();
+                    }
+                }
+
+                const tex = new THREE.CanvasTexture(cvs);
+                tex.wrapS = THREE.RepeatWrapping;
+                tex.wrapT = THREE.RepeatWrapping;
+                tex.magFilter = THREE.NearestFilter;
+                return tex;
+            },
+            generateAgedWood: function (baseColor = '#5d4037') {
+                const cvs = this.createCanvas();
+                const ctx = cvs.getContext('2d');
+
+                ctx.fillStyle = baseColor;
+                ctx.fillRect(0, 0, 64, 64);
+
+                // Grain
+                ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+                ctx.lineWidth = 1;
+                for (let i = 0; i < 20; i++) {
+                    const x = Math.random() * 64;
+                    ctx.beginPath();
+                    ctx.moveTo(x, 0);
+                    ctx.bezierCurveTo(x + Math.random() * 10 - 5, 20, x + Math.random() * 10 - 5, 40, x, 64);
+                    ctx.stroke();
+                }
+
+                // Knots
+                ctx.fillStyle = 'rgba(40,30,20,0.3)';
+                for (let i = 0; i < 3; i++) {
+                    const x = Math.random() * 64;
+                    const y = Math.random() * 64;
+                    ctx.beginPath();
+                    ctx.ellipse(x, y, 2, 4, Math.random(), 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                const tex = new THREE.CanvasTexture(cvs);
+                tex.wrapS = THREE.RepeatWrapping;
+                tex.wrapT = THREE.RepeatWrapping;
+                tex.magFilter = THREE.NearestFilter;
+                return tex;
+            },
+            generateRoofTile: function (color = '#424242') {
+                const cvs = this.createCanvas();
+                const ctx = cvs.getContext('2d');
+
+                ctx.fillStyle = color;
+                ctx.fillRect(0, 0, 64, 64);
+
+                // Scales pattern
+                ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+                ctx.lineWidth = 2;
+
+                const r = 8;
+                for (let y = -r; y < 64 + r; y += r) {
+                    const offset = (y / r) % 2 === 0 ? 0 : r;
+                    for (let x = -r; x < 64 + r; x += r * 2) {
+                        ctx.beginPath();
+                        ctx.arc(x + offset, y, r, 0, Math.PI, false);
+                        ctx.stroke();
+                        // Shade
+                        ctx.fillStyle = 'rgba(0,0,0,0.1)';
+                        ctx.fill();
+                    }
+                }
+
+                const tex = new THREE.CanvasTexture(cvs);
+                tex.wrapS = THREE.RepeatWrapping;
+                tex.wrapT = THREE.RepeatWrapping;
                 return tex;
             }
         };
@@ -4065,6 +4188,91 @@
                         group.add(crane);
                     }
                     break;
+                case 'masonry_hub': // 石匠工房 (Master Mason's Workshop)
+                    // Custom Materials (High Fidelity) - Generated on fly (or cached if optimized)
+                    const matStoneBrick = new THREE.MeshStandardMaterial({ map: TextureGenerator.generateStoneBrick('#888888') });
+                    const matAgedWood = new THREE.MeshStandardMaterial({ map: TextureGenerator.generateAgedWood('#5d4037') });
+                    const matRoofTile = new THREE.MeshStandardMaterial({ map: TextureGenerator.generateRoofTile('#333333') });
+
+                    // Ground: Paved Stone
+                    group.add(createBox(1.0, 0.05, 1.0, matStoneBrick, 0, 0.025, 0));
+
+                    if (tier === 1) { // Tier 1: Open-air Stone Yard
+                        // 1. Large Central Crane (Wooden treadwheel crane style - simplified)
+                        const crane = new THREE.Group();
+                        crane.position.set(-0.2, 0, -0.2);
+                        // Vertical Post
+                        crane.add(createCyl(0.06, 0.08, 1.2, matAgedWood, 0, 0.6, 0));
+                        // Horizontal Boom
+                        crane.add(createCyl(0.04, 0.05, 0.8, matAgedWood, 0.3, 1.0, 0, 0, 0, -0.2));
+                        // Rope & Block
+                        crane.add(createCyl(0.01, 0.01, 0.6, MATERIALS.white, 0.6, 0.6, 0));
+                        const suspendedStone = createBox(0.2, 0.15, 0.2, matStoneBrick, 0.6, 0.4, 0);
+                        suspendedStone.rotation.y = 0.5;
+                        crane.add(suspendedStone);
+                        group.add(crane);
+
+                        // 2. Work Stations
+                        // Chisel Bench
+                        group.add(createBox(0.4, 0.2, 0.2, matAgedWood, 0.3, 0.1, 0.3));
+                        group.add(createBox(0.05, 0.02, 0.15, MATERIALS.metal, 0.3, 0.21, 0.3)); // Tools
+
+                        // Raw Stone Blocks waiting
+                        group.add(createBox(0.25, 0.25, 0.25, matStoneBrick, -0.3, 0.125, 0.3, 0.2));
+                        group.add(createBox(0.2, 0.2, 0.2, matStoneBrick, -0.35, 0.1, 0.1, -0.1));
+
+                        // 3. Workers (Static props for now)
+                        // Maybe a small shelter
+                        const shelter = new THREE.Group();
+                        shelter.position.set(0.3, 0, -0.3);
+                        shelter.add(createCyl(0.03, 0.03, 0.6, matAgedWood, -0.2, 0.3, -0.2));
+                        shelter.add(createCyl(0.03, 0.03, 0.6, matAgedWood, 0.2, 0.3, -0.2));
+                        shelter.add(createCyl(0.03, 0.03, 0.6, matAgedWood, -0.2, 0.3, 0.2));
+                        shelter.add(createCyl(0.03, 0.03, 0.6, matAgedWood, 0.2, 0.3, 0.2));
+                        shelter.add(createBox(0.5, 0.02, 0.5, matRoofTile, 0, 0.6, 0));
+                        group.add(shelter);
+
+                    } else { // Tier 2: Guild Compound (Walled)
+                        // Stone Walls
+                        const wH = 0.4;
+                        const wThick = 0.1;
+                        // North
+                        group.add(createBox(1.0, wH, wThick, matStoneBrick, 0, wH / 2, -0.45));
+                        // East
+                        group.add(createBox(wThick, wH, 1.0, matStoneBrick, 0.45, wH / 2, 0));
+                        // West
+                        group.add(createBox(wThick, wH, 1.0, matStoneBrick, -0.45, wH / 2, 0));
+                        // South (Gate)
+                        group.add(createBox(0.3, wH, wThick, matStoneBrick, -0.35, wH / 2, 0.45));
+                        group.add(createBox(0.3, wH, wThick, matStoneBrick, 0.35, wH / 2, 0.45));
+
+                        // Gatehouse Roof
+                        const gate = new THREE.Group();
+                        gate.position.set(0, wH, 0.45);
+                        gate.add(createChineseRoof(0.6, 0.4, 0.3, matRoofTile, 0, 0.2, 0));
+                        group.add(gate);
+
+                        // Interior: Master Workshop
+                        const mainShop = new THREE.Group();
+                        mainShop.position.set(0, 0, -0.1);
+                        // Pillars
+                        mainShop.add(createPillar(0.6, -0.3, 0.3, 0));
+                        mainShop.add(createPillar(0.6, 0.3, 0.3, 0));
+                        // Roof
+                        mainShop.add(createChineseRoof(0.8, 0.6, 0.3, matRoofTile, 0, 0.6, 0));
+
+                        // Internal details: Polished Statues/Pillars
+                        mainShop.add(createCyl(0.1, 0.1, 0.3, MATERIALS.stoneWhite, 0, 0.15, 0)); // Masterpiece
+
+                        group.add(mainShop);
+
+                        // Heavy Crane
+                        const heavyCrane = new THREE.Group();
+                        heavyCrane.position.set(0.3, 0, 0.2);
+                        heavyCrane.add(createCyl(0.08, 0.1, 0.8, matAgedWood, 0, 0.4, 0));
+                        heavyCrane.add(createBox(0.4, 0.05, 0.05, matAgedWood, -0.1, 0.7, 0, 0, 0, 0.3));
+                        group.add(heavyCrane);
+                    }
 
                 case 'directorate': // 造営司 (Construction Directorate)
                     // Ground
@@ -4574,7 +4782,7 @@
 
         // --- Production Helper Functions ---
         function getGlobalBuffs() {
-            let buffs = { speed: 1.0, bank: 1.0, granary: 1.0, lumber_hub: 1.0 };
+            let buffs = { speed: 1.0, bank: 1.0, granary: 1.0, lumber_hub: 1.0, masonry_hub: 1.0 };
 
             // Clocktower (Speed)
             gameState.tiles.forEach(t => {
@@ -4583,7 +4791,7 @@
                 }
             });
 
-            // Boosters (Bank, Granary, Lumber Hub)
+            // Boosters (Bank, Granary, Lumber Hub, Masonry Hub)
             const calcBoost = (type) => {
                 let add = 0;
                 gameState.tiles.forEach(t => {
@@ -4597,12 +4805,13 @@
             buffs.bank = calcBoost('bank');
             buffs.granary = calcBoost('granary');
             buffs.lumber_hub = calcBoost('lumber_hub');
+            buffs.masonry_hub = calcBoost('masonry_hub');
             return buffs;
         }
 
         // Weighted Buffs for Offline: Accounts for buildings finishing mid-offline
         function getWeightedGlobalBuffs(totalSeconds, lastSaveTime, completionTimes) {
-            let buffs = { speed: 1.0, bank: 1.0, granary: 1.0, lumber_hub: 1.0 };
+            let buffs = { speed: 1.0, bank: 1.0, granary: 1.0, lumber_hub: 1.0, masonry_hub: 1.0 };
 
             // Helper to integrate bonus over time
             const integrateBonus = (tile, idx, baseBonusPerLevel, levelScale) => {
@@ -4619,21 +4828,8 @@
                     if (duration < 0) duration = 0;
                 } else if (tile.finishTime) {
                     // Still building (Future finish)
-                    // Currently constructing -> Level 0 contribution (or Base level if upgrading)
-                    // For Boosters: "level > 0".
-                    // If upgrading Lv1->2, t.level is 1. Effective is 1. 
-                    // Duration is Full.
-                    // If New Build, t.level is 0. Effective is 0.
-                    // So we just use Current Level * Full Duration.
                     duration = totalSeconds;
                 }
-
-                // If finishedAt existed: t.level is high level. We apply it for 'duration'.
-                // The pre-finish time (low level) contribution is ignored here?
-                // Example: Upgrading Lv1->2. 
-                // Pre: Lv1. Post: Lv2.
-                // This function currently only adds ONE term: (duration * CurrentLevelEffect).
-                // We should add the Pre-term too.
 
                 let bonus = 0;
                 // Post-term (Current Level) - applies for 'duration'
@@ -4642,7 +4838,6 @@
                 }
 
                 // Pre-term (Previous Level) - applies for (total - duration)
-                // Only if it finished (was upgrading)
                 if (finishedAt) {
                     const preDuration = totalSeconds - duration;
                     const preLevel = Math.max(0, tile.level - 1);
@@ -4656,7 +4851,7 @@
 
             let totalSpeedBonusSeconds = 0;
             gameState.tiles.forEach((t, i) => {
-                if (t.type === 'clocktower') { // Count even if level 0 if about to finish? integrate handles level check
+                if (t.type === 'clocktower') {
                     totalSpeedBonusSeconds += integrateBonus(t, i, 0.014, 0.006); // 0.02 base = 0.014 + 0.006*1
                 }
             });
@@ -4675,6 +4870,7 @@
             buffs.bank = calcWeightedBoost('bank');
             buffs.granary = calcWeightedBoost('granary');
             buffs.lumber_hub = calcWeightedBoost('lumber_hub');
+            buffs.masonry_hub = calcWeightedBoost('masonry_hub');
 
             return buffs;
         }
@@ -4896,6 +5092,7 @@
                                     if (r === 'money' && ['house', 'market', 'blacksmith', 'inn'].includes(tile.type)) finalMult *= globalBuffs.bank;
                                     if (r === 'food' && ['farm'].includes(tile.type)) finalMult *= globalBuffs.granary;
                                     if (r === 'wood' && ['lumber', 'forest'].includes(tile.type)) finalMult *= globalBuffs.lumber_hub;
+                                    if (r === 'stone' && ['quarry', 'stone_plant'].includes(tile.type)) finalMult *= globalBuffs.masonry_hub;
 
                                     // Add to storage
                                     const amount = b.prod[r] * tile.level * Math.pow(1.05, tile.level - 1) * finalMult;
@@ -5441,6 +5638,7 @@
                     if (r === 'money' && ['house', 'market', 'blacksmith', 'inn'].includes(t)) capMult *= globalBuffs.bank;
                     if (r === 'food' && ['farm'].includes(t)) capMult *= globalBuffs.granary;
                     if (r === 'wood' && ['lumber', 'forest'].includes(t)) capMult *= globalBuffs.lumber_hub;
+                    if (r === 'stone' && ['quarry', 'stone_plant'].includes(t)) capMult *= globalBuffs.masonry_hub;
 
                     if (r === 'food') capMult *= adjacencyMult;
                     if (r === 'wood') capMult *= adjacencyMult;
@@ -5517,6 +5715,7 @@
             if (type === 'granary') return 24;
             if (type === 'lumber_hub') return 26;
             if (type === 'stone_plant') return 28;
+            if (type === 'masonry_hub') return 33;
             if (type === 'well') return 10;
             if (type === 'inn' || type === 'clocktower') return 15;
             if (type === 'directorate') return 30;
