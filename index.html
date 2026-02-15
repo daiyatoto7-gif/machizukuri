@@ -1112,9 +1112,13 @@
         }
 
         function checkBuildingLimit(type) {
-            // 特別制限: 井戸・宿屋・時計塔・銀行・穀倉・製材所・石工所は2つまで
+            // 特別制限: 井戸・宿屋・時計塔・銀行・穀倉・製材所・石匠工房は2つまで
             if (['well', 'inn', 'clocktower', 'bank', 'granary', 'lumber_hub', 'stone_plant', 'masonry_hub'].includes(type)) {
                 if (getBuildingCount(type) >= 2) return false;
+            }
+            // 造営司は1つまで
+            if (type === 'directorate') {
+                if (getBuildingCount(type) >= 1) return false;
             }
 
             const typeIndex = BUILDING_KEYS.indexOf(type);
@@ -6716,10 +6720,11 @@
 
             const typeIndex = BUILDING_KEYS.indexOf(type);
             const isStandardLimited = (typeIndex >= LIMIT_START_INDEX && typeIndex !== -1);
-            const isSpecialLimited = ['well', 'inn', 'clocktower', 'bank', 'granary', 'lumber_hub', 'stone_plant'].includes(type);
+            const isSpecialLimited = ['well', 'inn', 'clocktower', 'bank', 'granary', 'lumber_hub', 'stone_plant', 'masonry_hub'].includes(type);
 
             let limitStr = '無制限 (土地依存)';
-            if (isSpecialLimited) limitStr = '2つまで';
+            if (type === 'directorate') limitStr = '1つまで';
+            else if (isSpecialLimited) limitStr = '2つまで';
             else if (isStandardLimited) limitStr = '4つまで';
 
             content.innerHTML = `
