@@ -1105,6 +1105,38 @@
         const BUILDING_KEYS = Object.keys(BUILDINGS);
         const LIMIT_START_INDEX = BUILDING_KEYS.indexOf('market');
 
+        // --- Ascension System Constants ---
+        // Based on Normal Lv.30 stats * 0.6
+        const ASCENSION_BASE_STATS = {
+            house: {
+                prod: { money: 150 },
+                cost: { money: 240000000, food: 120000000 },
+                time: 18000000 // ~5h
+            },
+            farm: {
+                prod: { food: 150 },
+                cost: { money: 360000000, wood: 120000000 },
+                time: 18000000 // ~5h
+            },
+            lumber: {
+                prod: { wood: 75 },
+                cost: { money: 600000000, food: 240000000 },
+                time: 27000000 // ~7.5h
+            }
+        };
+
+        // --- Helper: Check if building is ascended ---
+        function isAscended(tile) {
+            return tile && tile.ascended;
+        }
+
+        // --- Helper: Get Name with Suffix ---
+        function getBuildingName(type, ascended) {
+            const b = BUILDINGS[type];
+            if (!b) return '';
+            return ascended ? `${b.name} <span style="color:#e74c3c; font-weight:bold;">&lt;傑&gt;</span>` : b.name;
+        }
+
         function getBuildingCount(type) {
             const onMap = gameState.tiles.filter(t => t.type === type).length;
             const inInventory = gameState.inventory.filter(i => i.type === type).length;
@@ -2903,7 +2935,107 @@
             }
         }
 
-        function createBuildingMesh(type, level) {
+        function createExaltedMesh(type, level) {
+            const group = new THREE.Group();
+            // Exalted Base Scale
+            const scale = 1.6;
+            group.scale.set(scale, scale, scale);
+
+            switch (type) {
+                case 'house': group.add(createExaltedHouse(level)); break;
+                case 'farm': group.add(createExaltedFarm(level)); break;
+                case 'lumber': group.add(createExaltedLumber(level)); break;
+                default: return createBuildingMesh(type, level, false);
+            }
+            return group;
+        }
+
+        function createExaltedHouse(level) {
+            const g = new THREE.Group();
+            // Manor House (Siheyuan / Palace Style)
+            // Base Platform
+            g.add(createBox(1.0, 0.1, 1.0, MATERIALS.stone, 0, 0.05, 0));
+
+            // Main Structure
+            const w = 0.8;
+            g.add(createPillar(0.8, -w / 2, 0.4, -w / 2));
+            g.add(createPillar(0.8, w / 2, 0.4, -w / 2));
+            g.add(createPillar(0.8, -w / 2, 0.4, w / 2));
+            g.add(createPillar(0.8, w / 2, 0.4, w / 2));
+
+            // Walls (Red/White)
+            g.add(createBox(w, 0.6, w - 0.1, MATERIALS.wallWhite, 0, 0.4, 0));
+
+            // Roof (Double Eave, Gold/Black)
+            g.add(createChineseRoof(1.1, 1.1, 0.4, MATERIALS.roofTileBlack, 0, 0.85, 0));
+            g.add(createChineseRoof(0.9, 0.9, 0.5, MATERIALS.gold, 0, 1.25, 0, 2));
+
+            // Lanterns
+            g.add(createLantern(0.5, 0.7, 0.5));
+            g.add(createLantern(-0.5, 0.7, 0.5));
+
+            return g;
+        }
+
+        function createExaltedFarm(level) {
+            const g = new THREE.Group();
+            // Imperial Granary Style
+            g.add(createBox(1.0, 0.05, 1.0, MATERIALS.dirtDark, 0, 0.025, 0));
+
+            // Golden Wheat Field
+            for (let x = -0.4; x <= 0.4; x += 0.2) {
+                for (let z = -0.4; z <= 0.4; z += 0.2) {
+                    if (Math.abs(x) < 0.2 && Math.abs(z) < 0.2) continue; // Center clear
+                    const wheat = new THREE.Group();
+                    wheat.position.set(x, 0, z);
+                    wheat.add(createCyl(0.02, 0.01, 0.4, MATERIALS.gold, 0, 0.2, 0));
+                    wheat.userData = { anim: 'sway', speed: 2.0, offset: Math.random() };
+                    g.add(wheat);
+                }
+            }
+
+            // Central Pavilion
+            const pav = new THREE.Group();
+            pav.position.set(0, 0.1, 0);
+            pav.add(createPillar(0.8, -0.2, 0.4, -0.2));
+            pav.add(createPillar(0.8, 0.2, 0.4, -0.2));
+            pav.add(createPillar(0.8, -0.2, 0.4, 0.2));
+            pav.add(createPillar(0.8, 0.2, 0.4, 0.2));
+            pav.add(createChineseRoof(0.7, 0.7, 0.5, MATERIALS.gold, 0, 0.9, 0, 2));
+            g.add(pav);
+
+            return g;
+        }
+
+        function createExaltedLumber(level) {
+            const g = new THREE.Group();
+            g.add(createBox(1.0, 0.05, 1.0, MATERIALS.woodDark, 0, 0.025, 0));
+
+            // Giant Sawmill
+            // House
+            const house = new THREE.Group();
+            house.position.set(0, 0, -0.2);
+            house.add(createPillar(0.8, -0.4, 0.4, 0));
+            house.add(createPillar(0.8, 0.4, 0.4, 0));
+            house.add(createChineseRoof(1.0, 0.6, 0.5, MATERIALS.roofTileBlack, 0, 0.9, 0));
+            g.add(house);
+
+            // Saw
+            const sawGroup = new THREE.Group();
+            sawGroup.position.set(0, 0.2, 0.3);
+            sawGroup.add(createCyl(0.3, 0.3, 0.1, MATERIALS.metal, 0, 0, 0, 0, 16));
+            sawGroup.rotation.x = Math.PI / 2;
+            sawGroup.userData = { anim: 'spinX', speed: 0.2 };
+            g.add(sawGroup);
+
+            // Logs
+            g.add(createCyl(0.15, 0.15, 1.2, MATERIALS.wood, 0.5, 0.15, 0.2, Math.PI / 2));
+
+            return g;
+        }
+
+        function createBuildingMesh(type, level, isAscended = false) {
+            if (isAscended) return createExaltedMesh(type, level);
             const group = new THREE.Group();
             // ベーススケール調整
             // Cap level at 30 for visuals
@@ -4661,7 +4793,7 @@
 
                             // Lv0(新規)なら建物なし、Lv1以上ならそのレベルの建物を表示
                             if (tile.level > 0) {
-                                const newModel = createBuildingMesh(tile.type, tile.level);
+                                const newModel = createBuildingMesh(tile.type, tile.level, tile.ascended);
                                 tObj.buildingGroup.add(newModel);
                             }
 
@@ -5088,9 +5220,13 @@
                         const efficiency = getTileProductionMultiplier(i, globalBuffs);
 
                         if (efficiency > 0) {
+                            const isAsc = tile.ascended;
+                            const prodBase = (isAsc && ASCENSION_BASE_STATS[tile.type]) ? ASCENSION_BASE_STATS[tile.type].prod : b.prod;
+                            const growth = (isAsc && ASCENSION_BASE_STATS[tile.type]) ? 1.10 : 1.05;
+
                             const caps = getStorageCapacity(tile.type, tile.level, i); // Pass index for adjacency
-                            for (let r in b.prod) {
-                                if (b.prod[r] > 0) {
+                            for (let r in prodBase) {
+                                if (prodBase[r] > 0) {
                                     let finalMult = efficiency;
 
                                     if (r === 'money' && ['house', 'market', 'blacksmith', 'inn'].includes(tile.type)) finalMult *= globalBuffs.bank;
@@ -5099,7 +5235,7 @@
                                     if (r === 'stone' && ['quarry', 'stone_plant'].includes(tile.type)) finalMult *= globalBuffs.masonry_hub;
 
                                     // Add to storage
-                                    const amount = b.prod[r] * tile.level * Math.pow(1.05, tile.level - 1) * finalMult;
+                                    const amount = prodBase[r] * tile.level * Math.pow(growth, tile.level - 1) * finalMult;
 
                                     // Update storage
                                     if (!tile.stored[r]) tile.stored[r] = 0;
@@ -5353,13 +5489,33 @@
         }
 
         // 施設効果のHTML生成（Utility施設対応）
-        function getBuildingEffectHtml(type, level, nextLevel = null) {
+        function getBuildingEffectHtml(type, level, nextLevel = null, isAscended = false) {
             const b = BUILDINGS[type];
             let html = "";
 
             // Helper to generate text for a single level
-            const getEffectText = (lvl) => {
+            // Note: If nextLevel is passed, we check if WE are transitioning to ascended?
+            // Usually nextLevel is for current state -> next state.
+            // If currently Ascended, nextLevel is Ascended L+1.
+            // If Normal Lv.30, nextLevel could be Ascended Lv.1? 
+            // The UI usually calls this for "Next Level" preview in the upgrade panel.
+            // If we are showing the Ascension preview, we might call this with isAscended=true.
+
+            const getEffectText = (lvl, asc) => {
                 if (lvl === 0) return "効果なし";
+
+                if (asc && ASCENSION_BASE_STATS[type]) {
+                    // Ascended Logic
+                    const baseProd = ASCENSION_BASE_STATS[type].prod;
+                    let parts = [];
+                    for (let r in baseProd) {
+                        // Formula: Base * 1.10^(L-1)
+                        const val = baseProd[r] * Math.pow(1.10, lvl - 1);
+                        const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧');
+                        parts.push(`${icon}${val.toFixed(1)}/s`);
+                    }
+                    return parts.length ? parts.join(' ') : '効果なし';
+                }
 
                 if (type === 'well') {
                     // 水生産 + 農場バフ
@@ -5412,14 +5568,11 @@
                 }
             };
 
-            const currText = getEffectText(level);
+            const currText = getEffectText(level, isAscended);
 
             if (nextLevel !== null) {
-                const nextText = getEffectText(nextLevel);
+                const nextText = getEffectText(nextLevel, isAscended);
                 // 変更部分を強調
-                // 単純に文字列全体を矢印でつなぐ (井戸や時計塔のように数値部分だけが変わる場合も含む)
-
-                // ただし、Innや通常施設のようにHTMLタグを含む場合の比較は少し冗長になるが、シンプルに
                 // "Current -> Next" とする
                 return `<div>${currText} <span style="color:#2ecc71; font-weight:bold;">➞ ${nextText}</span></div>`;
             } else {
@@ -5564,7 +5717,29 @@
             return base;
         }
 
-        function getBuildTime(t, l) {
+        function getBuildTime(t, l, isAscended = false) {
+            // Ascended Logic
+            if (isAscended) {
+                const base = ASCENSION_BASE_STATS[t] ? ASCENSION_BASE_STATS[t].time : (BUILDINGS[t].baseTime * 1500);
+                // Formula: Base * 1.08^(L-1)
+                // L is target level.
+                // If L=1 (Building Lv.1), time = Base.
+                const tl = l + 1;
+                // Wait, if l=0 (building new), tl=1.
+                // If l=1 (upgrading to 2), tl=2.
+                // Formula is 1.08^(tl-1).
+
+                let time = base * Math.pow(1.08, tl - 1);
+
+                // Cap Checks (Safety)
+                // If time > 24h/48h, the formula 1.08 is already < 1.1/1.3 so it is safe.
+                // 1.08 is 8% growth. 
+                // Constraints: >24h: <30% (ok), >48h: <10% (ok).
+                // So simple formula is sufficient.
+
+                return Math.floor(time);
+            }
+
             const tl = l + 1; // Target Level
             const base = BUILDINGS[t].baseTime;
 
@@ -5608,7 +5783,29 @@
             return Math.floor(time);
         }
 
-        function getCost(t, l) {
+        function getCost(t, l, isAscended = false) {
+            if (isAscended) {
+                const baseCost = ASCENSION_BASE_STATS[t] ? ASCENSION_BASE_STATS[t].cost : {};
+                // Formula: Base * 1.08^(L-1)
+                // Cost is usually for the *next* level (current L -> L+1).
+                // In normal logic, it uses L (current level). e.g. Lv.1 -> Lv.2 uses l=1.
+                // Our formula 1.08^(L-1) assumes L=1 is Base.
+                // So if we are at Lv.1 (l=1), we want the cost to reach Lv.2.
+                // Let's assume cost scales with the level we are *at* or *going to*.
+                // Standard logic: Math.pow(1.6, l). If l=1, 1.6^1. 
+                // Ascended Spec: Lv.1 Cost = Base. 
+                // So at l=1 (Ascended Lv.1), getting to Lv.2 should cost Base.
+                // If input l=1, we want result Base.
+                // So multiplier should be 1.08^(l-1).
+
+                const mult = Math.pow(1.08, l - 1);
+                const r = {};
+                for (let k in baseCost) {
+                    r[k] = Math.floor(baseCost[k] * mult);
+                }
+                return r;
+            }
+
             let m = Math.pow(1.6, l) * 1.5;
             if (l >= 10) m *= 10;
             const r = {};
@@ -5616,12 +5813,17 @@
             return r;
         }
 
-        function getStorageCapacity(t, l, tileIndex = -1, passedBuffs = null) {
+        function getStorageCapacity(t, l, tileIndex = -1, passedBuffs = null, isAscended = false) {
             const b = BUILDINGS[t];
             const s = CONFIG.storageHours * 3600;
             const c = {};
             // Use passed (weighted) buffs if available, else static global
             const globalBuffs = passedBuffs || getGlobalBuffs();
+
+            // Auto-detect ascended if tileIndex provided
+            if (tileIndex >= 0 && gameState.tiles[tileIndex] && gameState.tiles[tileIndex].ascended) {
+                isAscended = true;
+            }
 
             // Adjacency for Storage
             let adjacencyMult = 1.0;
@@ -5636,8 +5838,17 @@
                 }
             }
 
-            for (let r in b.prod) {
-                if (b.prod[r] > 0) {
+            // Determine Prod Base and Formula
+            let prodBase = b.prod;
+            let growthRate = 1.05;
+
+            if (isAscended && ASCENSION_BASE_STATS[t]) {
+                prodBase = ASCENSION_BASE_STATS[t].prod;
+                growthRate = 1.10;
+            }
+
+            for (let r in prodBase) {
+                if (prodBase[r] > 0) {
                     let capMult = 1.0;
                     if (r === 'money' && ['house', 'market', 'blacksmith', 'inn'].includes(t)) capMult *= globalBuffs.bank;
                     if (r === 'food' && ['farm'].includes(t)) capMult *= globalBuffs.granary;
@@ -5647,7 +5858,7 @@
                     if (r === 'food') capMult *= adjacencyMult;
                     if (r === 'wood') capMult *= adjacencyMult;
 
-                    c[r] = b.prod[r] * l * Math.pow(1.05, l - 1) * s * capMult;
+                    c[r] = prodBase[r] * l * Math.pow(growthRate, l - 1) * s * capMult;
                 }
             }
 
@@ -6316,6 +6527,28 @@
                 showToast(`工事を中止しました ${refundTxt}`);
             });
         }
+
+        window.actAscend = function () {
+            if (selectedTileIndex === null) return;
+            const t = gameState.tiles[selectedTileIndex];
+
+            if (!t.ascended && t.level >= 30 && ASCENSION_BASE_STATS[t.type]) {
+                showConfirmModal("🔥 昇格を行いますか？\n\n・レベルが1に戻ります\n・外観が変化します\n・成長率が大幅に向上します\n・元に戻すことはできません", () => {
+                    t.ascended = true;
+                    t.level = 1;
+                    t.finishTime = null; // No construction time for ascension itself? Or maybe instant?
+                    // Spec didn't specify. Instant is cleaner for "Evolution".
+
+                    SoundManager.playSE('save'); // Special sound?
+                    // Maybe play a different sound if available, but save is okay.
+
+                    sync3DState(); // Updates visual to <傑> model (if impl)
+                    updatePanelUI();
+                    showToast(`🔥 ${BUILDINGS[t.type].name}が昇格しました！`);
+                    saveGame();
+                });
+            }
+        };
 
         window.actBuild = function (type) {
             if (selectedTileIndex === null) return;
@@ -7290,7 +7523,12 @@
                             const efficiency = getTileProductionMultiplier(i, globalBuffs, true, offlineCtx); // Pass ctx
 
                             if (efficiency > 0 && activeSeconds > 0) {
-                                for (let r in b.prod) if (b.prod[r] > 0) {
+                                // Ascension Logic Setup
+                                const isAsc = t.ascended;
+                                const prodBase = (isAsc && ASCENSION_BASE_STATS[t.type]) ? ASCENSION_BASE_STATS[t.type].prod : b.prod;
+                                const growth = (isAsc && ASCENSION_BASE_STATS[t.type]) ? 1.10 : 1.05;
+
+                                for (let r in prodBase) if (prodBase[r] > 0) {
                                     if (!earn[r]) earn[r] = 0;
 
                                     let finalMult = efficiency;
@@ -7299,7 +7537,9 @@
                                     if (r === 'wood' && ['lumber', 'forest'].includes(t.type)) finalMult *= globalBuffs.lumber_hub;
 
                                     // Use activeSeconds for production duration
-                                    const add = Math.min(caps[r] - (t.stored[r] || 0), b.prod[r] * t.level * Math.pow(1.05, t.level - 1) * finalMult * activeSeconds);
+                                    const amountPerSec = prodBase[r] * t.level * Math.pow(growth, t.level - 1) * finalMult;
+                                    const add = Math.min(caps[r] - (t.stored[r] || 0), amountPerSec * activeSeconds);
+
                                     if (add > 0) { t.stored[r] = (t.stored[r] || 0) + add; earn[r] += add; }
                                 }
                             }
