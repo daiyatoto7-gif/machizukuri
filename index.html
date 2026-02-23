@@ -1392,6 +1392,26 @@
                 }
             }
 
+            // 3. Validate Ascended State
+            for (let i = 0; i < grid.length; i++) {
+                const t = grid[i];
+                if (t.ascended) {
+                    // Only allow ascended if ASCENSION_BASE_STATS defines the type
+                    if (!ASCENSION_BASE_STATS[t.type]) {
+                        console.warn(`Sanitize: Removing invalid ascended flag from tile ${i} (type: ${t.type})`);
+                        t.ascended = false;
+                        // Restore level to 30 since ascension resets to 1
+                        if (t.level <= 1) t.level = 30;
+                        fixedCount++;
+                    }
+                    // Ensure ascended building has valid level
+                    if (t.level <= 0) {
+                        t.level = 1;
+                        fixedCount++;
+                    }
+                }
+            }
+
             if (fixedCount > 0) {
                 console.log(`Sanitized ${fixedCount} issues.`);
                 showToast(`不整合データを修正/保管庫へ移動しました(${fixedCount}件)`);
@@ -1445,8 +1465,14 @@
             try {
                 init3D();
             } catch (e) {
-                log(`3D Init Error: ${e.message}`, true);
-                showToast("3D表示の初期化に失敗しました。");
+                console.error('3D Init Error:', e);
+                log(`3D Init Error: ${e.message}\n${e.stack}`, true);
+                showToast(`3D表示の初期化に失敗しました: ${e.message}`);
+                // Display error details for debugging
+                const errDiv = document.createElement('div');
+                errDiv.style.cssText = 'position:fixed;bottom:10px;left:10px;right:10px;background:#fee;border:2px solid red;padding:10px;z-index:99999;font-size:12px;max-height:200px;overflow:auto;border-radius:8px;';
+                errDiv.innerHTML = `<b>3D Init Error:</b><br><pre style="white-space:pre-wrap;font-size:11px;">${e.message}\n${e.stack || ''}</pre>`;
+                document.body.appendChild(errDiv);
                 return;
             }
 
@@ -4794,8 +4820,22 @@
 
                             // Lv0(新規)なら建物なし、Lv1以上ならそのレベルの建物を表示
                             if (tile.level > 0) {
-                                const newModel = createBuildingMesh(tile.type, tile.level, tile.ascended);
-                                tObj.buildingGroup.add(newModel);
+                                try {
+                                    const newModel = createBuildingMesh(tile.type, tile.level, tile.ascended);
+                                    tObj.buildingGroup.add(newModel);
+                                } catch (meshErr) {
+                                    console.error(`Failed to create mesh for tile ${i} (${tile.type}, Lv${tile.level}, asc:${tile.ascended}):`, meshErr);
+                                    // Reset ascended flag if it caused the error
+                                    if (tile.ascended) {
+                                        tile.ascended = false;
+                                        try {
+                                            const fallbackModel = createBuildingMesh(tile.type, tile.level, false);
+                                            tObj.buildingGroup.add(fallbackModel);
+                                        } catch (e2) {
+                                            console.error(`Fallback mesh also failed for tile ${i}:`, e2);
+                                        }
+                                    }
+                                }
                             }
 
                             // 工事中ならシートと作業員を追加
