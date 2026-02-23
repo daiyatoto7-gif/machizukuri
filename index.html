@@ -1412,6 +1412,22 @@
                 }
             }
 
+            // 4. Robust recovery for ascended buildings incorrectly reset by bug
+            if (!gameState._ascensionRecoveryFinal) {
+                for (let i = 0; i < grid.length; i++) {
+                    const t = grid[i];
+                    // Detection: Lv.1 building, not a part, has ascended stats available, but flag is false.
+                    // This is the signature of a building that was reset by the rendering crash.
+                    if (t.type && !t.type.endsWith('_part') && !t.ascended && t.level === 1 && ASCENSION_BASE_STATS[t.type] && !t.finishTime) {
+                        t.ascended = true;
+                        console.log(`Recovery: Restored lost ascended flag for tile ${i} (type: ${t.type})`);
+                        showToast(`🔄 ${BUILDINGS[t.type].name}の昇格状態を復元しました`);
+                        fixedCount++;
+                    }
+                }
+                gameState._ascensionRecoveryFinal = true;
+            }
+
             if (fixedCount > 0) {
                 console.log(`Sanitized ${fixedCount} issues.`);
                 showToast(`不整合データを修正/保管庫へ移動しました(${fixedCount}件)`);
@@ -2962,6 +2978,72 @@
             }
         }
 
+        // --- 3D Building Helpers (Global Scope) ---
+
+        const createBox = (w, h, d, mat, x, y, z, rotY = 0) => {
+            const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+            m.position.set(x, y, z);
+            if (rotY) m.rotation.y = rotY;
+            m.castShadow = true;
+            m.receiveShadow = true;
+            return m;
+        };
+        const createCyl = (rt, rb, h, mat, x, y, z, rotY = 0, seg = 8) => {
+            const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), mat);
+            m.position.set(x, y, z);
+            if (rotY) m.rotation.y = rotY;
+            m.castShadow = true;
+            return m;
+        };
+        const createCone = (r, h, mat, x, y, z, rotY = 0) => {
+            const geom = new THREE.ConeGeometry(r, h, 8); // Smoother cones (8 segments)
+            const m = new THREE.Mesh(geom, mat);
+            m.position.set(x, y, z);
+            if (rotY) m.rotation.y = rotY;
+            m.castShadow = true;
+            return m;
+        };
+
+        const createPillar = (h, x, y, z) => {
+            return createCyl(0.1, 0.1, h, MATERIALS.pillarRed, x, y, z);
+        };
+
+        const createChineseRoof = (w, d, h, mat, x, y, z, tier = 1) => {
+            const roofGroup = new THREE.Group();
+            roofGroup.position.set(x, y, z);
+            const geom = new THREE.ConeGeometry(w * 0.8, h, 4);
+            const mesh = new THREE.Mesh(geom, mat);
+            mesh.rotation.y = Math.PI / 4;
+            mesh.scale.set(1, 1, d / w);
+            mesh.castShadow = true;
+            roofGroup.add(mesh);
+            const eaves = new THREE.Mesh(new THREE.BoxGeometry(w * 1.2, 0.1, d * 1.2), mat);
+            eaves.position.y = -h / 2;
+            eaves.castShadow = true;
+            roofGroup.add(eaves);
+            if (tier >= 2) {
+                const ridge = new THREE.Mesh(new THREE.BoxGeometry(w * 0.8, 0.1, 0.1), MATERIALS.gold);
+                ridge.position.y = h / 2;
+                roofGroup.add(ridge);
+            }
+            return roofGroup;
+        };
+
+        const createLantern = (x, y, z) => {
+            const g = new THREE.Group();
+            g.position.set(x, y, z);
+            g.add(createBox(0.02, 0.2, 0.02, MATERIALS.woodDark, 0, 0.1, 0));
+            const body = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 8), MATERIALS.lanternRed);
+            body.scale.set(1, 0.8, 1);
+            body.castShadow = true;
+            g.add(body);
+            return g;
+        };
+
+        const createFoundation = (w, d) => {
+            return createBox(w, 0.2, d, MATERIALS.pavingStone, 0, 0.1, 0);
+        };
+
         function createExaltedMesh(type, level) {
             const group = new THREE.Group();
             // Exalted Base Scale
@@ -3068,7 +3150,6 @@
             // Cap level at 30 for visuals
             const vizLevel = Math.min(level, 30);
             // Grid is 3.4, Cobblestone is 2.9. Standard model is ~1.0.
-            // Grid is 3.4, Cobblestone is 2.9. Standard model is ~1.0.
             // Scale up to ~1.6 to fit nicely without overlapping (User Feedback 20% reduced).
             const baseScale = 1.6;
             const scale = baseScale * (1.0 + (vizLevel * 0.01));
@@ -3076,30 +3157,6 @@
 
             // Tier 1: 1-20, Tier 2: 21+
             const tier = vizLevel >= 21 ? 2 : 1;
-
-            const createBox = (w, h, d, mat, x, y, z, rotY = 0) => {
-                const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-                m.position.set(x, y, z);
-                if (rotY) m.rotation.y = rotY;
-                m.castShadow = true;
-                m.receiveShadow = true;
-                return m;
-            };
-            const createCyl = (rt, rb, h, mat, x, y, z, rotY = 0, seg = 8) => {
-                const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), mat);
-                m.position.set(x, y, z);
-                if (rotY) m.rotation.y = rotY;
-                m.castShadow = true;
-                return m;
-            };
-            const createCone = (r, h, mat, x, y, z, rotY = 0) => {
-                const geom = new THREE.ConeGeometry(r, h, 8); // Smoother cones (8 segments)
-                const m = new THREE.Mesh(geom, mat);
-                m.position.set(x, y, z);
-                if (rotY) m.rotation.y = rotY;
-                m.castShadow = true;
-                return m;
-            };
 
             // Enhanced Helper: Box with "noise" or distinct look
             const createDetailedBox = (w, h, d, mat, x, y, z) => {
@@ -3110,13 +3167,6 @@
                 main.castShadow = true;
                 main.receiveShadow = true;
                 g.add(main);
-                // Detail (Trim/Top) - random slightly larger plate on top for texture
-                if (h > 0.2) {
-                    const plate = new THREE.Mesh(new THREE.BoxGeometry(w + 0.02, 0.05, d + 0.02), mat);
-                    plate.position.y = h / 2;
-                    plate.castShadow = true;
-                    // g.add(plate); // Maybe too much noise for everything
-                }
                 return g;
             };
 
@@ -3129,7 +3179,7 @@
                 const centerx = (x1 + x2) / 2;
                 const centerz = (z1 + z2) / 2;
                 g.position.set(centerx, h / 2, centerz);
-                g.rotation.y = -angle; // Three.js rotation is CCW from X+? Check
+                g.rotation.y = -angle;
 
                 // Posts
                 const p1 = createBox(0.05, h + 0.1, 0.05, MATERIALS.wood, -len / 2, 0, 0);
@@ -3142,62 +3192,6 @@
                 g.add(r1); g.add(r2);
 
                 return g;
-            };
-
-            // --- Helper Functions for Chinese Architecture ---
-
-            // 寄棟(よせむね)・入母屋(いりもや)風の屋根
-            const createChineseRoof = (w, d, h, mat, x, y, z, tier = 1) => {
-                const roofGroup = new THREE.Group();
-                roofGroup.position.set(x, y, z);
-
-                // Main roof slope
-                const geom = new THREE.ConeGeometry(w * 0.8, h, 4);
-                const mesh = new THREE.Mesh(geom, mat);
-                mesh.rotation.y = Math.PI / 4;
-                mesh.scale.set(1, 1, d / w); // Adjust aspect
-                mesh.castShadow = true;
-                roofGroup.add(mesh);
-
-                // Eaves (反り) - represented by a flattened wider cone/box at the bottom
-                const eaves = new THREE.Mesh(new THREE.BoxGeometry(w * 1.2, 0.1, d * 1.2), mat);
-                eaves.position.y = -h / 2;
-                eaves.castShadow = true;
-                roofGroup.add(eaves);
-
-                // Ridge decorations for higher tiers
-                if (tier >= 2) {
-                    const ridge = new THREE.Mesh(new THREE.BoxGeometry(w * 0.8, 0.1, 0.1), MATERIALS.gold);
-                    ridge.position.y = h / 2;
-                    roofGroup.add(ridge);
-                }
-
-                return roofGroup;
-            };
-
-            // 朱色の柱
-            const createPillar = (h, x, y, z) => {
-                return createCyl(0.1, 0.1, h, MATERIALS.pillarRed, x, y, z);
-            };
-
-            // 提灯
-            const createLantern = (x, y, z) => {
-                const g = new THREE.Group();
-                g.position.set(x, y, z);
-                // String
-                g.add(createBox(0.02, 0.2, 0.02, MATERIALS.woodDark, 0, 0.1, 0));
-                // Body
-                const body = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 8), MATERIALS.lanternRed);
-                body.scale.set(1, 0.8, 1);
-                body.castShadow = true;
-                g.add(body);
-                // Tassel (implied)
-                return g;
-            };
-
-            // 石畳の土台
-            const createFoundation = (w, d) => {
-                return createBox(w, 0.2, d, MATERIALS.pavingStone, 0, 0.1, 0);
             };
 
             // Procedural Props Generator
@@ -3216,8 +3210,6 @@
                     }
                 }
             };
-
-            // --- End Helpers ---
 
             // Specialized Han Helpers
 
@@ -4825,15 +4817,13 @@
                                     tObj.buildingGroup.add(newModel);
                                 } catch (meshErr) {
                                     console.error(`Failed to create mesh for tile ${i} (${tile.type}, Lv${tile.level}, asc:${tile.ascended}):`, meshErr);
-                                    // Reset ascended flag if it caused the error
-                                    if (tile.ascended) {
-                                        tile.ascended = false;
-                                        try {
-                                            const fallbackModel = createBuildingMesh(tile.type, tile.level, false);
-                                            tObj.buildingGroup.add(fallbackModel);
-                                        } catch (e2) {
-                                            console.error(`Fallback mesh also failed for tile ${i}:`, e2);
-                                        }
+                                    // Do NOT modify tile.ascended here — game state should not be changed in rendering
+                                    // Just render the fallback model without changing data
+                                    try {
+                                        const fallbackModel = createBuildingMesh(tile.type, tile.level, false);
+                                        tObj.buildingGroup.add(fallbackModel);
+                                    } catch (e2) {
+                                        console.error(`Fallback mesh also failed for tile ${i}:`, e2);
                                     }
                                 }
                             }
@@ -6370,7 +6360,8 @@
                 const prodInfo = getBuildingEffectHtml(tile.type, tile.level, null, !!tile.ascended);
 
                 let storeInfo = "";
-                for (let r in b.prod) if (b.prod[r] > 0) {
+                const prodSource = (tile.ascended && ASCENSION_BASE_STATS[tile.type]) ? ASCENSION_BASE_STATS[tile.type].prod : b.prod;
+                for (let r in prodSource) if (prodSource[r] > 0) {
                     storeInfo += `<div>${(r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : r == 'time_reduction' ? '⏳' : '💧')} ${Math.floor(tile.stored[r] || 0)}/${Math.floor(caps[r] || 0)}</div>`;
                 }
 
@@ -7066,7 +7057,8 @@
                 wood: { prod: 0, mult: 1 },
                 stone: { prod: 0, mult: 1 },
                 iron: { prod: 0, mult: 1 },
-                water: { prod: 0, mult: 1 }
+                water: { prod: 0, mult: 1 },
+                time_reduction: { prod: 0, mult: 1 }
             };
 
             // Global Multipliers Calculation (Mirrors gameLogicLoop)
@@ -7199,28 +7191,40 @@
                         const lumbers = unique.filter(t => {
                             if (!t || t.type !== 'lumber') return false;
                             if (t.level > 0) return true;
-                            // Feature request: "Count constructing Lumberjacks" logic should involve MAIN loop too
-                            // This matches gameLogicLoop which now counts finishTime unconditionally.
                             if (t.finishTime) return true;
                             return false;
                         });
                         if (lumbers.length > 0) mult *= (1 + 0.2 * lumbers.length);
                     }
 
-                    for (let r in b.prod) {
-                        if (b.prod[r] > 0) {
+                    const isAsc = tile.ascended;
+                    const prodBase = (isAsc && ASCENSION_BASE_STATS[tile.type]) ? ASCENSION_BASE_STATS[tile.type].prod : b.prod;
+                    const growth = (isAsc && ASCENSION_BASE_STATS[tile.type]) ? 1.10 : 1.05;
+
+                    for (let r in prodBase) {
+                        if (prodBase[r] > 0) {
                             let finalMult = mult;
                             if (r === 'money' && ['house', 'market', 'blacksmith', 'inn'].includes(tile.type)) finalMult *= bankMult;
                             if (r === 'food' && ['farm'].includes(tile.type)) finalMult *= granaryMult;
                             if (r === 'wood' && ['lumber', 'forest'].includes(tile.type)) finalMult *= lumberMult;
 
-                            const rawAmount = b.prod[r] * level * Math.pow(1.05, level - 1);
+                            const rawAmount = prodBase[r] * level * Math.pow(growth, level - 1);
                             const actualAmount = rawAmount * finalMult;
 
+                            if (!stats[r]) stats[r] = { prod: 0, mult: 1, base: 0 };
                             stats[r].prod += actualAmount;
                             if (!stats[r].base) stats[r].base = 0;
                             stats[r].base += rawAmount;
                         }
+                    }
+
+                    // Handles special production like Directorate (time_reduction)
+                    if (tile.type === 'directorate') {
+                        const rate = 0.4 * Math.pow(1.10, level - 1);
+                        const actualRate = rate * mult; // global speed applies
+                        if (!stats.time_reduction) stats.time_reduction = { prod: 0, mult: 1, base: 0 };
+                        stats.time_reduction.prod += actualRate;
+                        stats.time_reduction.base += rate;
                     }
 
                     // Handles Consumption (e.g. Stone Plant)
@@ -7269,9 +7273,9 @@
                     </tr>
             `;
 
-            const resKeys = ['money', 'food', 'wood', 'stone', 'iron', 'water'];
-            const labels = { money: 'お金', food: '食料', wood: '木材', stone: '石材', iron: '鉄', water: '水' };
-            const icons = { money: '💰', food: '🌾', wood: '🌲', stone: '🪨', iron: '🔩', water: '💧' };
+            const resKeys = ['money', 'food', 'wood', 'stone', 'iron', 'water', 'time_reduction'];
+            const labels = { money: 'お金', food: '食料', wood: '木材', stone: '石材', iron: '鉄', water: '水', time_reduction: '工事短縮' };
+            const icons = { money: '💰', food: '🌾', wood: '🌲', stone: '🪨', iron: '🔩', water: '💧', time_reduction: '⏳' };
 
             resKeys.forEach(key => {
                 const s = stats[key];
@@ -7288,10 +7292,13 @@
                     if (key === 'food') displayMult *= granaryMult;
                     if (key === 'wood') displayMult *= lumberMult;
 
+                    let prodDisplay = s.prod.toFixed(1);
+                    if (key === 'time_reduction') prodDisplay = s.prod.toFixed(2);
+
                     html += `
                         <tr style="border-bottom:1px solid #eee;">
                             <td style="padding:8px;">${icons[key]} ${labels[key]}</td>
-                            <td style="padding:8px; text-align:right; font-weight:bold;">${s.prod.toFixed(1)}/s</td>
+                            <td style="padding:8px; text-align:right; font-weight:bold;">${prodDisplay}${key === 'time_reduction' ? 'x' : '/s'}</td>
                             <td style="padding:8px; text-align:right; color:#2980b9;">x${displayMult.toFixed(2)}</td>
                         </tr>
                     `;
@@ -7378,13 +7385,13 @@
 
                 sortedInv.forEach(item => {
                     const b = BUILDINGS[item.type];
-                    // Inventory items also show effect
-                    const prodStr = getBuildingEffectHtml(item.type, item.level);
+                    const prodStr = getBuildingEffectHtml(item.type, item.level, null, !!item.ascended);
+                    const displayName = item.ascended ? getBuildingName(item.type, true) : b.name;
 
                     html += `
                     <div class="building-item" style="background:#f5f5f5; color:#666;">
                         <div class="building-info">
-                            <strong>${b.icon} ${b.name} (Lv.${item.level})</strong>
+                            <strong>${b.icon} ${displayName} (Lv.${item.level})</strong>
                             <span style="font-size:0.8em;">${prodStr}</span>
                         </div>
                         <span style="font-size:0.8em; background:#eee; padding:3px 6px; border-radius:4px;">保管中</span>
