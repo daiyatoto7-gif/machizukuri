@@ -4786,7 +4786,7 @@
                     if (tile.type) {
                         tObj.buildingGroup.visible = true;
                         const isBuilding = !!tile.finishTime;
-                        const stateKey = `${tile.type}_${tile.level}_${isBuilding ? 'b' : ''}`;
+                        const stateKey = `${tile.type}_${tile.level}_${isBuilding ? 'b' : ''}${tile.ascended ? '_asc' : ''}`;
                         if (tObj.currentType !== stateKey) {
                             while (tObj.buildingGroup.children.length > 0) {
                                 tObj.buildingGroup.remove(tObj.buildingGroup.children[0]);
@@ -4817,7 +4817,7 @@
                         if (tile.finishTime) {
                             tObj.particles.active = true;
                             const remaining = Math.max(0, (tile.finishTime - Date.now()));
-                            const total = getBuildTime(tile.type, tile.level);
+                            const total = getBuildTime(tile.type, tile.level, !!tile.ascended);
                             const percent = Math.min(100, Math.max(0, 100 - (remaining / total * 100)));
 
                             overlay.innerHTML = `
@@ -5156,7 +5156,7 @@
                     if (tile.finishTime && now >= tile.finishTime) {
                         tile.level++;
                         tile.finishTime = null;
-                        const xp = Math.floor(getBuildTime(tile.type, tile.level - 1) / 1000);
+                        const xp = Math.floor(getBuildTime(tile.type, tile.level - 1, !!tile.ascended) / 1000);
                         addXP(xp);
                         dirty = true;
                         if (selectedTileIndex !== null) updatePanelUI();
@@ -6240,7 +6240,7 @@
                     html += `<div class="inventory-section"><div class="inventory-title">📦 保管庫から再設置</div>`;
                     gameState.inventory.forEach((item, idx) => {
                         const b = BUILDINGS[item.type];
-                        const timeSec = getBuildTime(item.type, item.level - 1) / 1000;
+                        const timeSec = getBuildTime(item.type, item.level - 1, !!item.ascended) / 1000;
                         // Restoration is always allowed (already counted in limit)
                         const disabledAttr = '';
                         const warnText = '';
@@ -6301,9 +6301,9 @@
             if (tile.finishTime) {
                 const rem = Math.max(0, (tile.finishTime - Date.now()));
 
-                const prodDiff = getBuildingEffectHtml(tile.type, tile.level, tile.level + 1);
+                const prodDiff = getBuildingEffectHtml(tile.type, tile.level, tile.level + 1, !!tile.ascended);
 
-                const c = getCost(tile.type, tile.level);
+                const c = getCost(tile.type, tile.level, !!tile.ascended);
                 let refund = [];
                 for (let r in c) if (c[r] > 0) refund.push(`${(r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧')}${Math.floor(c[r] * 0.5).toLocaleString()}`);
 
@@ -6321,13 +6321,13 @@
                 </div>`;
             } else {
                 const next = tile.level + 1;
-                const c = getCost(tile.type, tile.level);
+                const c = getCost(tile.type, tile.level, !!tile.ascended);
                 const afford = checkAfford(c);
                 const caps = getStorageCapacity(tile.type, tile.level, selectedTileIndex);
                 // Use helper for upgrade cost
                 const costStr = formatCostWithColor(c);
 
-                const prodInfo = getBuildingEffectHtml(tile.type, tile.level);
+                const prodInfo = getBuildingEffectHtml(tile.type, tile.level, null, !!tile.ascended);
 
                 let storeInfo = "";
                 for (let r in b.prod) if (b.prod[r] > 0) {
@@ -6369,7 +6369,7 @@
 
                 content.innerHTML = `
                 <div style="text-align:center;">
-                    <h3>${b.name} (Lv.${tile.level})</h3>
+                    <h3>${tile.ascended ? getBuildingName(tile.type, true) : b.name} (Lv.${tile.level})</h3>
                     <p style="font-size:0.85em; color:#666; margin:0 0 10px 0;">${b.desc}</p>
                     <div style="background:#f0f0f0; padding:5px; border-radius:5px; margin-bottom:5px;">
                         <strong>現在性能:</strong><br>${prodInfo}
@@ -6380,7 +6380,7 @@
                     </div>` : ''}
                     <div style="text-align:left; font-size:0.9em; margin-bottom:5px;">
                          <strong>LvUP費用:</strong> ${costStr}<br>
-                         <strong>時間:</strong> ${formatTime(getBuildTime(tile.type, tile.level) / 1000)}
+                         <strong>時間:</strong> ${formatTime(getBuildTime(tile.type, tile.level, !!tile.ascended) / 1000)}
                     </div>
                     ${buildersBusy ? '<p style="color:red; font-size:0.9em;">⚠️ 工事枠がいっぱいです</p>' : ''}
                     ${extraBtns}
@@ -6509,7 +6509,7 @@
             if (!t.finishTime) return;
 
             showConfirmModal("工事を中止しますか？\n費用の一部(50%)が返還されます。", () => {
-                const c = getCost(t.type, t.level);
+                const c = getCost(t.type, t.level, !!t.ascended);
                 let refundTxt = "";
                 for (let r in c) {
                     const amount = Math.floor(c[r] * 0.5);
@@ -6645,7 +6645,7 @@
                 }
             }
 
-            const c = getCost(type, lv);
+            const c = getCost(type, lv, !!t.ascended);
             if (checkAfford(c)) {
                 payCost(c);
 
@@ -6659,7 +6659,7 @@
 
                 // Master tile properties
                 const tMaster = gameState.tiles[targetIndex]; // Re-fetch in case changed
-                tMaster.finishTime = Date.now() + getBuildTime(type, lv);
+                tMaster.finishTime = Date.now() + getBuildTime(type, lv, !!t.ascended);
                 tMaster.stored = {}; // Reset storage
                 SoundManager.playSE('build');
 
@@ -7314,7 +7314,7 @@
                     const b = BUILDINGS[item.tile.type];
                     const level = item.tile.level;
 
-                    const prodStr = getBuildingEffectHtml(item.tile.type, level);
+                    const prodStr = getBuildingEffectHtml(item.tile.type, level, null, !!item.tile.ascended);
 
                     html += `
                     <div class="building-item" style="background:white; margin-bottom:5px;">
@@ -7450,7 +7450,7 @@
                             t.level++;
                             t.finishTime = null;
                             built++;
-                            gameState.xp += Math.floor(getBuildTime(t.type, t.level - 1) / 1000);
+                            gameState.xp += Math.floor(getBuildTime(t.type, t.level - 1, !!t.ascended) / 1000);
                         }
                     });
 
