@@ -4274,10 +4274,10 @@
                         group.add(createBox(0.8, 0.05, 0.6, MATERIALS.stone, 0, 0.025, 0));
 
                         // 1. Large Worked Stone Block (Centerpiece)
-                        group.add(createBox(0.3, 0.25, 0.3, MATERIALS.stoneWhite, 0, 0.15, 0));
+                        group.add(createBox(0.3, 0.25, 0.3, MATERIALS.stone, 0, 0.15, 0));
                         // Chips around it
-                        group.add(createCone(0.1, 0.05, MATERIALS.stoneWhite, 0.2, 0.05, 0.2));
-                        group.add(createCone(0.08, 0.04, MATERIALS.stoneWhite, -0.2, 0.05, 0.15));
+                        group.add(createCone(0.1, 0.05, MATERIALS.stone, 0.2, 0.05, 0.2));
+                        group.add(createCone(0.08, 0.04, MATERIALS.stone, -0.2, 0.05, 0.15));
 
                         // 2. Simple Wooden Hoist (Crane)
                         const hoist = new THREE.Group();
@@ -4288,7 +4288,7 @@
                         // Crossbar
                         hoist.add(createCyl(0.03, 0.03, 0.4, MATERIALS.wood, 0, 0.7, 0, Math.PI / 2));
                         // Rope
-                        hoist.add(createCyl(0.01, 0.01, 0.5, MATERIALS.white, 0, 0.5, 0));
+                        hoist.add(createCyl(0.01, 0.01, 0.5, MATERIALS.roofStraw, 0, 0.5, 0));
                         // Hook/Stone suspended?
                         hoist.add(createBox(0.15, 0.1, 0.15, MATERIALS.stone, 0, 0.3, 0));
                         group.add(hoist);
@@ -5039,7 +5039,8 @@
 
             const getActiveDurationRatio = (t, idx) => {
                 if (!isOffline || !offlineCtx) {
-                    return (t.level > 0 && !t.finishTime) ? 1.0 : 0.0;
+                    // level > 0 なら稼働中とみなす（アップグレード中でも隣接ボーナスを維持）
+                    return (t.level > 0) ? 1.0 : 0.0;
                 }
                 const { totalSeconds, lastSaveTime, completionTimes } = offlineCtx;
 
@@ -5217,6 +5218,24 @@
                             return; // Skip standard logic for this special building
                         }
 
+                        // Directorate Production (dedicated handler)
+                        if (tile.type === 'directorate') {
+                            const efficiency = getTileProductionMultiplier(i, globalBuffs);
+                            if (efficiency > 0) {
+                                const caps = getStorageCapacity(tile.type, tile.level, i);
+                                // Base 0.4 * 1.10^(L-1) — dedicated growth rate
+                                const rate = 0.4 * Math.pow(1.10, tile.level - 1) * efficiency;
+
+                                if (!tile.stored.time_reduction) tile.stored.time_reduction = 0;
+                                if (tile.stored.time_reduction < caps.time_reduction) {
+                                    tile.stored.time_reduction += rate; // +rate seconds per second
+                                    if (tile.stored.time_reduction > caps.time_reduction) tile.stored.time_reduction = caps.time_reduction;
+                                    dirty = true;
+                                }
+                            }
+                            return; // Skip standard logic for this special building
+                        }
+
                         // Calculate efficiency
                         const efficiency = getTileProductionMultiplier(i, globalBuffs);
 
@@ -5244,21 +5263,6 @@
                                         tile.stored[r] = Math.min(caps[r], tile.stored[r] + amount);
                                         if (Math.floor(tile.stored[r]) >= 1) dirty = true;
                                     }
-                                }
-                            }
-                        } else if (tile.type === 'directorate') {
-                            // Time Reduction Production
-                            // Base 0.4 * 1.10^(L-1)
-                            const efficiency = getTileProductionMultiplier(i, globalBuffs);
-                            if (efficiency > 0) {
-                                const caps = getStorageCapacity(tile.type, tile.level, i);
-                                const rate = 0.4 * Math.pow(1.10, tile.level - 1) * efficiency;
-
-                                if (!tile.stored.time_reduction) tile.stored.time_reduction = 0;
-                                if (tile.stored.time_reduction < caps.time_reduction) {
-                                    tile.stored.time_reduction += rate; // +rate seconds per second
-                                    if (tile.stored.time_reduction > caps.time_reduction) tile.stored.time_reduction = caps.time_reduction;
-                                    dirty = true;
                                 }
                             }
                         }
@@ -6327,7 +6331,7 @@
 
                 let storeInfo = "";
                 for (let r in b.prod) if (b.prod[r] > 0) {
-                    storeInfo += `<div>${(r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧')} ${Math.floor(tile.stored[r])}/${Math.floor(caps[r])}</div>`;
+                    storeInfo += `<div>${(r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : r == 'time_reduction' ? '⏳' : '💧')} ${Math.floor(tile.stored[r] || 0)}/${Math.floor(caps[r] || 0)}</div>`;
                 }
 
                 // Consumption Info for Stone Plant
@@ -6380,6 +6384,7 @@
                     </div>
                     ${buildersBusy ? '<p style="color:red; font-size:0.9em;">⚠️ 工事枠がいっぱいです</p>' : ''}
                     ${extraBtns}
+                    ${(!tile.ascended && tile.level >= 30 && ASCENSION_BASE_STATS[tile.type]) ? `<button class="action-btn" onclick="actAscend()" style="background: linear-gradient(135deg, #f39c12, #e74c3c); margin-bottom:5px;">🔥 昇格する</button>` : ''}
                     <button class="action-btn" onclick="actBuild('${tile.type}')" ${afford && !buildersBusy ? '' : 'disabled'}>レベルアップ</button>
                     <button class="action-btn store-btn" onclick="actStore()">📦 回収（保管庫へ）</button>
                 </div>`;
@@ -7561,4 +7566,8 @@
     </script>
 </body>
 
+<<<<<<< HEAD </html>
+    =======
+
 </html>
+>>>>>>> 568112aaa44032fc69d38c9026e21d0b37cbe5ff
