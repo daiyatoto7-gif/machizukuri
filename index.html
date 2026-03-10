@@ -5583,6 +5583,9 @@
                 } else if (type === 'lumber_hub') {
                     const val = 1.27 + (lvl * 0.03);
                     return `木産・木貯 x${val.toFixed(2)}`;
+                } else if (type === 'masonry_hub') {
+                    const val = 1.27 + (lvl * 0.03);
+                    return `石産・石貯 x${val.toFixed(2)}`;
                 } else if (type === 'directorate') {
                     // Time Reduction
                     const rate = b.prod.time_reduction * Math.pow(1.10, lvl - 1); // 10% growth per level
@@ -7086,6 +7089,7 @@
             const bankMult = getBoost('bank');
             const granaryMult = getBoost('granary');
             const lumberMult = getBoost('lumber_hub');
+            const masonryMult = getBoost('masonry_hub');
 
             // Clocktower
             let globalSpeed = 1.0;
@@ -7207,6 +7211,7 @@
                             if (r === 'money' && ['house', 'market', 'blacksmith', 'inn'].includes(tile.type)) finalMult *= bankMult;
                             if (r === 'food' && ['farm'].includes(tile.type)) finalMult *= granaryMult;
                             if (r === 'wood' && ['lumber', 'forest'].includes(tile.type)) finalMult *= lumberMult;
+                            if (r === 'stone' && ['quarry', 'stone_plant'].includes(tile.type)) finalMult *= masonryMult;
 
                             const rawAmount = prodBase[r] * level * Math.pow(growth, level - 1);
                             const actualAmount = rawAmount * finalMult;
@@ -7291,6 +7296,7 @@
                     if (key === 'money') displayMult *= bankMult;
                     if (key === 'food') displayMult *= granaryMult;
                     if (key === 'wood') displayMult *= lumberMult;
+                    if (key === 'stone') displayMult *= masonryMult;
 
                     let prodDisplay = s.prod.toFixed(1);
                     if (key === 'time_reduction') prodDisplay = s.prod.toFixed(2);
@@ -7612,9 +7618,4 @@
 
     </script>
 </body>
-
-<<<<<<< HEAD </html>
-    =======
-
-</html>
->>>>>>> 568112aaa44032fc69d38c9026e21d0b37cbe5ff
+ </html>
