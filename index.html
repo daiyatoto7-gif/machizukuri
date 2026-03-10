@@ -5216,7 +5216,7 @@
 
                                     // Produce Stone
                                     // Spec: 20 base * level logic
-                                    const stoneProd = (b.prod.stone || 0) * tile.level * Math.pow(1.05, tile.level - 1);
+                                    const stoneProd = (b.prod.stone || 0) * tile.level * Math.pow(1.05, tile.level - 1) * globalBuffs.masonry_hub;
 
                                     // Add Stone directly to GLOBAL resources (no storage limit mentioned for this converter, or use stored?)
                                     // "Produce stone" - typically goes to storage? 
@@ -7552,7 +7552,7 @@
                                         gameState.resources.wood -= wCost * maxTime;
 
                                         // Produce Stone (4x spec = 20 base)
-                                        const pVal = (b.prod.stone || 0) * t.level * Math.pow(1.05, t.level - 1);
+                                        const pVal = (b.prod.stone || 0) * t.level * Math.pow(1.05, t.level - 1) * globalBuffs.masonry_hub;
                                         const prodTotal = pVal * maxTime;
 
                                         const caps = getStorageCapacity(t.type, t.level, i, globalBuffs);
@@ -7618,4 +7618,5 @@
 
     </script>
 </body>
- </html>
+
+</html>
