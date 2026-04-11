@@ -11,6 +11,8 @@ function log(msg, isError = false) {
         console.log(msg);
     }
     el.appendChild(line);
+    el.scrollTop = el.scrollHeight;
+}
 
 function showToast(msg) {
     const t = document.getElementById('toast-notification');
@@ -19,9 +21,6 @@ function showToast(msg) {
     void t.offsetWidth; // trigger reflow
     t.style.display = 'block';
 }
-
-window.onerror = function (message, source, lineno, colno, error) {
-    log(`Global Error: ${message} at line ${lineno}`, true);
 
 function formatTimeShort(s) { if (s < 60) return `${Math.floor(s)}s`; if (s < 3600) return `${Math.floor(s / 60)}m`; return `${Math.floor(s / 3600)}h`; }
 function formatTime(s) {
@@ -36,8 +35,6 @@ function formatTime(s) {
     if (m > 0) return `${m}分${sec}秒`;
     return `${sec}秒`;
 }
-
-function getNextRankXP(r) {
 
 function getBuildingEffectHtml(type, level, nextLevel = null, isAscended = false) {
     const b = BUILDINGS[type];

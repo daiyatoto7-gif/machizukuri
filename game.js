@@ -200,9 +200,10 @@ window.onload = function () {
 
 // --- Game Logic ---
 
-    el.scrollTop = el.scrollHeight;
-}
 
+
+window.onerror = function (message, source, lineno, colno, error) {
+    log(`Global Error: ${message} at line ${lineno}`, true);
     return false;
 };
 
@@ -4704,6 +4705,8 @@ window.closeModal = function (id) {
     document.getElementById(id).style.display = 'none';
 };
 
+
+function getNextRankXP(r) {
     const base = r * 500;
     if (r >= 12) return base * 4 * 3;
     if (r >= 10) return base * 4;
