@@ -1,0 +1,6573 @@
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
+import { getFirestore, doc, setDoc, getDoc, collection } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
+
+// Global Firebase Variables
+let firebaseConfig;
+let appId;
+let offlineMode = false; // クラウドエラー時のフォールバックフラグ
+
+// 環境判定
+if (typeof __firebase_config !== 'undefined') {
+    firebaseConfig = JSON.parse(__firebase_config);
+    appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+} else {
+    firebaseConfig = {
+        apiKey: "AIzaSyBzJkeWGrzm5pFKAuX_Vkk-w1w4tsKHsDo",
+        authDomain: "kingdom-builder-cdfb9.firebaseapp.com",
+        projectId: "kingdom-builder-cdfb9",
+        storageBucket: "kingdom-builder-cdfb9.firebasestorage.app",
+        messagingSenderId: "672874506084",
+        appId: "1:672874506084:web:573a57495e5a350d4fbc71",
+        measurementId: "G-F6JMJJR146"
+    };
+    appId = firebaseConfig.projectId;
+}
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+let currentUser = null;
+let userDocRef = null;
+let currentDocId = null;
+
+// --- Firebase Init ---
+async function initFirebase() {
+    const loadingText = document.getElementById('loading-text');
+
+    try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+            await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+            await signInAnonymously(auth);
+        }
+    } catch (error) {
+        console.error("Auth failed:", error);
+        if (error.code === 'auth/requests-from-referer-blocked' || error.message.includes('referer')) {
+            console.warn("Domain restricted: Switching to Offline Mode.");
+            offlineMode = true;
+            loadingText.innerText = "Offline Mode (Cloud Disabled)";
+            setTimeout(loadGameFromCloud, 1000);
+            return;
+        }
+        try {
+            await signInAnonymously(auth);
+        } catch (e) {
+            console.error("Retry Auth Failed, using offline", e);
+            offlineMode = true;
+            loadingText.innerText = "Offline Mode";
+            setTimeout(loadGameFromCloud, 1000);
+            return;
+        }
+    }
+
+    onAuthStateChanged(auth, async (user) => {
+        if (user) {
+            currentUser = user;
+
+            const sharedId = localStorage.getItem('kingdomBuilder_sharedId');
+            if (sharedId) {
+                currentDocId = sharedId;
+                console.log("Using Shared ID:", currentDocId);
+            } else {
+                currentDocId = user.uid;
+            }
+
+            userDocRef = doc(db, 'artifacts', appId, 'users', currentDocId, 'gameData', 'saveSlot1');
+
+            loadingText.innerText = "Loading Kingdom...";
+            await loadGameFromCloud();
+        }
+    });
+}
+
+// --- Cloud Load & Save Logic ---
+async function loadGameFromCloud() {
+    try {
+        let data = null;
+        let loadedFrom = "";
+
+        if (!offlineMode && userDocRef) {
+            try {
+                const snap = await getDoc(userDocRef);
+                if (snap.exists()) {
+                    data = snap.data();
+                    loadedFrom = "Cloud";
+                }
+            } catch (e) {
+                console.warn("Cloud read failed, falling back to local:", e);
+            }
+        }
+
+        if (!data) {
+            const backup = localStorage.getItem('kingdomBuilderSave');
+            if (backup) {
+                try {
+                    data = JSON.parse(backup);
+                    loadedFrom = "Local Backup";
+                } catch (e) { }
+            }
+        }
+
+        if (!data) {
+            const legacyKeys = ['kingdomBuilderSave', 'kb_save_data', 'gameState'];
+            for (const key of legacyKeys) {
+                const localRaw = localStorage.getItem(key);
+                if (localRaw) {
+                    try {
+                        const localData = JSON.parse(localRaw);
+                        if (localData && (localData.resources || localData.tiles)) {
+                            data = localData;
+                            loadedFrom = "Legacy Migration";
+                            showToast("📦 古いデータを引き継ぎました！");
+                            break;
+                        }
+                    } catch (e) { }
+                }
+            }
+        }
+
+        if (data) {
+            // Deep merge for resources to preserve new keys added in code
+            const savedResources = data.resources || {};
+            const currentResources = gameState.resources || {};
+
+            // Merge: Use saved value if exists, otherwise keep current (default) value
+            const mergedResources = { ...currentResources, ...savedResources };
+
+            gameState = { ...gameState, ...data };
+            gameState.resources = mergedResources; // Apply merged resources
+
+            processOfflineProgress();
+            console.log(`Loaded game from: ${loadedFrom}`);
+            saveGameToCloud(true);
+        } else {
+            console.log("New User: Creating initial state.");
+            saveGameToCloud(true);
+        }
+
+    } catch (e) {
+        console.error("Load failed:", e);
+        showToast("データの読み込みに失敗しました");
+    }
+
+    initGame();
+
+    const loader = document.getElementById('loading-screen');
+    if (loader) {
+        loader.style.opacity = 0;
+        setTimeout(() => loader.style.display = 'none', 500);
+    }
+}
+
+async function saveGameToCloud(silent = false) {
+    gameState.lastSaveTime = Date.now();
+
+    try {
+        const dataToSave = JSON.parse(JSON.stringify(gameState));
+        localStorage.setItem('kingdomBuilderSave', JSON.stringify(dataToSave));
+
+        if (!offlineMode && currentUser && userDocRef) {
+            await setDoc(userDocRef, dataToSave);
+            // if (!silent) showToast("☁️ 保存しました"); // Suppressed
+        } else {
+            // if (!silent) showToast("💾 保存しました (オフライン)"); // Suppressed
+        }
+    } catch (e) {
+        console.error("Save failed:", e);
+        // Always show error, ignoring silent flag for critical failure (or keep logic)
+        // User requirement: "Only show if failed"
+        if (!offlineMode) showToast("⚠️ クラウド保存失敗(ローカルに保存)");
+    }
+}
+
+window.saveGame = saveGameToCloud;
+
+window.onload = function () {
+    try {
+        initFirebase();
+    } catch (e) {
+        console.error("Firebase init crash:", e);
+        document.getElementById('loading-text').innerText = "Offline Mode";
+        offlineMode = true;
+        setTimeout(() => {
+            loadGameFromCloud();
+        }, 1000);
+    }
+};
+
+
+// --- Game Logic ---
+
+    el.scrollTop = el.scrollHeight;
+}
+
+    return false;
+};
+
+
+function getBuildingCount(type) {
+    const onMap = gameState.tiles.filter(t => t.type === type).length;
+    const inInventory = gameState.inventory.filter(i => i.type === type).length;
+    return onMap + inInventory;
+}
+
+function checkBuildingLimit(type) {
+    // 特別制限: 井戸・宿屋・時計塔・銀行・穀倉・製材所・石匠工房は2つまで
+    if (['well', 'inn', 'clocktower', 'bank', 'granary', 'lumber_hub', 'stone_plant', 'masonry_hub'].includes(type)) {
+        if (getBuildingCount(type) >= 2) return false;
+    }
+    // 造営司は1つまで
+    if (type === 'directorate') {
+        if (getBuildingCount(type) >= 1) return false;
+    }
+
+    const typeIndex = BUILDING_KEYS.indexOf(type);
+    if (typeIndex >= LIMIT_START_INDEX && typeIndex !== -1) {
+        // その他の上級施設は4つまで
+        if (getBuildingCount(type) >= 4) {
+            return false;
+        }
+    }
+    return true;
+}
+
+
+let gameState = {
+    rank: 1, xp: 0,
+    resources: { money: 200, food: 100, wood: 50, stone: 0, iron: 0, water: 0 },
+    tiles: [],
+    inventory: [],
+    maxBuilders: CONFIG.initialMaxBuilders,
+    gridSize: CONFIG.initialGridSize,
+    lastSaveTime: Date.now()
+};
+
+let selectedTileIndex = null;
+
+// UI State for Move Mode
+let moveMode = { active: false, sourceIndex: null };
+
+let scene, camera, renderer;
+let raycaster, mouse;
+let tileMeshes = [];
+let pedestrians = [];
+let environmentGroup = null; // 背景オブジェクト用グループ
+
+let pointerDownPos = new THREE.Vector2();
+let lastPointerPos = new THREE.Vector2();
+let isDragging = false;
+let isPanning = false;
+
+// 石畳テクスチャ生成 (改良版)
+function createCobblestoneTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+
+    // ベース（目地の色：濃いグレー）
+    ctx.fillStyle = '#555';
+    ctx.fillRect(0, 0, 512, 512);
+
+    const rows = 8; // 行数を増やして石を小さく
+    const cols = 8;
+    const cellW = 512 / cols;
+    const cellH = 512 / rows;
+
+    // 石を描画
+    for (let y = 0; y < rows; y++) {
+        // 行ごとにオフセットをずらす（レンガ積み風）
+        const offset = (y % 2 === 0) ? 0 : cellW / 2;
+
+        for (let x = -1; x < cols; x++) {
+            let sx = x * cellW + offset;
+            let sy = y * cellH;
+
+            // ランダムな位置ずれ
+            sx += (Math.random() - 0.5) * 10;
+            sy += (Math.random() - 0.5) * 10;
+
+            // 石のサイズ（少しランダムに不揃いにする）
+            const w = cellW - 8 + (Math.random() - 0.5) * 8;
+            const h = cellH - 8 + (Math.random() - 0.5) * 8;
+
+            // 色のバリエーション（自然な石の色味）
+            const gray = 140 + Math.random() * 60;
+            const r = gray + (Math.random() * 20 - 10);
+            const g = gray + (Math.random() * 20 - 10);
+            const b = gray + (Math.random() * 20 - 10);
+            ctx.fillStyle = `rgb(${Math.floor(r)}, ${Math.floor(g)}, ${Math.floor(b)})`;
+
+            // 角丸の石を描画
+            drawRoundedRect(ctx, sx, sy, w, h, 10);
+            ctx.fill();
+
+            // ハイライトとシャドウで立体感を出す
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = 'rgba(255,255,255,0.15)'; // ハイライト
+            ctx.stroke();
+        }
+    }
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    // 石を細かくしたのでリピート回数を減らす
+    tex.repeat.set(1, 1);
+    return tex;
+}
+
+// 角丸矩形描画ヘルパー
+function drawRoundedRect(ctx, x, y, w, h, r) {
+    if (w < 2 * r) r = w / 2;
+    if (h < 2 * r) r = h / 2;
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+}
+
+function sanitizeGameState() {
+    let fixedCount = 0;
+    const grid = gameState.tiles;
+    const size = gameState.gridSize;
+
+    // 1. Remove Orphan Parts
+    for (let i = 0; i < grid.length; i++) {
+        const t = grid[i];
+        if (t.type && t.type.endsWith('_part')) {
+            const mIdx = t.masterIndex;
+            if (mIdx === undefined || mIdx < 0 || mIdx >= grid.length) {
+                t.type = null; t.level = 0; t.masterIndex = undefined;
+                fixedCount++;
+                continue;
+            }
+            const master = grid[mIdx];
+            const expectedType = t.type.substring(0, t.type.length - 5);
+            if (!master.type || master.type !== expectedType) {
+                t.type = null; t.level = 0; t.masterIndex = undefined;
+                fixedCount++;
+            }
+        }
+    }
+
+    // 2. Validate Masters & Heal/Delete
+    for (let i = 0; i < grid.length; i++) {
+        const t = grid[i];
+        if (t.type && !t.type.endsWith('_part')) {
+            if (typeof getBuildingSize !== 'function') continue; // Safety
+            const bSize = getBuildingSize(t.type);
+            if (bSize.w === 1 && bSize.h === 1) continue;
+
+            const rot = t.rotation || 0;
+            const w = (rot % 2 === 0) ? bSize.w : bSize.h;
+            const h = (rot % 2 === 0) ? bSize.h : bSize.w;
+            const origin = getGridPos(i);
+
+            let isValid = true;
+            if (!t.unlocked) isValid = false; // Check Master Unlock
+
+            let partsToRestore = [];
+
+            if (isValid) {
+                for (let dy = 0; dy < h; dy++) {
+                    for (let dx = 0; dx < w; dx++) {
+                        if (dx === 0 && dy === 0) continue;
+
+                        const tx = origin.x + dx;
+                        const ty = origin.y + dy;
+                        const tidx = getIndexFromPos(tx, ty);
+
+                        if (tidx === -1) {
+                            isValid = false; break; // Out of bounds
+                        }
+                        const target = grid[tidx];
+
+                        if (!target.unlocked) {
+                            isValid = false; break; // Locked tile
+                        }
+
+                        if (!target.type) {
+                            partsToRestore.push(tidx);
+                        } else if (target.type === t.type + '_part' && target.masterIndex === i) {
+                            // OK
+                        } else {
+                            isValid = false; break; // Collision
+                        }
+                    }
+                    if (!isValid) break;
+                }
+            }
+
+            if (!isValid) {
+                // Corrupted or Invalid Pos -> Move to Inventory & Remove
+                // Recover Stored Resources first
+                if (t.stored) {
+                    for (let r in t.stored) {
+                        if (gameState.resources[r] !== undefined) {
+                            gameState.resources[r] += t.stored[r];
+                        }
+                    }
+                }
+                // Move to Inventory
+                gameState.inventory.push({ type: t.type, level: t.level });
+
+                // Remove Master
+                t.type = null; t.level = 0; t.finishTime = null; t.stored = {}; t.rotation = 0;
+
+                // Clean parts
+                for (let dy = 0; dy < h; dy++) {
+                    for (let dx = 0; dx < w; dx++) {
+                        if (dx === 0 && dy === 0) continue;
+                        const tx = origin.x + dx;
+                        const ty = origin.y + dy;
+                        const tidx = getIndexFromPos(tx, ty);
+                        if (tidx !== -1) {
+                            const p = grid[tidx];
+                            if (p.type === (t.type ? t.type + '_part' : '') && p.masterIndex === i) {
+                                p.type = null; p.level = 0; p.masterIndex = undefined;
+                            }
+                        }
+                    }
+                }
+                fixedCount++;
+            } else {
+                // Heal
+                if (partsToRestore.length > 0) {
+                    partsToRestore.forEach(pidx => {
+                        const p = grid[pidx];
+                        p.type = t.type + '_part';
+                        p.masterIndex = i;
+                        p.level = t.level;
+                    });
+                    fixedCount++;
+                }
+            }
+        }
+    }
+
+    // 3. Validate Ascended State
+    for (let i = 0; i < grid.length; i++) {
+        const t = grid[i];
+        if (t.ascended) {
+            // Only allow ascended if ASCENSION_BASE_STATS defines the type
+            if (!ASCENSION_BASE_STATS[t.type]) {
+                console.warn(`Sanitize: Removing invalid ascended flag from tile ${i} (type: ${t.type})`);
+                t.ascended = false;
+                // Restore level to 30 since ascension resets to 1
+                if (t.level <= 1) t.level = 30;
+                fixedCount++;
+            }
+            // Ensure ascended building has valid level
+            if (t.level <= 0) {
+                t.level = 1;
+                fixedCount++;
+            }
+        }
+    }
+
+    // 4. Robust recovery for ascended buildings incorrectly reset by bug
+    if (!gameState._ascensionRecoveryFinal) {
+        for (let i = 0; i < grid.length; i++) {
+            const t = grid[i];
+            // Detection: Lv.1 building, not a part, has ascended stats available, but flag is false.
+            // This is the signature of a building that was reset by the rendering crash.
+            if (t.type && !t.type.endsWith('_part') && !t.ascended && t.level === 1 && ASCENSION_BASE_STATS[t.type] && !t.finishTime) {
+                t.ascended = true;
+                console.log(`Recovery: Restored lost ascended flag for tile ${i} (type: ${t.type})`);
+                showToast(`🔄 ${BUILDINGS[t.type].name}の昇格状態を復元しました`);
+                fixedCount++;
+            }
+        }
+        gameState._ascensionRecoveryFinal = true;
+    }
+
+    if (fixedCount > 0) {
+        console.log(`Sanitized ${fixedCount} issues.`);
+        showToast(`不整合データを修正/保管庫へ移動しました(${fixedCount}件)`);
+        saveGame(); // Save fixes
+    }
+}
+
+function initGame() {
+    log("Game initializing...");
+
+    if (typeof THREE === 'undefined') {
+        document.body.innerHTML = '<div style="padding:20px;text-align:center;color:red;"><h3>エラー: 3Dライブラリが読み込めません。</h3><p>再読み込みしてください。</p></div>';
+        return;
+    }
+
+    migrateXPSystem();
+
+    if (!gameState.maxBuilders) gameState.maxBuilders = CONFIG.initialMaxBuilders;
+    if (!gameState.gridSize) gameState.gridSize = CONFIG.initialGridSize;
+
+    const totalTiles = gameState.gridSize * gameState.gridSize;
+    if (gameState.tiles.length !== totalTiles) {
+        if (gameState.tiles.length === 0) {
+            gameState.tiles = Array(totalTiles).fill(null).map((_, i) => ({
+                type: null, level: 0, finishTime: null,
+                unlocked: CONFIG.initialUnlocked.includes(i),
+                stored: {},
+                lastCollectTime: 0
+            }));
+        } else {
+            const currentLen = gameState.tiles.length;
+            for (let i = currentLen; i < totalTiles; i++) {
+                gameState.tiles.push({
+                    type: null, level: 0, finishTime: null,
+                    unlocked: false,
+                    stored: {},
+                    lastCollectTime: 0
+                });
+            }
+        }
+    } else {
+        gameState.tiles.forEach(t => {
+            if (!t.stored) t.stored = {};
+            if (t.lastCollectTime === undefined) t.lastCollectTime = 0;
+        });
+    }
+    if (!gameState.inventory) gameState.inventory = [];
+
+    sanitizeGameState(); // Auto-fix corrupted data on load
+
+    try {
+        init3D();
+    } catch (e) {
+        console.error('3D Init Error:', e);
+        log(`3D Init Error: ${e.message}\n${e.stack}`, true);
+        showToast(`3D表示の初期化に失敗しました: ${e.message}`);
+        // Display error details for debugging
+        const errDiv = document.createElement('div');
+        errDiv.style.cssText = 'position:fixed;bottom:10px;left:10px;right:10px;background:#fee;border:2px solid red;padding:10px;z-index:99999;font-size:12px;max-height:200px;overflow:auto;border-radius:8px;';
+        errDiv.innerHTML = `<b>3D Init Error:</b><br><pre style="white-space:pre-wrap;font-size:11px;">${e.message}\n${e.stack || ''}</pre>`;
+        document.body.appendChild(errDiv);
+        return;
+    }
+
+    updateHeader();
+
+    requestAnimationFrame(animate3D);
+    setInterval(gameLogicLoop, 1000);
+    setInterval(() => window.saveGame(true), CONFIG.autoSaveInterval);
+    setInterval(updatePanelUI, 500);
+
+    log("Game loop started.");
+}
+
+function migrateXPSystem() {
+    if (gameState.xpMigrationDone) return;
+    if (gameState.rank < 12) {
+        gameState.xpMigrationDone = true;
+        return;
+    }
+
+    console.log("Migrating XP system for Rank 12+ user...");
+    let totalXP = gameState.xp;
+    const getLegacyXP = (r) => {
+        const base = r * 500;
+        if (r >= 10) return base * 4;
+        return base;
+    };
+    for (let r = 1; r < gameState.rank; r++) {
+        totalXP += getLegacyXP(r);
+    }
+    let newRank = 1;
+    while (true) {
+        const req = getNextRankXP(newRank);
+        if (totalXP >= req) {
+            totalXP -= req;
+            newRank++;
+        } else {
+            break;
+        }
+    }
+    if (newRank !== gameState.rank) {
+        console.log(`Rank migrated: ${gameState.rank} -> ${newRank}`);
+        showToast(`ランク調整: ${gameState.rank}→${newRank}`);
+        gameState.rank = newRank;
+        gameState.xp = totalXP;
+    }
+    gameState.xpMigrationDone = true;
+    saveGame(true);
+}
+
+// 土の道テクスチャを生成（暗い黄土色、ムラあり）
+function createDirtRoadTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+
+    // ベース色（暗い黄土色）
+    ctx.fillStyle = '#7B6B4A';
+    ctx.fillRect(0, 0, 128, 128);
+
+    // ノイズ・ムラを追加
+    for (let i = 0; i < 300; i++) {
+        const x = Math.random() * 128;
+        const y = Math.random() * 128;
+        const size = 2 + Math.random() * 4;
+        const r = 90 + Math.floor(Math.random() * 40);
+        const g = 80 + Math.floor(Math.random() * 35);
+        const b = 50 + Math.floor(Math.random() * 30);
+        const alpha = 0.3 + Math.random() * 0.4;
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // 細い線（轍のような効果）
+    ctx.strokeStyle = 'rgba(60, 50, 35, 0.3)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 5; i++) {
+        ctx.beginPath();
+        ctx.moveTo(Math.random() * 128, 0);
+        ctx.lineTo(Math.random() * 128, 128);
+        ctx.stroke();
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(8, 8);
+    return texture;
+}
+
+function init3D() {
+    const container = document.getElementById('game-container');
+    if (!container) throw new Error("Game container not found");
+
+    let width = container.clientWidth;
+    let height = container.clientHeight;
+
+    if (width === 0 || height === 0) {
+        width = window.innerWidth;
+        height = window.innerHeight;
+    }
+
+    scene = new THREE.Scene();
+
+    const aspect = width / height;
+    const d = 10;
+
+    camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 1, 1000);
+    camera.position.set(20, 20, 20);
+    camera.lookAt(scene.position);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+
+    const pixelRatio = Math.max(window.devicePixelRatio, 2.0);
+    renderer.setPixelRatio(pixelRatio);
+
+    renderer.setSize(width, height);
+    renderer.shadowMap.enabled = true;
+    renderer.setClearColor(0x000000, 0);
+    container.innerHTML = '';
+    container.appendChild(renderer.domElement);
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+    dirLight.position.set(10, 20, 10);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 1024;
+    dirLight.shadow.mapSize.height = 1024;
+    scene.add(dirLight);
+
+    // テクスチャとマテリアルの初期化
+    MATERIALS.cobblestone = new THREE.MeshStandardMaterial({
+        map: createCobblestoneTexture(),
+        roughness: 0.8, // 少しつやを出す
+        color: 0xffffff
+    });
+    MATERIALS.grassLocked = new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 1.0 });
+    MATERIALS.white = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 });
+
+    // 土の道テクスチャ生成
+    MATERIALS.dirtRoad = new THREE.MeshStandardMaterial({
+        map: createDirtRoadTexture(),
+        roughness: 1.0,
+        color: 0xffffff
+    });
+
+    raycaster = new THREE.Raycaster();
+    mouse = new THREE.Vector2();
+
+    createTiles();
+    initPedestrians();
+    createSurroundingEnvironment(); // 背景生成
+
+    window.addEventListener('resize', onWindowResize, false);
+
+    renderer.domElement.addEventListener('pointerdown', onPointerDown, false);
+    renderer.domElement.addEventListener('pointerup', onPointerUp, false);
+    renderer.domElement.addEventListener('pointermove', onPointerMove, false);
+
+    renderer.domElement.addEventListener('wheel', onMouseWheel, { passive: false });
+    renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
+    renderer.domElement.addEventListener('touchmove', onTouchMove, { passive: false });
+    renderer.domElement.addEventListener('touchend', onTouchEnd, { passive: false });
+
+    setTimeout(onWindowResize, 100);
+}
+
+// マテリアル定義（テクスチャ生成後に使用）
+const MATERIALS = {
+    roof: new THREE.MeshStandardMaterial({ color: 0xe74c3c, roughness: 0.8 }),
+    wall: new THREE.MeshStandardMaterial({ color: 0xf39c12, roughness: 0.9 }),
+    leaf: new THREE.MeshStandardMaterial({ color: 0x2ecc71, roughness: 1.0 }), // 明るい緑
+    darkLeaf: new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 1.0 }), // 暗い緑（森用）
+    stone: new THREE.MeshStandardMaterial({ color: 0x7f8c8d, roughness: 0.6 }),
+    stoneWhite: new THREE.MeshStandardMaterial({ color: 0xe0e0e0, roughness: 0.7 }), // Light Stone
+    mountain: new THREE.MeshStandardMaterial({ color: 0x95a5a6, roughness: 0.9 }), // 山用
+    snow: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 }), // 雪用
+    dark: new THREE.MeshStandardMaterial({ color: 0x34495e, roughness: 0.5 }),
+    tent: new THREE.MeshStandardMaterial({ color: 0x3498db, roughness: 0.9 }),
+    grass: new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 1.0 }),
+    wood: new THREE.MeshStandardMaterial({ color: 0x8B4513, roughness: 0.9 }),
+    window: new THREE.MeshStandardMaterial({ color: 0x87CEEB, emissive: 0x112233, roughness: 0.2 }),
+    dirt: new THREE.MeshStandardMaterial({ color: 0x5d4037, roughness: 1.0 }),
+    metal: new THREE.MeshStandardMaterial({ color: 0xbdc3c7, metalness: 0.8, roughness: 0.2 }),
+    gold: new THREE.MeshStandardMaterial({ color: 0xf1c40f, metalness: 0.6, roughness: 0.3 }),
+    water: new THREE.MeshStandardMaterial({ color: 0x3498db, transparent: true, opacity: 0.7 }),
+    graySheet: new THREE.MeshStandardMaterial({ color: 0x95a5a6, roughness: 0.9, side: THREE.DoubleSide }),
+    // New Materials for Three Kingdoms Theme
+    pillarRed: new THREE.MeshStandardMaterial({ color: 0x8e2020, roughness: 0.8 }), // 朱色
+    roofStraw: new THREE.MeshStandardMaterial({ color: 0xd4ac6e, roughness: 1.0 }), // 藁
+    roofTileBlack: new THREE.MeshStandardMaterial({ color: 0x2c3e50, roughness: 0.6 }), // 黒瓦
+    roofTileGreen: new THREE.MeshStandardMaterial({ color: 0x16a085, roughness: 0.5 }), // 緑瓦
+    roofTileGold: new THREE.MeshStandardMaterial({ color: 0xf39c12, metalness: 0.4, roughness: 0.4 }), // 金瓦
+    wallWhite: new THREE.MeshStandardMaterial({ color: 0xecf0f1, roughness: 0.9 }), // 白漆喰
+    wallEarth: new THREE.MeshStandardMaterial({ color: 0xa08362, roughness: 1.0 }), // 土壁
+    lanternRed: new THREE.MeshStandardMaterial({ color: 0xe74c3c, emissive: 0x990000, emissiveIntensity: 0.5 }), // 提灯
+    woodDark: new THREE.MeshStandardMaterial({ color: 0x5d4037, roughness: 0.9 }), // 暗い木
+    dirtDark: new THREE.MeshStandardMaterial({ color: 0x3e2723, roughness: 1.0 }), // 暗い土
+    pavingStone: new THREE.MeshStandardMaterial({ color: 0x95a5a6, roughness: 0.8 }), // 石畳
+    dirtRoad: null, // init3Dでテクスチャ付きで初期化
+    // cobblestone と grassLocked は init3D 内で追加
+};
+
+// 工事現場（シート＋作業員）作成
+function createConstructionSite(type) {
+    const group = new THREE.Group();
+
+    let dimW = 1, dimH = 1;
+    if (type && getBuildingSize) {
+        const s = getBuildingSize(type);
+        dimW = s.w; dimH = s.h;
+    }
+
+    // Use cobblestone size for barrier to stay within tile bounds (not road)
+    const offsetStep = 3.4; // Tile offset (updated for wider roads)
+    const unitSize = 2.9;   // Cobblestone tile size (within tile bounds)
+
+    const totalW = unitSize + (dimW - 1) * offsetStep;
+    const totalH = unitSize + (dimH - 1) * offsetStep; // Depth (Z)
+
+    // Center relative to Master
+    const cx = (dimW - 1) * offsetStep / 2;
+    const cz = (dimH - 1) * offsetStep / 2;
+
+    const distW = totalW / 2;
+    const distH = totalH / 2;
+    const height = 0.8; // Increased height to better contain buildings
+
+    // 支柱
+    const poles = [
+        { x: cx + distW, z: cz + distH },
+        { x: cx - distW, z: cz + distH },
+        { x: cx + distW, z: cz - distH },
+        { x: cx - distW, z: cz - distH }
+    ];
+    const poleGeo = new THREE.CylinderGeometry(0.05, 0.05, height, 8);
+    poles.forEach(p => {
+        const pole = new THREE.Mesh(poleGeo, MATERIALS.metal);
+        pole.position.set(p.x, height / 2, p.z);
+        group.add(pole);
+    });
+
+    // 幕
+    const sheetGeoW = new THREE.PlaneGeometry(totalW, height * 0.9);
+    const sheetGeoH = new THREE.PlaneGeometry(totalH, height * 0.9); // Z-axis sides
+
+    const sides = [
+        { x: cx, z: cz + distH, ry: 0, geo: sheetGeoW },
+        { x: cx, z: cz - distH, ry: Math.PI, geo: sheetGeoW },
+        { x: cx + distW, z: cz, ry: Math.PI / 2, geo: sheetGeoH },
+        { x: cx - distW, z: cz, ry: -Math.PI / 2, geo: sheetGeoH }
+    ];
+    sides.forEach(s => {
+        const sheet = new THREE.Mesh(s.geo, MATERIALS.graySheet);
+        sheet.position.set(s.x, height / 2, s.z);
+        sheet.rotation.y = s.ry;
+        group.add(sheet);
+    });
+
+    // Helper: Create detailed worker model with natural hammering animation
+    const createWorker = (posX, posZ, rotY, animOffset = 0) => {
+        const worker = new THREE.Group();
+        worker.position.set(posX, 0, posZ);
+        worker.rotation.y = rotY;
+
+        // Materials - Three Kingdoms era appropriate
+        const matTunic = new THREE.MeshStandardMaterial({ color: 0x8B7355 }); // Brown hemp/cotton tunic
+        const matPants = new THREE.MeshStandardMaterial({ color: 0x5D4E37 }); // Dark brown pants
+        const matSkin = new THREE.MeshStandardMaterial({ color: 0xffccaa });
+        const matStraw = new THREE.MeshStandardMaterial({ color: 0xD4B896 }); // Straw color for hat
+
+        // 上半身グループ（わずかな前傾のみ）
+        const upperBody = new THREE.Group();
+        upperBody.position.set(0, 0.25, 0); // 腰の位置を基準点に
+        upperBody.userData = { anim: 'workerBow', speed: 1.0, offset: animOffset };
+        worker.add(upperBody);
+
+        // Torso (brown work tunic)
+        const torso = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.25, 0.08), matTunic);
+        torso.position.y = 0.10;
+        torso.castShadow = true;
+        upperBody.add(torso);
+
+        // Head
+        const head = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.12), matSkin);
+        head.position.y = 0.28;
+        head.castShadow = true;
+        upperBody.add(head);
+
+        // Conical straw hat (笠 - kasa/li)
+        const hat = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.08, 8), matStraw);
+        hat.position.y = 0.37;
+        hat.castShadow = true;
+        upperBody.add(hat);
+
+        // 腕のグループ（肩から回転する）
+        const createArmWithPivot = (side, hasHammer = false, offset = 0) => {
+            const armGroup = new THREE.Group();
+            const xPos = side === 'left' ? 0.11 : -0.11;
+            armGroup.position.set(xPos, 0.20, 0); // 肩の位置
+
+            // 腕本体
+            const arm = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.22, 0.06), matTunic);
+            arm.position.y = -0.11; // 肩から下に
+            arm.castShadow = true;
+            armGroup.add(arm);
+
+            if (hasHammer) {
+                // ハンマー（腕の先端に取り付け、前方を向く）
+                const hammer = new THREE.Group();
+                hammer.position.set(0, -0.22, 0); // 手の位置
+
+                // ハンマーの柄（手から後方に伸びる）
+                const handle = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.20), MATERIALS.wood);
+                handle.position.z = -0.10; // 後方に
+                hammer.add(handle);
+
+                // ハンマーヘッド（前方、振り下ろす時に当たる部分）
+                const hammerHead = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.10), MATERIALS.metal);
+                hammerHead.position.set(0, 0, 0.05); // 手の前方
+                hammer.add(hammerHead);
+
+                armGroup.add(hammer);
+
+                // ハンマーを持つ腕のアニメーション
+                armGroup.userData = { anim: 'armSwing', speed: 1.0, offset: offset };
+            }
+
+            return armGroup;
+        };
+
+        // 左腕（補助、少し動く）
+        const leftArm = createArmWithPivot('left', false);
+        leftArm.userData = { anim: 'armAssist', speed: 1.0, offset: animOffset };
+        upperBody.add(leftArm);
+
+        // 右腕（ハンマー持ち、大きく振る）
+        const rightArm = createArmWithPivot('right', true, animOffset);
+        upperBody.add(rightArm);
+
+        // Legs（肩幅に開いた姿勢）
+        const createLeg = (xPos) => {
+            const legGroup = new THREE.Group();
+            legGroup.position.set(xPos, 0.25, 0);
+            const leg = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.25, 0.065), matPants);
+            leg.position.y = -0.125;
+            leg.castShadow = true;
+            legGroup.add(leg);
+            return legGroup;
+        };
+
+        const leftLeg = createLeg(0.08);  // 足を広げる
+        const rightLeg = createLeg(-0.08);
+        worker.add(leftLeg);
+        worker.add(rightLeg);
+
+        return worker;
+    };
+
+    // Worker 1: Hammering (front-right)
+    const worker1 = createWorker(0.4, 0.8, Math.PI, 0);
+    group.add(worker1);
+
+    // Worker 2: Hammering (front-left) - with timing offset
+    const worker2 = createWorker(-0.4, 0.8, Math.PI, Math.PI); // 半周期ずれたタイミング
+    group.add(worker2);
+
+    return group;
+}
+
+// 周囲の環境（山や森）を生成する関数
+function createSurroundingEnvironment() {
+    if (environmentGroup) scene.remove(environmentGroup);
+    environmentGroup = new THREE.Group();
+    scene.add(environmentGroup);
+
+    const currentSize = gameState.gridSize * 2; // グリッドの倍の範囲を安全地帯とする
+    const range = 60; // 生成範囲の半径
+
+    // ヘルパー: 木を作成
+    const createTree = (x, z, scale = 1) => {
+        const g = new THREE.Group();
+        g.position.set(x, 0, z);
+        g.scale.set(scale, scale, scale);
+
+        // 幹
+        const trunk = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.1, 0.15, 0.5, 5),
+            MATERIALS.wood
+        );
+        trunk.position.y = 0.25;
+        trunk.castShadow = true;
+        g.add(trunk);
+
+        // 葉 (3段)
+        const l1 = new THREE.Mesh(new THREE.ConeGeometry(0.4, 0.6, 5), MATERIALS.darkLeaf);
+        l1.position.y = 0.6;
+        l1.castShadow = true;
+        g.add(l1);
+
+        const l2 = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.5, 5), MATERIALS.darkLeaf);
+        l2.position.y = 0.9;
+        l2.castShadow = true;
+        g.add(l2);
+
+        return g;
+    };
+
+    // ヘルパー: 山を作成
+    const createMountain = (x, z, height, radius) => {
+        const g = new THREE.Group();
+        g.position.set(x, 0, z);
+
+        // 本体
+        const m = new THREE.Mesh(
+            new THREE.ConeGeometry(radius, height, 5),
+            MATERIALS.mountain
+        );
+        m.position.y = height / 2;
+        m.castShadow = true;
+        m.receiveShadow = true;
+        g.add(m);
+
+        // 雪解け（頂上）
+        const s = new THREE.Mesh(
+            new THREE.ConeGeometry(radius * 0.3, height * 0.3, 5),
+            MATERIALS.snow
+        );
+        s.position.y = height * 0.85;
+        g.add(s);
+
+        return g;
+    };
+
+    // 配置ロジック
+    for (let i = 0; i < 150; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        // グリッドの外側から遠くまで配置
+        // offset=3なので、サイズも大きくなっている。
+        // 半径計算: (currentSize / 2 * 3) + 余裕
+        const dist = (currentSize * 1.5) + 8 + Math.random() * range;
+
+        const x = Math.cos(angle) * dist;
+        const z = Math.sin(angle) * dist;
+
+        // 奥側（北側）には山を多めに配置
+        if (z < -10 && Math.random() > 0.6) {
+            const h = (3 + Math.random() * 5) * 1.6; // Scale up 1.6
+            const r = (2 + Math.random() * 3) * 1.6; // Scale up 1.6
+            environmentGroup.add(createMountain(x, z, h, r));
+        } else {
+            // 木を配置
+            const scale = (0.8 + Math.random() * 0.8) * 1.6; // Scale up 1.6
+            const tree = createTree(x, z, scale);
+            // ランダムに少し傾ける
+            tree.rotation.z = (Math.random() - 0.5) * 0.1;
+            tree.rotation.x = (Math.random() - 0.5) * 0.1;
+            environmentGroup.add(tree);
+        }
+    }
+
+    // 地面となる巨大な円盤（プレイエリアの下）
+    const bigGround = new THREE.Mesh(
+        new THREE.CircleGeometry(range + 30, 32),
+        new THREE.MeshStandardMaterial({ color: 0x3c5c35, roughness: 1.0 }) // 濃い緑の地面
+    );
+    bigGround.rotation.x = -Math.PI / 2;
+    bigGround.position.y = -0.1; // タイルの地面よりさらに下
+    bigGround.receiveShadow = true;
+    environmentGroup.add(bigGround);
+}
+
+// --- Sound Manager (Web Audio API) ---
+const SoundManager = {
+    ctx: null,
+    bgmNode: null,
+    masterGain: null,
+    bgmGain: null,
+    nextNoteTime: 0,
+    isPlaying: false,
+    timerID: null,
+    config: {
+        bgmVolume: parseFloat(localStorage.getItem('kb_config_bgm_vol') || '0.5'),
+        seVolume: parseFloat(localStorage.getItem('kb_config_se_vol') || '0.5')
+    },
+
+    init: function () {
+        if (this.ctx) return;
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext) return;
+
+        this.ctx = new AudioContext();
+        this.masterGain = this.ctx.createGain();
+        this.masterGain.gain.value = 1.0;
+        this.masterGain.connect(this.ctx.destination);
+
+        if (this.config.bgmVolume > 0) this.playBGM();
+    },
+
+    resume: function () {
+        if (this.ctx && this.ctx.state === 'suspended') {
+            this.ctx.resume();
+        }
+        if (!this.ctx) this.init();
+    },
+
+    setBGMVolume: function (val) {
+        this.config.bgmVolume = val;
+        localStorage.setItem('kb_config_bgm_vol', val);
+        if (!this.ctx) return; // Wait for init
+        if (this.bgmGain) {
+            try {
+                this.bgmGain.gain.cancelScheduledValues(0);
+                this.bgmGain.gain.value = val * 0.3;
+            } catch (e) {
+                console.warn("Audio error", e);
+            }
+        }
+        if (val > 0 && !this.isPlaying) {
+            this.playBGM();
+        } else if (val === 0 && this.isPlaying) {
+            this.stopBGM();
+        }
+    },
+
+    setSEVolume: function (val) {
+        this.config.seVolume = val;
+        localStorage.setItem('kb_config_se_vol', val);
+    },
+
+    // --- BGM Sequencer ---
+    playBGM: function () {
+        if (this.isPlaying || !this.ctx) return;
+        this.resume();
+
+        // If volume is 0, don't start
+        if (this.config.bgmVolume <= 0) return;
+
+        this.isPlaying = true;
+        this.nextNoteTime = this.ctx.currentTime + 0.1;
+
+        // Master BGM Gain for volume control
+        this.bgmGain = this.ctx.createGain();
+        this.bgmGain.gain.value = this.config.bgmVolume * 0.3;
+        this.bgmGain.connect(this.masterGain);
+
+        this.melodyIndex = 0;
+        this.scheduler();
+    },
+
+    stopBGM: function () {
+        this.isPlaying = false;
+        if (this.timerID) clearTimeout(this.timerID);
+        if (this.bgmGain) {
+            this.bgmGain.disconnect();
+            this.bgmGain = null;
+        }
+    },
+
+    scheduler: function () {
+        if (!this.isPlaying) return;
+        // Schedule ahead 0.1s
+        while (this.nextNoteTime < this.ctx.currentTime + 0.1) {
+            this.scheduleNote(this.nextNoteTime);
+            this.nextNoteTime += 0.4; // Tempo
+        }
+        this.timerID = setTimeout(() => this.scheduler(), 25);
+    },
+
+    melodyIndex: 0,
+    scheduleNote: function (time) {
+        // Calming pentatonic melody loop
+        // C4, D4, E4, G4, A4 ... 
+        const notes = [
+            261.63, 293.66, 329.63, 392.00, // C D E G
+            440.00, 392.00, 329.63, 293.66, // A G E D
+            261.63, -1, 329.63, -1,         // C - E -
+            392.00, 261.63, 293.66, -1      // G C D -
+        ];
+
+        const freq = notes[this.melodyIndex % notes.length];
+        this.melodyIndex++;
+        if (freq <= 0) return;
+
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+
+        // Soft Triangle (Electric Piano like)
+        osc.type = 'triangle';
+        osc.frequency.value = freq;
+
+        // Envelope
+        gain.gain.setValueAtTime(0, time);
+        gain.gain.linearRampToValueAtTime(1.0, time + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.01, time + 0.6);
+
+        osc.connect(gain);
+        gain.connect(this.bgmGain);
+
+        osc.start(time);
+        osc.stop(time + 0.6);
+    },
+
+    playSE: function (type) {
+        if (this.config.seVolume <= 0) return;
+        this.resume();
+        if (!this.ctx) return;
+
+        const t = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+
+        const vol = this.config.seVolume;
+
+        if (type === 'select') {
+            // High blip
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(800, t);
+            osc.frequency.exponentialRampToValueAtTime(1200, t + 0.1);
+            gain.gain.setValueAtTime(0.3 * vol, t);
+            gain.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
+            osc.start(t);
+            osc.stop(t + 0.1);
+
+        } else if (type === 'build') {
+            // Low thud
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(150, t);
+            osc.frequency.exponentialRampToValueAtTime(40, t + 0.2);
+            gain.gain.setValueAtTime(0.5 * vol, t);
+            gain.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
+            osc.start(t);
+            osc.stop(t + 0.2);
+
+        } else if (type === 'collect') {
+            // Coin / Shimmer
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(1200, t);
+            gain.gain.setValueAtTime(0.3 * vol, t);
+            gain.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
+            osc.start(t);
+            osc.stop(t + 0.15);
+
+            const osc2 = this.ctx.createOscillator();
+            const gain2 = this.ctx.createGain();
+            osc2.connect(gain2);
+            gain2.connect(this.masterGain);
+            osc2.type = 'sine';
+            osc2.frequency.setValueAtTime(1800, t + 0.05);
+            gain2.gain.setValueAtTime(0.3 * vol, t + 0.05);
+            gain2.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
+            osc2.start(t + 0.05);
+            osc2.stop(t + 0.2);
+
+        } else if (type === 'levelup') {
+            // Fanfare
+            const notes = [523.25, 659.25, 783.99, 1046.50];
+            notes.forEach((freq, i) => {
+                const o = this.ctx.createOscillator();
+                const g = this.ctx.createGain();
+                o.connect(g);
+                g.connect(this.masterGain);
+                o.type = 'triangle';
+                o.frequency.value = freq;
+                g.gain.setValueAtTime(0.2 * vol, t + i * 0.1);
+                g.gain.exponentialRampToValueAtTime(0.01, t + i * 0.1 + 0.3);
+                o.start(t + i * 0.1);
+                o.stop(t + i * 0.1 + 0.3);
+            });
+
+        } else if (type === 'error') {
+            // Buzz
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(150, t);
+            osc.frequency.linearRampToValueAtTime(100, t + 0.15);
+            gain.gain.setValueAtTime(0.2 * vol, t);
+            gain.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
+            osc.start(t);
+            osc.stop(t + 0.15);
+        } else if (type === 'cancel') {
+            // Descending
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(600, t);
+            osc.frequency.linearRampToValueAtTime(300, t + 0.2);
+            gain.gain.setValueAtTime(0.2 * vol, t);
+            gain.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
+            osc.start(t);
+            osc.stop(t + 0.2);
+        }
+    }
+};
+
+// Click to resume
+window.SoundManager = SoundManager;
+
+// --- Pedestrian Visual Upgrade ---
+const TextureGenerator = {
+    createCanvas: function () {
+        const cvs = document.createElement('canvas');
+        cvs.width = 64; cvs.height = 64;
+        return cvs;
+    },
+    generateFace: function (role) {
+        const cvs = this.createCanvas();
+        const ctx = cvs.getContext('2d');
+        ctx.fillStyle = '#fcc'; ctx.fillRect(0, 0, 64, 64); // Skin
+        // Faceless style (No eyes/mouth)
+        const tex = new THREE.CanvasTexture(cvs);
+        tex.magFilter = THREE.NearestFilter;
+        return tex;
+    },
+    generateClothing: function (role, colorHex) {
+        const cvs = this.createCanvas();
+        const ctx = cvs.getContext('2d');
+        ctx.fillStyle = '#' + colorHex.toString(16).padStart(6, '0'); ctx.fillRect(0, 0, 64, 64); // Base
+
+        ctx.fillStyle = 'rgba(255,255,255,0.1)';
+        if (role === 'merchant' || role === 'official') {
+            for (let i = 0; i < 64; i += 8) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + 4, 4); ctx.lineTo(i, 8); ctx.fill(); } // Silk
+            ctx.fillStyle = '#222'; ctx.fillRect(28, 0, 8, 64); ctx.fillRect(0, 0, 64, 4); // Trim
+        } else if (role === 'soldier') {
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            for (let y = 0; y < 64; y += 8) for (let x = 0; x < 64; x += 8) ctx.strokeRect(x, y, 8, 8); // Scales
+            ctx.strokeStyle = '#b22'; ctx.lineWidth = 4; ctx.strokeRect(0, 0, 64, 64); // Red trim
+        } else { // Villager
+            ctx.fillStyle = 'rgba(0,0,0,0.05)';
+            for (let i = 0; i < 200; i++) ctx.fillRect(Math.random() * 64, Math.random() * 64, 2, 2); // Noise
+            ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(32, 0); ctx.lineTo(0, 32); ctx.moveTo(32, 0); ctx.lineTo(64, 32); ctx.stroke(); // Collar
+        }
+        const tex = new THREE.CanvasTexture(cvs);
+        tex.magFilter = THREE.NearestFilter;
+        return tex;
+    },
+    // --- High Fidelity Textures ---
+    generateStoneBrick: function (baseColor = '#7a7a7a') {
+        const cvs = this.createCanvas();
+        const ctx = cvs.getContext('2d');
+
+        // Base
+        ctx.fillStyle = baseColor;
+        ctx.fillRect(0, 0, 64, 64);
+
+        // Noise / Grit
+        for (let i = 0; i < 400; i++) {
+            ctx.fillStyle = Math.random() < 0.5 ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.1)';
+            ctx.fillRect(Math.random() * 64, Math.random() * 64, 1, 1);
+        }
+
+        // Bricks pattern
+        ctx.strokeStyle = 'rgba(40,40,40,0.4)';
+        ctx.lineWidth = 2;
+        // Rows
+        for (let y = 0; y <= 64; y += 16) {
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(64, y);
+            ctx.stroke();
+        }
+        // Cols (Staggered)
+        for (let y = 0; y < 64; y += 16) {
+            const offset = (y / 16) % 2 === 0 ? 0 : 16;
+            for (let x = offset; x <= 64; x += 32) {
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                ctx.lineTo(x, y + 16);
+                ctx.stroke();
+            }
+        }
+
+        // Highlight/Shadow edges for depth
+        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+        ctx.lineWidth = 1;
+        for (let y = 0; y < 64; y += 16) {
+            const offset = (y / 16) % 2 === 0 ? 0 : 16;
+            for (let x = offset; x <= 64; x += 32) {
+                ctx.beginPath(); ctx.moveTo(x + 2, y + 2); ctx.lineTo(x + 30, y + 2); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(x + 2, y + 2); ctx.lineTo(x + 2, y + 14); ctx.stroke();
+            }
+        }
+
+        const tex = new THREE.CanvasTexture(cvs);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.magFilter = THREE.NearestFilter;
+        return tex;
+    },
+    generateAgedWood: function (baseColor = '#5d4037') {
+        const cvs = this.createCanvas();
+        const ctx = cvs.getContext('2d');
+
+        ctx.fillStyle = baseColor;
+        ctx.fillRect(0, 0, 64, 64);
+
+        // Grain
+        ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 20; i++) {
+            const x = Math.random() * 64;
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.bezierCurveTo(x + Math.random() * 10 - 5, 20, x + Math.random() * 10 - 5, 40, x, 64);
+            ctx.stroke();
+        }
+
+        // Knots
+        ctx.fillStyle = 'rgba(40,30,20,0.3)';
+        for (let i = 0; i < 3; i++) {
+            const x = Math.random() * 64;
+            const y = Math.random() * 64;
+            ctx.beginPath();
+            ctx.ellipse(x, y, 2, 4, Math.random(), 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        const tex = new THREE.CanvasTexture(cvs);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.magFilter = THREE.NearestFilter;
+        return tex;
+    },
+    generateRoofTile: function (color = '#424242') {
+        const cvs = this.createCanvas();
+        const ctx = cvs.getContext('2d');
+
+        ctx.fillStyle = color;
+        ctx.fillRect(0, 0, 64, 64);
+
+        // Scales pattern
+        ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+        ctx.lineWidth = 2;
+
+        const r = 8;
+        for (let y = -r; y < 64 + r; y += r) {
+            const offset = (y / r) % 2 === 0 ? 0 : r;
+            for (let x = -r; x < 64 + r; x += r * 2) {
+                ctx.beginPath();
+                ctx.arc(x + offset, y, r, 0, Math.PI, false);
+                ctx.stroke();
+                // Shade
+                ctx.fillStyle = 'rgba(0,0,0,0.1)';
+                ctx.fill();
+            }
+        }
+
+        const tex = new THREE.CanvasTexture(cvs);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        return tex;
+    }
+};
+
+function createAdvancedPedestrian(role) {
+    const group = new THREE.Group();
+
+    // Textures
+    const faceTex = TextureGenerator.generateFace(role);
+    let color = 0x8B4513;
+    if (role === 'merchant') color = 0x4682B4;
+    if (role === 'official') color = 0x800000;
+    if (role === 'soldier') color = 0x555555;
+    if (role === 'villager') color = [0x8B4513, 0x556B2F, 0xD2B48C][Math.floor(Math.random() * 3)];
+
+    const clothesTex = TextureGenerator.generateClothing(role, color);
+    const matSkin = new THREE.MeshStandardMaterial({ map: faceTex });
+    const matClothes = new THREE.MeshStandardMaterial({ map: clothesTex });
+    const matDark = new THREE.MeshStandardMaterial({ color: 0x333333 });
+
+    // Body
+    const torsoGeo = (role === 'official' || role === 'merchant') ? new THREE.CylinderGeometry(0.1, 0.15, 0.25, 8) : new THREE.BoxGeometry(0.15, 0.25, 0.08);
+    const torso = new THREE.Mesh(torsoGeo, matClothes);
+    torso.position.y = 0.25; torso.castShadow = true;
+    group.add(torso);
+
+    // Head
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.12), matSkin);
+    head.position.y = 0.43; head.castShadow = true;
+    group.add(head);
+
+    // Hat
+    const hatGroup = new THREE.Group(); hatGroup.position.y = 0.5;
+    if (role === 'official') {
+        const guan = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.1), matDark); guan.position.y = 0.02; hatGroup.add(guan);
+    } else if (role === 'soldier') {
+        const helm = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.08, 8), new THREE.MeshStandardMaterial({ color: 0x888888 })); hatGroup.add(helm);
+    } else if (role === 'villager') {
+        if (Math.random() > 0.5) {
+            const hat = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.05, 8), new THREE.MeshStandardMaterial({ color: 0xDAA520 })); hatGroup.add(hat);
+        } else {
+            const bun = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.06), matDark); hatGroup.add(bun);
+        }
+    } else {
+        const cap = new THREE.Mesh(new THREE.DodecahedronGeometry(0.07), new THREE.MeshStandardMaterial({ color: 0x222222 })); cap.position.y = 0.02; hatGroup.add(cap);
+    }
+    group.add(hatGroup);
+
+    // Limbs
+    const createLimb = (w, h, mat, x, y) => {
+        const g = new THREE.Group(); g.position.set(x, y, 0);
+        const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, w), mat); m.position.y = -h / 2; m.castShadow = true;
+        g.add(m); return g;
+    };
+
+    group.userData.leftArm = createLimb(0.05, 0.2, matClothes, 0.11, 0.38);
+    group.userData.rightArm = createLimb(0.05, 0.2, matClothes, -0.11, 0.38);
+    group.add(group.userData.leftArm); group.add(group.userData.rightArm);
+
+    const pantsMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+    group.userData.leftLeg = createLimb(0.06, 0.25, pantsMat, 0.05, 0.2);
+    group.userData.rightLeg = createLimb(0.06, 0.25, pantsMat, -0.05, 0.2);
+    group.add(group.userData.leftLeg); group.add(group.userData.rightLeg);
+
+    // Accessories
+    if (role === 'soldier') {
+        const spear = new THREE.Group();
+        spear.add(new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 1.2), new THREE.MeshStandardMaterial({ color: 0x654321 }))); // Shaft
+        const tip = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.1, 4), new THREE.MeshStandardMaterial({ color: 0xaaaaaa })); tip.position.y = 0.6; spear.add(tip);
+        spear.rotation.x = -Math.PI / 2; spear.position.set(0, -0.1, 0.3);
+        group.userData.rightArm.add(spear);
+    }
+
+    return group;
+}
+const initAudio = () => { SoundManager.resume(); };
+document.addEventListener('click', initAudio, { once: true });
+document.addEventListener('touchstart', initAudio, { once: true });
+
+// 道路メッシュ管理
+let roadMeshes = [];
+let baseRoadMesh = null; // ベースの道路レイヤー
+
+function createTiles() {
+    tileMeshes.forEach(t => {
+        scene.remove(t.mesh);
+        scene.remove(t.groundMesh);
+        t.overlayEl.remove();
+    });
+    tileMeshes = [];
+
+    // 土台は「見えないヒットボックス」に変更
+    const geometry = new THREE.BoxGeometry(2.1, 0.75, 2.1);
+    const invisibleMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0 });
+
+    const offset = 3.4; // 道幅4倍のため拡張（元3.0→3.4）
+    const size = gameState.gridSize;
+    const start = -offset * (size - 1) / 2;
+
+    // ベースの道路レイヤー（地面全体を覆う）
+    const totalGridSize = size * offset + 1; // グリッド全体 + 余白
+    const baseRoadGeo = new THREE.PlaneGeometry(totalGridSize, totalGridSize);
+    if (baseRoadMesh) scene.remove(baseRoadMesh);
+    baseRoadMesh = new THREE.Mesh(baseRoadGeo, MATERIALS.dirtRoad);
+    baseRoadMesh.rotation.x = -Math.PI / 2;
+    baseRoadMesh.position.set(0, -0.08, 0); // タイル地面より下に配置
+    baseRoadMesh.receiveShadow = true;
+    scene.add(baseRoadMesh);
+
+    // 施設タイル用の地面（石畳、サイズ維持）
+    const groundGeo = new THREE.PlaneGeometry(2.9, 2.9);
+
+    for (let i = 0; i < size * size; i++) {
+        const row = Math.floor(i / size);
+        const col = i % size;
+        const x = start + col * offset;
+        const z = start + row * offset;
+
+        // 地面（初期マテリアルは仮、sync3DStateで更新）
+        const groundMat = new THREE.MeshStandardMaterial({ color: 0x555555 });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.set(x, -0.05, z); // ちらつき防止のため少し下げる
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // 透明なヒット判定用ボックス
+        const mesh = new THREE.Mesh(geometry, invisibleMat.clone());
+        mesh.position.set(x, 0, z);
+        mesh.userData = { index: i, type: 'tile' };
+        scene.add(mesh);
+
+        const bGroup = new THREE.Group();
+        // 建物は地面(y=0)から直接建てる
+        bGroup.position.set(0, 0, 0);
+        mesh.add(bGroup);
+
+        const overlay = document.createElement('div');
+        overlay.className = 'overlay-item';
+        document.getElementById('ui-overlay-layer').appendChild(overlay);
+
+        const particles = new ParticleSystem(mesh.position, scene);
+
+        tileMeshes.push({
+            mesh: mesh,
+            groundMesh: ground,
+            buildingGroup: bGroup,
+            overlayEl: overlay,
+            particles: particles,
+            currentType: null
+        });
+    }
+
+    // 道路は別メッシュではなく、タイル地面素材で区別
+    // sync3DStateで施設有無に応じて地面素材を切り替え  
+    roadMeshes = []; // 未使用（互換性のため空配列）
+
+    sync3DState();
+    createSurroundingEnvironment(); // タイル生成時にも環境を更新（サイズ拡張対応）
+}
+
+class Person {
+    constructor(scene, role) {
+        this.scene = scene;
+        this.role = role || 'villager';
+        this.mesh = createAdvancedPedestrian(this.role);
+        this.mesh.castShadow = true;
+
+        // Animation handles
+        this.leftArm = this.mesh.userData.leftArm;
+        this.rightArm = this.mesh.userData.rightArm;
+        this.leftLeg = this.mesh.userData.leftLeg;
+        this.rightLeg = this.mesh.userData.rightLeg;
+
+        this.scene.add(this.mesh);
+        this.active = false;
+        this.mesh.visible = false;
+        this.isStopped = false;
+        this.stopTimer = 0;
+        this.canTurn = true;
+        this.animTime = Math.random() * 100;
+
+        this.reset();
+    }
+
+    updateAnimation(dt) {
+        if (!this.active || !this.mesh.visible) return;
+
+        if (this.isStopped) {
+            // Reset pose Lerp
+            const lerpFactor = 0.1;
+            this.leftArm.rotation.x += (0 - this.leftArm.rotation.x) * lerpFactor;
+            this.rightArm.rotation.x += (0 - this.rightArm.rotation.x) * lerpFactor;
+            this.leftLeg.rotation.x += (0 - this.leftLeg.rotation.x) * lerpFactor;
+            this.rightLeg.rotation.x += (0 - this.rightLeg.rotation.x) * lerpFactor;
+            return;
+        }
+
+        // Walk Cycle
+        const speed = 4.0; // Animation frequency (4 = ~2 steps/second)
+        const range = 0.3; // Swing amplitude
+
+        // Use dt directly for animation timing
+        this.animTime += dt * 0.75; // 0.75 base rate for natural walking
+
+        const angle = Math.sin(this.animTime * speed) * range;
+
+        // Arms (Opposite to legs)
+        this.leftArm.rotation.x = angle;
+        this.rightArm.rotation.x = -angle;
+
+        // Legs
+        this.leftLeg.rotation.x = -angle;
+        this.rightLeg.rotation.x = angle;
+    }
+
+    getNearestRoadCoord(val) {
+        const size = gameState.gridSize;
+        const offset = 3.4;
+        const tileStart = -offset * (size - 1) / 2;
+        const roadStart = tileStart + offset / 2; // 道路はタイル間
+        const index = Math.round((val - roadStart) / offset);
+        return roadStart + index * offset;
+    }
+
+    // Update body rotation to face movement direction
+    updateFacing() {
+        const dx = this.direction.x;
+        const dz = this.direction.z;
+        if (dx !== 0 || dz !== 0) {
+            this.mesh.rotation.y = Math.atan2(dx, dz);
+        }
+    }
+
+    // Spawn pedestrian inside the road grid (for initial load)
+    resetInside() {
+        const size = gameState.gridSize;
+        const offset = 3.4;
+        const tileStart = -offset * (size - 1) / 2;
+        const roadStart = tileStart + offset / 2; // 道路はタイル間にある
+        const roadCount = Math.max(1, size - 1);
+
+        // Try up to 20 times to find a valid (non-blocked) spawn position
+        for (let attempt = 0; attempt < 20; attempt++) {
+            const isVertical = Math.random() < 0.5;
+
+            // Pick random road lane
+            const roadIndex = Math.floor(Math.random() * roadCount);
+            const laneCenter = roadStart + roadIndex * offset;
+            const jitter = (Math.random() - 0.5) * 0.4;
+            const lane = laneCenter + jitter;
+
+            // Pick random position ALONG the road (inside grid)
+            const posAlongRoad = roadStart + Math.random() * (roadCount - 1) * offset;
+
+            let sx, sz;
+            if (isVertical) {
+                sx = lane;
+                sz = posAlongRoad;
+            } else {
+                sz = lane;
+                sx = posAlongRoad;
+            }
+
+            // Check if this road position is blocked by a multi-tile building
+            if (this.isRoadBlocked(sx, sz, isVertical)) {
+                continue; // Try another position
+            }
+
+            // Valid position found
+            this.baseSpeed = (0.02 + Math.random() * 0.02) * 0.25;
+            this.speed = this.baseSpeed;
+            const dx = isVertical ? 0 : (Math.random() < 0.5 ? -1 : 1);
+            const dz = isVertical ? (Math.random() < 0.5 ? -1 : 1) : 0;
+
+            this.mesh.position.set(sx, 0, sz);
+            this.direction = new THREE.Vector3(dx, 0, dz);
+            this.updateFacing();
+            this.active = true;
+            this.isStopped = false;
+            this.canTurn = true;
+            this.updateVisibility();
+            return; // Successfully spawned
+        }
+
+        // Fallback: if no valid position found, use regular reset (spawn from outside)
+        this.reset();
+    }
+    reset() {
+        const isVertical = Math.random() < 0.5;
+        const size = gameState.gridSize;
+        const offset = 3.4;
+        const tileStart = -offset * (size - 1) / 2;
+        const roadStart = tileStart + offset / 2; // 道路はタイル間にある
+        const roadCount = Math.max(1, size - 1);
+        const roadIndex = Math.floor(Math.random() * roadCount);
+        const laneCenter = roadStart + roadIndex * offset;
+        const jitter = (Math.random() - 0.5) * 0.4;
+        const lane = laneCenter + jitter;
+        this.baseSpeed = (0.02 + Math.random() * 0.02) * 0.25;
+        this.speed = this.baseSpeed;
+        let sx, sz, dx, dz;
+        const spawnDist = size + 5;
+        if (isVertical) {
+            sx = lane;
+            sz = (Math.random() < 0.5 ? -spawnDist : spawnDist);
+            dx = 0; dz = sz > 0 ? -1 : 1;
+        } else {
+            sz = lane;
+            sx = (Math.random() < 0.5 ? -spawnDist : spawnDist);
+            dx = sx > 0 ? -1 : 1; dz = 0;
+        }
+        this.mesh.position.set(sx, 0, sz);
+        this.direction = new THREE.Vector3(dx, 0, dz);
+        this.updateFacing(); // Sync facing on spawn
+        this.active = true;
+        this.isStopped = false;
+        this.canTurn = true;
+        this.updateVisibility();
+    }
+    isRoadBlocked(x, z, isVertical) {
+        const size = gameState.gridSize;
+        const offset = 3.4;
+        const start = -offset * (size - 1) / 2;
+
+        const getTileIdx = (wx, wz) => {
+            const col = Math.round((wx - start) / offset);
+            const row = Math.round((wz - start) / offset);
+            if (col < 0 || col >= size || row < 0 || row >= size) return -1;
+            return row * size + col;
+        };
+
+        let t1_idx = -1, t2_idx = -1;
+
+        if (isVertical) {
+            // Vertical road: separates Left(x-1) and Right(x+1)
+            t1_idx = getTileIdx(x - 1, z);
+            t2_idx = getTileIdx(x + 1, z);
+        } else {
+            // Horizontal road: separates Top(z-1) and Bottom(z+1)
+            t1_idx = getTileIdx(x, z - 1);
+            t2_idx = getTileIdx(x, z + 1);
+        }
+
+        if (t1_idx === -1 || t2_idx === -1) return false; // Edge of map, usually fine or handled by reset
+
+        const t1 = gameState.tiles[t1_idx];
+        const t2 = gameState.tiles[t2_idx];
+
+        if (!t1 || !t2) return false;
+
+        // Helper to get master index
+        const getMaster = (t, idx) => {
+            if (!t.type) return null;
+            if (t.type.endsWith('_part')) return t.masterIndex;
+            return idx; // It is master or single
+        };
+
+        const m1 = getMaster(t1, t1_idx);
+        const m2 = getMaster(t2, t2_idx);
+
+        // If both share the SAME master (and are not null), they are connected -> Road Blocked
+        if (m1 !== null && m2 !== null && m1 === m2) {
+            return true;
+        }
+
+        return false;
+    }
+
+    isOnGreenRoad(x, z, isVertical) {
+        const size = gameState.gridSize;
+        const offset = 3.4; // Fixed from 2
+        const start = -offset * (size - 1) / 2;
+        const checkTile = (wx, wz) => {
+            const col = Math.round((wx - start) / offset);
+            const row = Math.round((wz - start) / offset);
+            if (col < 0 || col >= size || row < 0 || row >= size) return false;
+            const idx = row * size + col;
+            return gameState.tiles[idx] && gameState.tiles[idx].unlocked;
+        };
+        let t1_unlocked = false;
+        let t2_unlocked = false;
+        if (isVertical) {
+            t1_unlocked = checkTile(x - 1, Math.round(z));
+            t2_unlocked = checkTile(x + 1, Math.round(z));
+        } else {
+            t1_unlocked = checkTile(Math.round(x), z - 1);
+            t2_unlocked = checkTile(Math.round(x), z + 1);
+        }
+        return (!t1_unlocked && !t2_unlocked);
+    }
+    // 石畳（建物があるタイル）の上かどうかをチェック
+    isOnCobblestone(x, z) {
+        const size = gameState.gridSize;
+        const offset = 3.4;
+        const start = -offset * (size - 1) / 2;
+        const baseHalfSize = 1.45; // 石畳タイルのサイズ 2.9 / 2
+        const expandAmount = (3.4 - 2.9) / 2; // 片側拡張量 = 0.25
+
+        for (let i = 0; i < size * size; i++) {
+            const row = Math.floor(i / size);
+            const col = i % size;
+            const tileX = start + col * offset;
+            const tileZ = start + row * offset;
+
+            const tile = gameState.tiles[i];
+            if (!tile || !tile.type) continue;
+
+            // タイルの石畳の実際の範囲を計算（片側のみ拡張）
+            let minX = tileX - baseHalfSize;
+            let maxX = tileX + baseHalfSize;
+            let minZ = tileZ - baseHalfSize;
+            let maxZ = tileZ + baseHalfSize;
+
+            if (tile.type.endsWith('_part')) {
+                // パーツタイル: マスターの方向に拡張
+                const masterIdx = tile.masterIndex;
+                if (masterIdx !== undefined) {
+                    const masterRow = Math.floor(masterIdx / size);
+                    const masterCol = masterIdx % size;
+
+                    if (masterRow < row) {
+                        // マスターが上（-Z方向）
+                        minZ -= expandAmount * 2;
+                    } else if (masterRow > row) {
+                        // マスターが下（+Z方向）
+                        maxZ += expandAmount * 2;
+                    }
+
+                    if (masterCol < col) {
+                        // マスターが左（-X方向）
+                        minX -= expandAmount * 2;
+                    } else if (masterCol > col) {
+                        // マスターが右（+X方向）
+                        maxX += expandAmount * 2;
+                    }
+                }
+            } else {
+                // マスタータイルかチェック
+                const buildCfg = BUILDINGS[tile.type];
+                if (buildCfg && ((buildCfg.w || 1) > 1 || (buildCfg.h || 1) > 1)) {
+                    const bw = buildCfg.w || 1;
+                    const bh = buildCfg.h || 1;
+                    const rot = tile.rotation || 0;
+
+                    let effectiveW = bw, effectiveH = bh;
+                    if (rot === 1 || rot === 3) {
+                        effectiveW = bh;
+                        effectiveH = bw;
+                    }
+
+                    if (effectiveW > 1) {
+                        if (rot === 0 || rot === 3) {
+                            maxX += expandAmount * 2; // 右方向
+                        } else {
+                            minX -= expandAmount * 2; // 左方向
+                        }
+                    }
+                    if (effectiveH > 1) {
+                        if (rot === 0 || rot === 1) {
+                            maxZ += expandAmount * 2; // 下方向
+                        } else {
+                            minZ -= expandAmount * 2; // 上方向
+                        }
+                    }
+                }
+            }
+
+            // 石畳範囲内かチェック
+            if (x >= minX && x <= maxX && z >= minZ && z <= maxZ) {
+                return true;
+            }
+        }
+        return false;
+    }
+    update() {
+        if (!this.active) {
+            if (Math.random() < 0.01) this.reset();
+            return;
+        }
+        if (this.isStopped) {
+            this.stopTimer--;
+            if (this.stopTimer <= 0) {
+                this.isStopped = false;
+            }
+            this.updateVisibility();
+            return;
+        }
+
+        // Check for obstacles ahead
+        // Only check if moving
+        if (this.speed > 0) {
+            const isVertical = (this.direction.z !== 0);
+            // Look ahead slightly
+            const lookAhead = 0.5;
+            const nextX = this.mesh.position.x + this.direction.x * lookAhead;
+            const nextZ = this.mesh.position.z + this.direction.z * lookAhead;
+
+            if (this.isRoadBlocked(nextX, nextZ, isVertical)) {
+                // Reverse direction
+                this.direction.negate();
+                this.updateFacing(); // Sync facing after reversal
+                // Also move back a bit to prevent sticking
+                this.mesh.position.addScaledVector(this.direction, 0.2);
+                this.updateVisibility();
+                return;
+            }
+        }
+
+        if (Math.random() < 0.005) {
+            this.isStopped = true;
+            this.stopTimer = 30 + Math.random() * 60;
+            return;
+        }
+        const nearestRoadX = this.getNearestRoadCoord(this.mesh.position.x);
+        const nearestRoadZ = this.getNearestRoadCoord(this.mesh.position.z);
+        const distX = Math.abs(this.mesh.position.x - nearestRoadX);
+        const distZ = Math.abs(this.mesh.position.z - nearestRoadZ);
+        const intersectionThreshold = 0.1;
+        const isAtIntersection = (distX < intersectionThreshold && distZ < intersectionThreshold);
+        if (isAtIntersection) {
+            if (this.canTurn) {
+                if (Math.random() < 0.5) {
+                    const dirs = [
+                        new THREE.Vector3(1, 0, 0),
+                        new THREE.Vector3(-1, 0, 0),
+                        new THREE.Vector3(0, 0, 1),
+                        new THREE.Vector3(0, 0, -1)
+                    ];
+                    // Filter valid directions (don't turn into walls)
+                    const validDirs = dirs.filter(d => {
+                        // Simple check: is immediate next step blocked?
+                        const checkX = this.mesh.position.x + d.x * 0.5;
+                        const checkZ = this.mesh.position.z + d.z * 0.5;
+                        return !this.isRoadBlocked(checkX, checkZ, d.z !== 0);
+                    });
+
+                    if (validDirs.length > 0) {
+                        this.direction = validDirs[Math.floor(Math.random() * validDirs.length)];
+                        this.updateFacing(); // Sync facing after turn
+                        this.mesh.position.x = nearestRoadX;
+                        this.mesh.position.z = nearestRoadZ;
+                    } else {
+                        // Dead end? Reverse
+                        this.direction.negate();
+                        this.updateFacing(); // Sync facing after reversal
+                    }
+                }
+                this.canTurn = false;
+            }
+        } else {
+            if (Math.max(distX, distZ) > 0.4) {
+                this.canTurn = true;
+            }
+        }
+        this.mesh.position.addScaledVector(this.direction, this.speed);
+        const limit = gameState.gridSize * 1.5 + 5;
+        if (Math.abs(this.mesh.position.x) > limit || Math.abs(this.mesh.position.z) > limit) {
+            this.reset();
+            return;
+        }
+        this.updateVisibility();
+        this.mesh.position.y = Math.abs(Math.sin(Date.now() * 0.005)) * 0.05;
+    }
+    updateVisibility() {
+        const isVertical = (this.direction.z !== 0);
+        // 緑ロード（未解放タイル間）または石畳（建物があるタイル）の上にいる場合は非表示
+        if (this.isOnGreenRoad(this.mesh.position.x, this.mesh.position.z, isVertical) ||
+            this.isOnCobblestone(this.mesh.position.x, this.mesh.position.z)) {
+            this.mesh.visible = false;
+        } else {
+            this.mesh.visible = true;
+        }
+    }
+}
+
+function initPedestrians() {
+    if (pedestrians.length === 0) {
+        // Initial load: spawn pedestrians inside existing roads
+        for (let i = 0; i < 20; i++) {
+            let role = 'villager';
+            const r = Math.random();
+            if (r < 0.1) role = 'official';
+            else if (r < 0.25) role = 'merchant';
+            else if (r < 0.4) role = 'soldier';
+
+            const p = new Person(scene, role);
+            p.resetInside(); // Spawn inside the grid
+            pedestrians.push(p);
+        }
+    } else {
+        // Respawn: use outside spawn (normal reset)
+        pedestrians.forEach(p => p.reset());
+    }
+}
+
+class ParticleSystem {
+    constructor(position, scene) {
+        this.origin = position.clone().add(new THREE.Vector3(0, 1, 0));
+        this.particles = [];
+        this.scene = scene;
+        this.active = false;
+        this.geo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+        this.mat = new THREE.MeshBasicMaterial({ color: 0xdddddd, transparent: true });
+    }
+    update() {
+        if (!this.active && this.particles.length === 0) return;
+        if (this.active && Math.random() < 0.2) {
+            const mesh = new THREE.Mesh(this.geo, this.mat.clone());
+            const offset = new THREE.Vector3((Math.random() - 0.5) * 1.5, 0, (Math.random() - 0.5) * 1.5);
+            mesh.position.copy(this.origin).add(offset);
+            this.scene.add(mesh);
+            this.particles.push({
+                mesh: mesh,
+                vel: new THREE.Vector3(0, 0.05 + Math.random() * 0.05, 0),
+                life: 1.0
+            });
+        }
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            const p = this.particles[i];
+            p.mesh.position.add(p.vel);
+            p.mesh.rotation.x += 0.1;
+            p.mesh.rotation.y += 0.1;
+            p.life -= 0.02;
+            p.mesh.material.opacity = p.life;
+            if (p.life <= 0) {
+                this.scene.remove(p.mesh);
+                this.particles.splice(i, 1);
+            }
+        }
+    }
+}
+
+// --- 3D Building Helpers (Global Scope) ---
+
+const createBox = (w, h, d, mat, x, y, z, rotY = 0) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z);
+    if (rotY) m.rotation.y = rotY;
+    m.castShadow = true;
+    m.receiveShadow = true;
+    return m;
+};
+const createCyl = (rt, rb, h, mat, x, y, z, rotY = 0, seg = 8) => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), mat);
+    m.position.set(x, y, z);
+    if (rotY) m.rotation.y = rotY;
+    m.castShadow = true;
+    return m;
+};
+const createCone = (r, h, mat, x, y, z, rotY = 0) => {
+    const geom = new THREE.ConeGeometry(r, h, 8); // Smoother cones (8 segments)
+    const m = new THREE.Mesh(geom, mat);
+    m.position.set(x, y, z);
+    if (rotY) m.rotation.y = rotY;
+    m.castShadow = true;
+    return m;
+};
+
+const createPillar = (h, x, y, z) => {
+    return createCyl(0.1, 0.1, h, MATERIALS.pillarRed, x, y, z);
+};
+
+const createChineseRoof = (w, d, h, mat, x, y, z, tier = 1) => {
+    const roofGroup = new THREE.Group();
+    roofGroup.position.set(x, y, z);
+    const geom = new THREE.ConeGeometry(w * 0.8, h, 4);
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.rotation.y = Math.PI / 4;
+    mesh.scale.set(1, 1, d / w);
+    mesh.castShadow = true;
+    roofGroup.add(mesh);
+    const eaves = new THREE.Mesh(new THREE.BoxGeometry(w * 1.2, 0.1, d * 1.2), mat);
+    eaves.position.y = -h / 2;
+    eaves.castShadow = true;
+    roofGroup.add(eaves);
+    if (tier >= 2) {
+        const ridge = new THREE.Mesh(new THREE.BoxGeometry(w * 0.8, 0.1, 0.1), MATERIALS.gold);
+        ridge.position.y = h / 2;
+        roofGroup.add(ridge);
+    }
+    return roofGroup;
+};
+
+const createLantern = (x, y, z) => {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    g.add(createBox(0.02, 0.2, 0.02, MATERIALS.woodDark, 0, 0.1, 0));
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 8), MATERIALS.lanternRed);
+    body.scale.set(1, 0.8, 1);
+    body.castShadow = true;
+    g.add(body);
+    return g;
+};
+
+const createFoundation = (w, d) => {
+    return createBox(w, 0.2, d, MATERIALS.pavingStone, 0, 0.1, 0);
+};
+
+function createExaltedMesh(type, level) {
+    const group = new THREE.Group();
+    // Exalted Base Scale
+    const scale = 1.6;
+    group.scale.set(scale, scale, scale);
+
+    switch (type) {
+        case 'house': group.add(createExaltedHouse(level)); break;
+        case 'farm': group.add(createExaltedFarm(level)); break;
+        case 'lumber': group.add(createExaltedLumber(level)); break;
+        default: return createBuildingMesh(type, level, false);
+    }
+    return group;
+}
+
+function createExaltedHouse(level) {
+    const g = new THREE.Group();
+    // Manor House (Siheyuan / Palace Style)
+    // Base Platform
+    g.add(createBox(1.0, 0.1, 1.0, MATERIALS.stone, 0, 0.05, 0));
+
+    // Main Structure
+    const w = 0.8;
+    g.add(createPillar(0.8, -w / 2, 0.4, -w / 2));
+    g.add(createPillar(0.8, w / 2, 0.4, -w / 2));
+    g.add(createPillar(0.8, -w / 2, 0.4, w / 2));
+    g.add(createPillar(0.8, w / 2, 0.4, w / 2));
+
+    // Walls (Red/White)
+    g.add(createBox(w, 0.6, w - 0.1, MATERIALS.wallWhite, 0, 0.4, 0));
+
+    // Roof (Double Eave, Gold/Black)
+    g.add(createChineseRoof(1.1, 1.1, 0.4, MATERIALS.roofTileBlack, 0, 0.85, 0));
+    g.add(createChineseRoof(0.9, 0.9, 0.5, MATERIALS.gold, 0, 1.25, 0, 2));
+
+    // Lanterns
+    g.add(createLantern(0.5, 0.7, 0.5));
+    g.add(createLantern(-0.5, 0.7, 0.5));
+
+    return g;
+}
+
+function createExaltedFarm(level) {
+    const g = new THREE.Group();
+    // Imperial Granary Style
+    g.add(createBox(1.0, 0.05, 1.0, MATERIALS.dirtDark, 0, 0.025, 0));
+
+    // Golden Wheat Field
+    for (let x = -0.4; x <= 0.4; x += 0.2) {
+        for (let z = -0.4; z <= 0.4; z += 0.2) {
+            if (Math.abs(x) < 0.2 && Math.abs(z) < 0.2) continue; // Center clear
+            const wheat = new THREE.Group();
+            wheat.position.set(x, 0, z);
+            wheat.add(createCyl(0.02, 0.01, 0.4, MATERIALS.gold, 0, 0.2, 0));
+            wheat.userData = { anim: 'sway', speed: 2.0, offset: Math.random() };
+            g.add(wheat);
+        }
+    }
+
+    // Central Pavilion
+    const pav = new THREE.Group();
+    pav.position.set(0, 0.1, 0);
+    pav.add(createPillar(0.8, -0.2, 0.4, -0.2));
+    pav.add(createPillar(0.8, 0.2, 0.4, -0.2));
+    pav.add(createPillar(0.8, -0.2, 0.4, 0.2));
+    pav.add(createPillar(0.8, 0.2, 0.4, 0.2));
+    pav.add(createChineseRoof(0.7, 0.7, 0.5, MATERIALS.gold, 0, 0.9, 0, 2));
+    g.add(pav);
+
+    return g;
+}
+
+function createExaltedLumber(level) {
+    const g = new THREE.Group();
+    g.add(createBox(1.0, 0.05, 1.0, MATERIALS.woodDark, 0, 0.025, 0));
+
+    // Giant Sawmill
+    // House
+    const house = new THREE.Group();
+    house.position.set(0, 0, -0.2);
+    house.add(createPillar(0.8, -0.4, 0.4, 0));
+    house.add(createPillar(0.8, 0.4, 0.4, 0));
+    house.add(createChineseRoof(1.0, 0.6, 0.5, MATERIALS.roofTileBlack, 0, 0.9, 0));
+    g.add(house);
+
+    // Saw
+    const sawGroup = new THREE.Group();
+    sawGroup.position.set(0, 0.2, 0.3);
+    sawGroup.add(createCyl(0.3, 0.3, 0.1, MATERIALS.metal, 0, 0, 0, 0, 16));
+    sawGroup.rotation.x = Math.PI / 2;
+    sawGroup.userData = { anim: 'spinX', speed: 0.2 };
+    g.add(sawGroup);
+
+    // Logs
+    g.add(createCyl(0.15, 0.15, 1.2, MATERIALS.wood, 0.5, 0.15, 0.2, Math.PI / 2));
+
+    return g;
+}
+
+function createBuildingMesh(type, level, isAscended = false) {
+    if (isAscended) return createExaltedMesh(type, level);
+    const group = new THREE.Group();
+    // ベーススケール調整
+    // Cap level at 30 for visuals
+    const vizLevel = Math.min(level, 30);
+    // Grid is 3.4, Cobblestone is 2.9. Standard model is ~1.0.
+    // Scale up to ~1.6 to fit nicely without overlapping (User Feedback 20% reduced).
+    const baseScale = 1.6;
+    const scale = baseScale * (1.0 + (vizLevel * 0.01));
+    group.scale.set(scale, scale, scale);
+
+    // Tier 1: 1-20, Tier 2: 21+
+    const tier = vizLevel >= 21 ? 2 : 1;
+
+    // Enhanced Helper: Box with "noise" or distinct look
+    const createDetailedBox = (w, h, d, mat, x, y, z) => {
+        const g = new THREE.Group();
+        g.position.set(x, y, z);
+        // Main mesh
+        const main = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+        main.castShadow = true;
+        main.receiveShadow = true;
+        g.add(main);
+        return g;
+    };
+
+    // Helper: Fence Segment
+    const createFence = (x1, z1, x2, z2, h = 0.2) => {
+        const len = Math.sqrt((x2 - x1) ** 2 + (z2 - z1) ** 2);
+        const angle = Math.atan2(z2 - z1, x2 - x1);
+
+        const g = new THREE.Group();
+        const centerx = (x1 + x2) / 2;
+        const centerz = (z1 + z2) / 2;
+        g.position.set(centerx, h / 2, centerz);
+        g.rotation.y = -angle;
+
+        // Posts
+        const p1 = createBox(0.05, h + 0.1, 0.05, MATERIALS.wood, -len / 2, 0, 0);
+        const p2 = createBox(0.05, h + 0.1, 0.05, MATERIALS.wood, len / 2, 0, 0);
+        g.add(p1); g.add(p2);
+
+        // Rails
+        const r1 = createBox(len, 0.03, 0.02, MATERIALS.wood, 0, 0.05, 0);
+        const r2 = createBox(len, 0.03, 0.02, MATERIALS.wood, 0, -0.05, 0);
+        g.add(r1); g.add(r2);
+
+        return g;
+    };
+
+    // Procedural Props Generator
+    const addProps = (targetGroup, seed, count) => {
+        for (let i = 0; i < count; i++) {
+            const type = (seed + i) % 3;
+            const offsetX = ((seed * 7 + i * 3) % 10 - 5) * 0.1;
+            const offsetZ = ((seed * 11 + i * 5) % 10 - 5) * 0.1;
+
+            if (type === 0) { // Barrel
+                targetGroup.add(createCyl(0.1, 0.1, 0.2, MATERIALS.wood, offsetX, 0.1, offsetZ));
+            } else if (type === 1) { // Box
+                targetGroup.add(createBox(0.15, 0.15, 0.15, MATERIALS.woodDark, offsetX, 0.1, offsetZ, (seed + i) * 0.5));
+            } else { // Bush/Pot
+                targetGroup.add(createCone(0.1, 0.2, MATERIALS.leaf, offsetX, 0.1, offsetZ));
+            }
+        }
+    };
+
+    // Specialized Han Helpers
+
+    // Rammed Earth Wall (Layered texture effect using stacked boxes)
+    const createRammedEarthWall = (w, h, d, x, y, z) => {
+        const g = new THREE.Group();
+        g.position.set(x, y, z);
+        const layers = 3;
+        const layerH = h / layers;
+        for (let i = 0; i < layers; i++) {
+            // Alternating slightly different colored earth
+            const mat = i % 2 === 0 ? MATERIALS.dirt : MATERIALS.dirtDark;
+            // Actually MATERIALS.dirt is brown, dirtDark is... darker. 
+            // Let's just use dirt for now, maybe scale slightly to show seam
+            g.add(createBox(w, layerH, d, mat, 0, (i - 1) * layerH, 0));
+        }
+        return g;
+    };
+
+    // Shadoof (Well Sweep) - Animated
+    const createShadoof = (x, z) => {
+        const g = new THREE.Group();
+        g.position.set(x, 0, z);
+
+        // Pivot Post
+        g.add(createCyl(0.04, 0.04, 0.5, MATERIALS.woodDark, 0, 0.25, 0));
+
+        // Beam (The sweep)
+        const beam = new THREE.Group();
+        beam.position.set(0, 0.5, 0);
+        beam.add(createCyl(0.03, 0.02, 1.2, MATERIALS.wood, 0, 0, 0, 0, 0, Math.PI / 2)); // Horizontal-ish
+
+        // Counterweight (Stone) at one end
+        beam.add(createBox(0.15, 0.15, 0.15, MATERIALS.stone, -0.6, 0, 0));
+
+        // Bucket Rope at other end
+        beam.add(createCyl(0.01, 0.01, 0.4, MATERIALS.woodDark, 0.6, -0.2, 0));
+        beam.add(createCyl(0.1, 0.08, 0.1, MATERIALS.wood, 0.6, -0.45, 0)); // Bucket
+
+        // Animation: Rocking
+        beam.userData = { anim: 'sawMove', speed: 0.5 }; // Re-using sawMove (z-axis move) logic? 
+        // Wait, sawMove modifies z position. We want rotation.
+        // We don't have a generic "rocking" anim. 'sway' rotates Z. 
+        // Let's use 'sway' but we need to rotate around Z axis?
+        // Beam is aligned along X (cylinder rotation Z 90deg -> aligned X).
+        // So rotating around Z (sway) will tilt it up/down. Correct.
+        beam.userData = { anim: 'sway', speed: 1.0, offset: 0, range: 0.2 };
+
+        g.add(beam);
+        return g;
+    };
+
+
+    switch (type) {
+        case 'wild': // 未開拓地
+            // 草
+            for (let i = 0; i < 8; i++) {
+                const r = 0.1 + (i % 3) * 0.05;
+                const x = Math.sin(i * 2.5) * 0.5;
+                const z = Math.cos(i * 2.5) * 0.5;
+                group.add(createCone(0.1, 0.3, MATERIALS.grass, x, 0.15, z, Math.random()));
+            }
+            // 岩や木
+            group.add(createBox(0.3, 0.2, 0.3, MATERIALS.stone, 0.4, 0.1, 0.4, 0.5));
+            group.add(createCyl(0.05, 0.08, 0.4, MATERIALS.wood, -0.3, 0.2, -0.3)); // 幹
+            group.add(createCone(0.3, 0.6, MATERIALS.leaf, -0.3, 0.5, -0.3)); // 葉
+            break;
+
+        case 'house': // 民家 -> 住居 (Residence)
+            // 土台
+            if (tier >= 2) group.add(createFoundation(0.9, 0.9));
+
+            if (tier === 1) { // Tier 1: Thatched Hut (Straw Roof)
+                // Main walls - slightly tapered look? (Trapezoid logic hard, use box)
+                const houseW = 0.6;
+                const houseD = 0.5;
+                const houseH = 0.4;
+
+                group.add(createBox(houseW, houseH, houseD, MATERIALS.wallWhite, 0, houseH / 2, 0));
+
+                // Wooden beams/framing (Timber frame look)
+                // Corners
+                const beamW = 0.06;
+                group.add(createBox(beamW, houseH, beamW, MATERIALS.wood, houseW / 2, houseH / 2, houseD / 2));
+                group.add(createBox(beamW, houseH, beamW, MATERIALS.wood, -houseW / 2, houseH / 2, houseD / 2));
+                group.add(createBox(beamW, houseH, beamW, MATERIALS.wood, houseW / 2, houseH / 2, -houseD / 2));
+                group.add(createBox(beamW, houseH, beamW, MATERIALS.wood, -houseW / 2, houseH / 2, -houseD / 2));
+
+                // Roof (Straw - Conical/Pyramidal)
+                const roofH = 0.5;
+                const roof = createCone(0.55, roofH, MATERIALS.roofStraw, 0, houseH + roofH / 2 - 0.1, 0, Math.PI / 4); // 8-segment cone
+                roof.scale.set(1, 1, 0.8);
+                group.add(roof);
+
+                // Door (Detailed)
+                const doorH = 0.3;
+                const doorW = 0.2;
+                group.add(createBox(doorW + 0.04, doorH + 0.04, 0.04, MATERIALS.woodDark, 0, doorH / 2 + 0.02, houseD / 2)); // Frame
+                group.add(createBox(doorW, doorH, 0.06, MATERIALS.wood, 0, doorH / 2, houseD / 2)); // Door
+                group.add(createBox(0.03, 0.03, 0.08, MATERIALS.metal, 0.06, 0.2, houseD / 2)); // Knob
+
+                // Window (Side)
+                const winSize = 0.15;
+                group.add(createBox(winSize + 0.04, winSize + 0.04, 0.04, MATERIALS.woodDark, houseW / 2, 0.25, 0)); // Frame
+                group.add(createBox(winSize, winSize, 0.05, MATERIALS.wallWhite, houseW / 2, 0.25, 0)); // "Paper"
+                // Window Bars
+                group.add(createBox(winSize, 0.02, 0.06, MATERIALS.woodDark, houseW / 2, 0.25, 0));
+                group.add(createBox(0.02, winSize, 0.06, MATERIALS.woodDark, houseW / 2, 0.25, 0));
+
+                // Small Garden patch
+                group.add(createBox(0.2, 0.05, 0.15, MATERIALS.leaf, -0.3, 0.05, 0.35));
+                group.add(createCone(0.05, 0.1, MATERIALS.gold, -0.3, 0.1, 0.35)); // Flower?
+
+            } else { // Tier 2: 瓦屋 (Tile House)
+                // Pillars
+                group.add(createPillar(0.8, 0.35, 0.4, 0.35));
+                group.add(createPillar(0.8, -0.35, 0.4, 0.35));
+                group.add(createPillar(0.8, 0.35, 0.4, -0.35));
+                group.add(createPillar(0.8, -0.35, 0.4, -0.35));
+
+                // Walls (White plaster)
+                group.add(createBox(0.7, 0.7, 0.7, MATERIALS.wallWhite, 0, 0.45, 0));
+
+                // Roof (Black tile)
+                group.add(createChineseRoof(1.0, 1.0, 0.6, MATERIALS.roofTileBlack, 0, 1.1, 0, 1));
+
+                // Door & Windows
+                group.add(createBox(0.25, 0.5, 0.05, MATERIALS.woodDark, 0, 0.25, 0.36));
+                group.add(createBox(0.2, 0.2, 0.05, MATERIALS.wood, 0.25, 0.5, 0.36)); // Window
+                group.add(createBox(0.2, 0.2, 0.05, MATERIALS.wood, -0.25, 0.5, 0.36)); // Window
+
+                // Lanterns at higher sub-levels (Lv 30)
+                if (vizLevel >= 30) {
+                    group.add(createLantern(0.45, 0.8, 0.45));
+                    group.add(createLantern(-0.45, 0.8, 0.45));
+                }
+            }
+
+            // Props (Levels 11-20 in Tier 1, 21-30 in Tier 2)
+            if (vizLevel >= 11) {
+                // Add props based on level seed
+                const propCount = Math.floor(vizLevel / 5);
+                addProps(group, vizLevel, propCount);
+            }
+
+            // Smoke (common)
+            if (tier >= 2 || vizLevel >= 15) {
+                const smokeNode = new THREE.Object3D();
+                smokeNode.position.set(0, 1.5, 0);
+                smokeNode.userData = { anim: 'smoke' };
+                group.add(smokeNode);
+            }
+
+            // Simple entrance stone step instead of base
+            group.add(createBox(0.3, 0.05, 0.2, MATERIALS.stone, 0, 0.025, 0.4));
+            break;
+
+        case 'farm': // 畑 (Farm) - Historical Han Style
+            // TIER 1: Daitian Fa (Ridge & Furrow) - Dry Farming (Millet)
+            if (vizLevel <= 10) {
+                // Ground: Daitian pattern (Deep alternating Furrows and Ridges)
+                group.add(createBox(0.95, 0.05, 0.95, MATERIALS.dirt, 0, 0.025, 0));
+
+                // Create 3 High Ridges
+                for (let i = -1; i <= 1; i++) {
+                    // Ridge
+                    group.add(createBox(0.2, 0.1, 0.9, MATERIALS.dirtDark, i * 0.3, 0.05, 0));
+                }
+
+                // Crops: Foxtail Millet (Setaria italica) - Drooping yellow spikes
+                // Planted in the furrows (between ridges)
+                const createMillet = (x, z) => {
+                    const g = new THREE.Group();
+                    g.position.set(x, 0.05, z); // In furrow
+                    const scale = 0.8 + Math.random() * 0.4;
+                    g.scale.set(scale, scale, scale);
+                    g.rotation.y = Math.random() * Math.PI;
+
+                    // Stalk
+                    g.add(createCyl(0.015, 0.015, 0.5, MATERIALS.leaf, 0, 0.25, 0));
+                    // Leaves (Long, grass-like)
+                    g.add(createCyl(0.2, 0.01, 0.01, MATERIALS.leaf, 0.1, 0.1, 0, 0, 0, -0.5));
+                    g.add(createCyl(0.2, 0.01, 0.01, MATERIALS.leaf, -0.1, 0.15, 0, 0, 0, 0.5));
+
+                    // Head (Thick, drooping spike)
+                    const head = new THREE.Group();
+                    head.position.set(0, 0.48, 0);
+                    head.rotation.z = 2.0; // Heavy droop
+                    const spike = createCyl(0.03, 0.04, 0.15, MATERIALS.gold, 0, 0.07, 0);
+                    head.add(spike);
+                    g.add(head);
+
+                    g.userData = { anim: 'sway', speed: 2.0 + Math.random(), offset: Math.random() };
+                    return g;
+                };
+
+                // Plant in furrows (x = -0.15, +0.15)
+                for (let z = -0.35; z <= 0.35; z += 0.15) {
+                    group.add(createMillet(-0.15, z));
+                    group.add(createMillet(0.15, z));
+                }
+
+                // Structure: Rammed Earth Hut (Mud-Wattle)
+                // Simple texture, thatched roof
+                const hut = new THREE.Group();
+                hut.position.set(-0.3, 0.05, 0.3);
+                // Walls
+                hut.add(createRammedEarthWall(0.3, 0.25, 0.3, 0, 0.125, 0));
+                // Entrance
+                hut.add(createBox(0.1, 0.15, 0.05, MATERIALS.woodDark, 0, 0.075, 0.13));
+                // Roof (Conical Thatch)
+                hut.add(createCone(0.35, 0.2, MATERIALS.roofStraw, 0, 0.35, 0));
+                group.add(hut);
+
+                // Props: Si/Lei (Farm Tools)
+                const tool = new THREE.Group();
+                tool.position.set(-0.1, 0.05, 0.3);
+                tool.rotation.z = -0.3;
+                tool.add(createCyl(0.02, 0.02, 0.4, MATERIALS.wood, 0, 0.2, 0)); // Handle
+                tool.add(createBox(0.08, 0.08, 0.01, MATERIALS.metal, 0, 0.04, 0)); // Spade head
+                group.add(tool);
+
+            } else if (vizLevel <= 20) {
+                // TIER 2: Well Irrigation System (Wheat/Soy)
+                // Ground: Flat with irrigation channels
+                group.add(createBox(0.95, 0.05, 0.95, MATERIALS.dirt, 0, 0.025, 0));
+                // Small channels
+                group.add(createBox(0.95, 0.02, 0.2, MATERIALS.water, 0, 0.026, 0.15)); // Channel near well
+
+                // Well (Lathe-turned pottery style)
+                const well = new THREE.Group();
+                well.position.set(0.3, 0.05, 0.3);
+                well.add(createCyl(0.2, 0.2, 0.15, MATERIALS.stone, 0, 0.075, 0)); // Well head
+                well.add(createCyl(0.15, 0.15, 0.1, MATERIALS.water, 0, 0.06, 0)); // Water
+                group.add(well);
+
+                // Machinery: Shadoof (Well Sweep)
+                // Positioned to dip into the well
+                const shadoof = createShadoof(0.3, 0.3);
+                shadoof.rotation.y = Math.PI / 4; // Angle towards well
+                group.add(shadoof);
+
+                // Structure: Stilt Granary (Liang Cang)
+                const granary = new THREE.Group();
+                granary.position.set(-0.25, 0.05, -0.25);
+                // Stilts
+                const stiltH = 0.15;
+                granary.add(createCyl(0.03, 0.03, stiltH, MATERIALS.wood, -0.15, stiltH / 2, -0.15));
+                granary.add(createCyl(0.03, 0.03, stiltH, MATERIALS.wood, 0.15, stiltH / 2, -0.15));
+                granary.add(createCyl(0.03, 0.03, stiltH, MATERIALS.wood, -0.15, stiltH / 2, 0.15));
+                granary.add(createCyl(0.03, 0.03, stiltH, MATERIALS.wood, 0.15, stiltH / 2, 0.15));
+                // Floor/Rat guard
+                granary.add(createBox(0.35, 0.02, 0.35, MATERIALS.woodDark, 0, stiltH, 0));
+                // Body (Plank walls)
+                granary.add(createBox(0.32, 0.25, 0.32, MATERIALS.wood, 0, stiltH + 0.125, 0));
+                // Roof (Hipped Tile)
+                granary.add(createChineseRoof(0.45, 0.45, 0.2, MATERIALS.roofTileBlack, 0, stiltH + 0.3, 0));
+                group.add(granary);
+
+                // Crops: Winter Wheat (Straight, organized)
+                const createWheat = (x, z) => {
+                    const g = new THREE.Group();
+                    g.position.set(x, 0.05, z);
+                    g.scale.set(0.8, 0.8, 0.8);
+                    // Multiple straight stalks
+                    for (let k = 0; k < 3; k++) {
+                        g.add(createCyl(0.01, 0.01, 0.4, MATERIALS.leaf, (k - 1) * 0.02, 0.2, 0));
+                        g.add(createBox(0.02, 0.1, 0.02, MATERIALS.gold, (k - 1) * 0.02, 0.4, 0)); // Ear
+                    }
+                    g.userData = { anim: 'sway', speed: 1.5, offset: Math.random() };
+                    return g;
+                };
+
+                // Planting rows
+                for (let x = -0.3; x <= 0.2; x += 0.15) {
+                    for (let z = -0.3; z <= 0.2; z += 0.15) {
+                        if (x > 0.1 && z > 0.1) continue; // Avoid well
+                        if (x < -0.1 && z < -0.1) continue; // Avoid granary
+                        group.add(createWheat(x, z));
+                    }
+                }
+
+            } else {
+                // TIER 3: Manor Rice Paddy (Rice + Chain Pump + Watchtower)
+
+                // Ground: Flooded Paddy
+                group.add(createBox(0.95, 0.05, 0.95, MATERIALS.dirtDark, 0, 0.025, 0)); // Mud base
+                group.add(createBox(0.9, 0.02, 0.9, MATERIALS.water, 0, 0.06, 0)); // Water layer
+
+                // Structure: Han Watchtower (Wang Lou) - 2 Stories
+                const tower = new THREE.Group();
+                tower.position.set(-0.25, 0.05, -0.25);
+
+                // 1st Floor (Earthen base/walls)
+                tower.add(createRammedEarthWall(0.25, 0.3, 0.25, 0, 0.15, 0));
+                // 1st Floor Roof (Pent roof)
+                const roof1 = createChineseRoof(0.35, 0.35, 0.1, MATERIALS.roofTileBlack, 0, 0.3, 0);
+                roof1.scale.y = 0.5;
+                tower.add(roof1);
+
+                // 2nd Floor (Wood, slightly smaller)
+                const f2w = 0.2;
+                tower.add(createBox(f2w, 0.2, f2w, MATERIALS.wood, 0, 0.45, 0));
+                // Balcony/Railing
+                tower.add(createBox(0.28, 0.05, 0.28, MATERIALS.woodDark, 0, 0.35, 0));
+
+                // Main Roof (Hipped-Gable)
+                tower.add(createChineseRoof(0.4, 0.4, 0.25, MATERIALS.roofTileBlack, 0, 0.6, 0, 2)); // Tier 2 roof (ridge)
+
+                group.add(tower);
+
+                // Machinery: Dragon Backbone Machine (Chain Pump)
+                const pump = new THREE.Group();
+                pump.position.set(0.3, 0.1, 0.3);
+                // Trough (The long part)
+                const trough = createBox(0.15, 0.05, 0.6, MATERIALS.wood, 0, 0, 0);
+                trough.rotation.x = -0.5; // Sloped down into water
+                pump.add(trough);
+
+                // Chain Blades (Animated)
+                // Simple workaround: Rotate tiny blocks along the trough length? 
+                // Just use a wheel at the top for now as "motion"
+
+                // Pedal Mechanism / Wheel at top
+                const mech = new THREE.Group();
+                mech.position.set(0, 0.15, 0.25); // Top of trough
+                // Axle
+                mech.add(createCyl(0.2, 0.02, 0.02, MATERIALS.woodDark, 0, 0, 0, 0, 0, Math.PI / 2));
+                // Pedals/Spokes
+                const pedals = new THREE.Group();
+                pedals.add(createBox(0.02, 0.2, 0.02, MATERIALS.wood, 0, 0, 0));
+                pedals.add(createBox(0.02, 0.2, 0.02, MATERIALS.wood, 0, 0, 0, Math.PI / 2));
+                pedals.userData = { anim: 'rotateX', speed: 2.0 };
+                mech.add(pedals);
+                pump.add(mech);
+
+                group.add(pump);
+
+                // Crops: Rice (Paddy)
+                // Clusters in water
+                const createRice = (x, z) => {
+                    const g = new THREE.Group();
+                    g.position.set(x, 0.06, z); // Above water
+                    // Green blades
+                    for (let i = 0; i < 4; i++) {
+                        const blade = createBox(0.02, 0.2 + Math.random() * 0.1, 0.01, MATERIALS.leaf, (Math.random() - 0.5) * 0.1, 0.1, (Math.random() - 0.5) * 0.1);
+                        blade.rotation.y = Math.random();
+                        g.add(blade);
+                    }
+                    g.userData = { anim: 'sway', speed: 1.0, offset: Math.random() };
+                    return g;
+                };
+
+                for (let x = -0.3; x <= 0.2; x += 0.2) {
+                    for (let z = -0.3; z <= 0.2; z += 0.2) {
+                        if (x > 0 && z > 0) continue; // Pump area
+                        if (x < -0.1 && z < -0.1) continue; // Tower area
+                        group.add(createRice(x, z));
+                    }
+                }
+            }
+            break;
+
+        case 'lumber': // 伐採所 (Lumber Mill)
+            // Ground - Wood chips / worn dirt
+            group.add(createBox(1.0, 0.02, 1.0, MATERIALS.dirt, 0, 0.01, 0));
+            // Wood chips texture (particles)
+            for (let i = 0; i < 15; i++) {
+                const s = 0.05 + Math.random() * 0.05;
+                group.add(createBox(s, 0.01, s, MATERIALS.wood, (Math.random() - 0.5) * 0.8, 0.02, (Math.random() - 0.5) * 0.8));
+            }
+
+            if (tier === 1) { // Tier 1: Woodcutter's Camp
+                // 1. The Chopping Area
+                const stump = createCyl(0.2, 0.25, 0.3, MATERIALS.wood, 0.3, 0.15, 0.3);
+                group.add(stump);
+                // Axe embedded
+                const axeGroup = new THREE.Group();
+                axeGroup.position.set(0.3, 0.3, 0.3);
+                axeGroup.rotation.z = 0.6;
+                axeGroup.rotation.y = 0.5;
+                axeGroup.add(createCyl(0.02, 0.03, 0.4, MATERIALS.wood, 0, 0.2, 0));
+                axeGroup.add(createBox(0.15, 0.08, 0.02, MATERIALS.metal, 0, 0.4, 0)); // Blade
+                group.add(axeGroup);
+
+                // 2. Woodcutter's Shack (Small enclosed hut) - Adds mass to building
+                const shack = new THREE.Group();
+                shack.position.set(-0.25, 0, -0.25);
+                // Walls
+                shack.add(createBox(0.45, 0.4, 0.45, MATERIALS.woodDark, 0, 0.2, 0));
+                // Doorway
+                shack.add(createBox(0.15, 0.3, 0.05, MATERIALS.dark, 0.1, 0.15, 0.21));
+                // Roof (Sloped single shed roof)
+                const roof = createBox(0.55, 0.05, 0.6, MATERIALS.wood, 0, 0.45, 0);
+                roof.rotation.x = 0.2;
+                shack.add(roof);
+                group.add(shack);
+
+                // 3. Stacked Logs
+                group.add(createCyl(0.1, 0.1, 0.8, MATERIALS.wood, 0.3, 0.05, -0.2, Math.PI / 2, 0.1));
+                group.add(createCyl(0.1, 0.1, 0.8, MATERIALS.wood, 0.4, 0.05, -0.3, Math.PI / 2, -0.05));
+                group.add(createCyl(0.1, 0.1, 0.8, MATERIALS.wood, 0.35, 0.12, -0.25, Math.PI / 2, 0));
+
+                // Dead Tree / Standing Timber
+                const deadTree = new THREE.Group();
+                deadTree.position.set(-0.35, 0, 0.35);
+                deadTree.add(createCyl(0.08, 0.12, 0.6, MATERIALS.woodDark, 0, 0.3, 0));
+                deadTree.add(createCyl(0.04, 0.06, 0.3, MATERIALS.woodDark, 0.1, 0.5, 0, 0, 0, -0.5)); // Branch
+                group.add(deadTree);
+
+            } else { // Tier 2: Sawmill Yard (Open Air with Roofed Storage)
+                const roofY = 0.8;
+
+                // 1. Saw Mechanism Area (Left side)
+                const sawGroup = new THREE.Group();
+                sawGroup.position.set(-0.2, 0, 0);
+
+                // Roof over saw
+                sawGroup.add(createPillar(0.7, -0.25, 0.35, -0.25));
+                sawGroup.add(createPillar(0.7, 0.25, 0.35, -0.25));
+                sawGroup.add(createPillar(0.7, -0.25, 0.35, 0.25));
+                sawGroup.add(createPillar(0.7, 0.25, 0.35, 0.25));
+                sawGroup.add(createBox(0.6, 0.05, 0.6, MATERIALS.wood, 0, roofY, 0)); // Simple roof
+
+                // Reciprocating Frame Saw (Vertical)
+                const sawBase = createBox(0.4, 0.2, 0.3, MATERIALS.wood, 0, 0.1, 0);
+                sawGroup.add(sawBase);
+
+                // The Frame holding the blade
+                const frame = new THREE.Group();
+                frame.position.set(0, 0.4, 0);
+                // Side posts
+                frame.add(createBox(0.05, 0.4, 0.05, MATERIALS.woodDark, 0, 0, 0.1));
+                frame.add(createBox(0.05, 0.4, 0.05, MATERIALS.woodDark, 0, 0, -0.1));
+                // Top/Bottom bars
+                frame.add(createBox(0.05, 0.05, 0.25, MATERIALS.woodDark, 0, 0.175, 0));
+                frame.add(createBox(0.05, 0.05, 0.25, MATERIALS.woodDark, 0, -0.175, 0));
+                // Blade
+                frame.add(createBox(0.02, 0.35, 0.15, MATERIALS.metal, 0, 0, 0));
+                frame.userData = { anim: 'shuttleY', speed: 1.0, range: 0.15 };
+                sawGroup.add(frame);
+
+                // Log being cut
+                sawGroup.add(createCyl(0.12, 0.12, 0.8, MATERIALS.wood, 0, 0.25, 0, Math.PI / 2));
+                // Sawdust
+                sawGroup.add(createCone(0.2, 0.1, MATERIALS.gold, 0.4, 0.05, 0.4));
+                group.add(sawGroup);
+
+
+                // 2. Timber Storage Shed (Right side) - Adds volume
+                const shed = new THREE.Group();
+                shed.position.set(0.35, 0, 0);
+                // Roof (sloped)
+                shed.add(createPillar(0.6, 0.2, 0.3, -0.2)); // Back high
+                shed.add(createPillar(0.6, 0.2, 0.3, 0.2));
+                shed.add(createPillar(0.5, -0.2, 0.25, -0.2)); // Front low
+                shed.add(createPillar(0.5, -0.2, 0.25, 0.2));
+
+                const shedRoof = createBox(0.5, 0.05, 0.6, MATERIALS.wood, 0, 0.65, 0);
+                shedRoof.rotation.z = 0.2; // Slope
+                shed.add(shedRoof);
+
+                // Stacked Timber inside
+                shed.add(createBox(0.3, 0.3, 0.4, MATERIALS.wood, 0, 0.15, 0));
+                shed.add(createBox(0.3, 0.3, 0.4, MATERIALS.wood, 0, 0.15, 0)); // just a block of wood for now? No, make it look like planks
+                // Planks texture
+                for (let k = 0; k < 5; k++) {
+                    shed.add(createBox(0.35, 0.04, 0.4, MATERIALS.woodDark, 0, 0.05 + k * 0.06, 0));
+                }
+                group.add(shed);
+            }
+            break;
+
+        case 'quarry': // 採石場 -> 石切り場 (Stone Pit)
+            // Ground - Thin stone layer
+
+            // Rock Face (Jagged, irregular)
+            const rockScale = tier >= 2 ? 0.8 : 0.6;
+            for (let i = 0; i < 4; i++) {
+                // Random-ish looking rocks
+                const rx = -0.3 + (i % 2) * 0.6;
+                const rz = -0.3 + Math.floor(i / 2) * 0.6;
+                const rh = 0.2 + Math.random() * 0.4;
+                group.add(createBox(0.3, rh, 0.3, MATERIALS.stone, rx, rh / 2, rz));
+            }
+
+            if (tier >= 2) {
+                // Crane (Wooden) - No walls, distinctive silhouette
+                const craneGroup = new THREE.Group();
+                craneGroup.position.set(0.2, 0, 0.2);
+                craneGroup.add(createCyl(0.06, 0.08, 1.2, MATERIALS.wood, 0, 0.6, 0)); // Mast
+
+                const jib = createBox(0.8, 0.06, 0.06, MATERIALS.wood, -0.3, 1.1, 0); // Jib
+                jib.rotation.z = 0.2;
+                craneGroup.add(jib);
+
+                // Hanging stone
+                const rope = createCyl(0.01, 0.01, 0.6, MATERIALS.white, -0.6, 0.8, 0);
+                craneGroup.add(rope);
+                const stone = createBox(0.25, 0.25, 0.25, MATERIALS.stone, -0.6, 0.5, 0);
+                craneGroup.add(stone);
+
+                craneGroup.rotation.y = -0.7; // Angle it
+                group.add(craneGroup);
+
+                // Cut stone blocks ready for transport
+                group.add(createBox(0.2, 0.15, 0.3, MATERIALS.stoneWhite, -0.3, 0.075, 0.4));
+            } else {
+                // Tier 1: Just tools and rubble
+                group.add(createBox(0.05, 0.4, 0.05, MATERIALS.wood, 0, 0.2, 0, 0.5)); // Pick handle
+                group.add(createBox(0.2, 0.05, 0.05, MATERIALS.metal, 0, 0.4, 0, 0.5)); // Pick head
+
+                // Rubble
+                group.add(createCone(0.3, 0.2, MATERIALS.stone, 0.3, 0.1, 0.3));
+
+                // Wheelbarrow (suggests transport)
+                const barrow = new THREE.Group();
+                barrow.position.set(-0.3, 0.1, 0.3);
+                barrow.rotation.y = 0.5;
+                barrow.add(createBox(0.2, 0.1, 0.3, MATERIALS.wood, 0, 0, 0));
+                barrow.add(createCyl(0.08, 0.08, 0.05, MATERIALS.woodDark, 0, -0.05, 0.15, 0, 0, Math.PI / 2)); // Wheel
+                barrow.add(createCyl(0.02, 0.02, 0.4, MATERIALS.wood, -0.08, 0.1, -0.2)); // Handle L
+                barrow.add(createCyl(0.02, 0.02, 0.4, MATERIALS.wood, 0.08, 0.1, -0.2)); // Handle R
+                group.add(barrow);
+            }
+            break;
+
+        case 'mine': // 鉱山 -> 鉄山 (Iron Mine)
+            // Ground - Thin dirt layer
+            group.add(createBox(1.0, 0.02, 1.0, MATERIALS.dirt, 0, 0.01, 0));
+
+            if (tier === 1) { // Tier 1: Mine Shaft
+                // Hill/Mound
+                group.add(createBox(0.9, 0.5, 0.6, MATERIALS.dirt, 0, 0.25, -0.2));
+                // Entrance frame
+                group.add(createBox(0.5, 0.4, 0.1, MATERIALS.wood, 0, 0.2, 0.1));
+                group.add(createBox(0.4, 0.35, 0.05, MATERIALS.dark, 0, 0.175, 0.12)); // Hole
+
+                // Lantern at entrance
+                group.add(createBox(0.1, 0.15, 0.1, MATERIALS.gold, -0.3, 0.3, 0.15)); // Light
+
+                // Rails coming out
+                group.add(createBox(0.03, 0.03, 0.6, MATERIALS.metal, -0.15, 0.11, 0.3));
+                group.add(createBox(0.03, 0.03, 0.6, MATERIALS.metal, 0.15, 0.11, 0.3));
+                // Sleepers
+                group.add(createBox(0.4, 0.02, 0.05, MATERIALS.wood, 0, 0.1, 0.2));
+                group.add(createBox(0.4, 0.02, 0.05, MATERIALS.wood, 0, 0.1, 0.4));
+
+            } else { // Tier 2: Ironworks
+                // Blast Furnace (Tall cylinder/cone structure) - distinctive profile
+                group.add(createCyl(0.4, 0.3, 1.0, MATERIALS.stone, 0, 0.5, -0.1));
+                // Fire glow at base
+                group.add(createBox(0.2, 0.2, 0.1, MATERIALS.gold, 0, 0.2, 0.15));
+
+                // Bellows (Fungo) attached
+                group.add(createBox(0.3, 0.2, 0.4, MATERIALS.wood, 0.4, 0.15, 0));
+
+                // Chimney smoke
+                const smokeNode = new THREE.Object3D();
+                smokeNode.position.set(0, 1.2, -0.1);
+                smokeNode.userData = { anim: 'smoke' };
+                group.add(smokeNode);
+
+                // Pile of Iron Ore
+                group.add(createCone(0.3, 0.3, MATERIALS.dark, -0.4, 0.15, 0.3));
+            }
+            break;
+
+            // Props (Ore cart)
+            if (vizLevel >= 15) {
+                const cart = new THREE.Group();
+                cart.position.set(0, 0.15, 0.3);
+                cart.add(createBox(0.25, 0.15, 0.2, MATERIALS.wood, 0, 0, 0));
+                cart.add(createBox(0.2, 0.1, 0.15, MATERIALS.dark, 0, 0.05, 0)); // Ore
+                group.add(cart);
+            }
+            break;
+
+        case 'market': // 市場 -> 市 (Bazaar)
+            // No solid ground box - just placed on the road/grass
+
+            // Tier 1: Open Mat Market (Enhanced)
+            if (tier === 1) {
+                // Rug/Mat on ground - Keep thin
+                group.add(createBox(0.8, 0.02, 0.6, MATERIALS.roofStraw, 0, 0.01, 0));
+
+                // Simple Stall Structure (Crates + Board + Sunshade)
+                const tableH = 0.2;
+                // Table improvised (Crates)
+                group.add(createBox(0.15, tableH, 0.15, MATERIALS.woodDark, -0.15, tableH / 2, -0.1));
+                group.add(createBox(0.15, tableH, 0.15, MATERIALS.woodDark, 0.15, tableH / 2, -0.1));
+                // Table Top
+                group.add(createBox(0.5, 0.02, 0.25, MATERIALS.wood, 0, tableH, -0.1));
+
+                // Sunshade / Umbrella (Striped)
+                const umbrella = new THREE.Group();
+                umbrella.position.set(0.3, 0, 0.2);
+                umbrella.add(createCyl(0.03, 0.03, 0.7, MATERIALS.wood, 0, 0.35, 0)); // Pole
+
+                // Shade (Red/White stripes improvised by overlapped cones?)
+                // Just use Tent material which is reddish
+                const shade = createCone(0.35, 0.15, MATERIALS.tent, 0, 0.7, 0);
+                umbrella.add(shade);
+                group.add(umbrella);
+
+                // Seat
+                group.add(createCyl(0.1, 0.1, 0.08, MATERIALS.wood, -0.2, 0.04, 0.2));
+
+                // Wares (Detailed)
+                // Pot
+                const pot = createCyl(0.06, 0.04, 0.08, MATERIALS.stone, 0.15, tableH + 0.04, -0.08);
+                group.add(pot);
+                // Apples? (Red spheres/boxes)
+                group.add(createBox(0.04, 0.04, 0.04, MATERIALS.tent, -0.1, tableH + 0.02, -0.1));
+                group.add(createBox(0.04, 0.04, 0.04, MATERIALS.tent, -0.05, tableH + 0.02, -0.08));
+
+                // Vertical Sign/Flag
+                group.add(createCyl(0.02, 0.02, 0.8, MATERIALS.wood, -0.35, 0.4, 0.25));
+                group.add(createBox(0.2, 0.4, 0.01, MATERIALS.white, -0.35, 0.6, 0.25)); // Banner
+                // Text on banner? (Texture not avail, use red box trick)
+                group.add(createBox(0.05, 0.2, 0.015, MATERIALS.tent, -0.35, 0.6, 0.25));
+
+            } else { // Tier 2: Tented Stalls (Pavilions)
+                // Structure: 4 Poles + Cloth Roof (No walls)
+                group.add(createPillar(0.6, -0.3, 0.3, -0.3));
+                group.add(createPillar(0.6, 0.3, 0.3, -0.3));
+                group.add(createPillar(0.6, -0.3, 0.3, 0.3));
+                group.add(createPillar(0.6, 0.3, 0.3, 0.3));
+
+                // Cloth Roof (Draped)
+                const cloth = createBox(0.8, 0.05, 0.8, MATERIALS.tent, 0, 0.6, 0);
+                // Drapes? - simplified as box for now, maybe add smaller side pieces
+                group.add(cloth);
+
+                // Tables with wares
+                group.add(createBox(0.7, 0.2, 0.3, MATERIALS.wood, 0, 0.2, 0)); // Main table back
+                group.add(createBox(0.1, 0.1, 0.1, MATERIALS.leaf, -0.2, 0.35, 0));
+                group.add(createBox(0.1, 0.1, 0.1, MATERIALS.gold, 0.2, 0.35, 0));
+
+                // Banners/Flags
+                group.add(createCyl(0.02, 0.02, 1.0, MATERIALS.wood, -0.38, 0.5, 0.38));
+                group.add(createBox(0.2, 0.1, 0.01, MATERIALS.roof, -0.38, 0.8, 0.38)); // Red flag
+            }
+
+            // Props: More baskets/pots
+            if (vizLevel >= 15) {
+                group.add(createCyl(0.1, 0.12, 0.15, MATERIALS.wood, 0.35, 0.08, 0.35));
+            }
+            break;
+
+        case 'blacksmith': // 鍛冶屋 -> 兵器廠 (Arsenal)
+            // Ground - stone patches
+            if (tier >= 2) group.add(createBox(1.0, 0.02, 1.0, MATERIALS.stone, 0, 0.01, 0));
+
+            if (tier === 1) { // Tier 1: Field Smithy
+                // 1. Large Open Furnace (Stone)
+                group.add(createBox(0.5, 0.4, 0.4, MATERIALS.stone, 0, 0.2, -0.2));
+                // Fire Heart
+                group.add(createBox(0.25, 0.2, 0.2, MATERIALS.gold, 0, 0.2, -0.15));
+                // Chimney/Vent hint
+                group.add(createBox(0.3, 0.2, 0.1, MATERIALS.stone, 0, 0.5, -0.3));
+
+                // 2. Anvil on Stump (Prominent)
+                group.add(createCyl(0.2, 0.25, 0.25, MATERIALS.wood, -0.25, 0.125, 0.1)); // Stump
+                // Anvil Shape (T-shape)
+                const anvilGroup = new THREE.Group();
+                anvilGroup.position.set(-0.25, 0.3, 0.1);
+                anvilGroup.add(createBox(0.12, 0.15, 0.25, MATERIALS.metal, 0, 0, 0)); // Base
+                anvilGroup.add(createBox(0.18, 0.08, 0.3, MATERIALS.metal, 0, 0.1, 0)); // Top
+                // Hammer resting
+                anvilGroup.add(createBox(0.03, 0.03, 0.2, MATERIALS.wood, 0, 0.15, 0, 0, 0, 0.2));
+                group.add(anvilGroup);
+
+                // 3. Water Trough
+                group.add(createBox(0.25, 0.15, 0.15, MATERIALS.wood, 0.25, 0.075, 0.2));
+                group.add(createBox(0.2, 0.1, 0.1, MATERIALS.water, 0.25, 0.1, 0.2));
+
+                // 4. Weapon Rack (Spears)
+                const rack = new THREE.Group();
+                rack.position.set(0.35, 0.2, -0.1);
+                rack.add(createBox(0.1, 0.4, 0.05, MATERIALS.wood, 0, 0, 0));
+                // Spear
+                rack.add(createCyl(0.02, 0.02, 0.6, MATERIALS.metal, 0, 0.1, 0.05, 0.2));
+                group.add(rack);
+            } else { // Tier 2: Arsenal (Roof but no walls)
+                // 4 Poles
+                const h = 0.8;
+                group.add(createPillar(h, -0.35, 0.4, -0.35));
+                group.add(createPillar(h, 0.35, 0.4, -0.35));
+                group.add(createPillar(h, -0.35, 0.4, 0.35));
+                group.add(createPillar(h, 0.35, 0.4, 0.35));
+                // Roof
+                group.add(createChineseRoof(0.9, 0.9, 0.3, MATERIALS.roofTileBlack, 0, h + 0.15, 0));
+
+                // Larger Furnace
+                group.add(createBox(0.4, 0.5, 0.4, MATERIALS.stone, -0.2, 0.25, -0.2));
+                group.add(createBox(0.2, 0.2, 0.1, MATERIALS.gold, -0.2, 0.2, -0.01)); // Fire
+
+                // Weapon Racks
+                const rack = new THREE.Group();
+                rack.position.set(0.3, 0, 0.2);
+                rack.add(createBox(0.1, 0.5, 0.4, MATERIALS.wood, 0, 0.25, 0));
+                // Spears
+                rack.add(createCyl(0.01, 0.01, 0.7, MATERIALS.metal, 0, 0.35, 0.1));
+                rack.add(createCyl(0.01, 0.01, 0.7, MATERIALS.metal, 0, 0.35, -0.1));
+                group.add(rack);
+
+                // Anvil
+                group.add(createBox(0.2, 0.3, 0.2, MATERIALS.metal, 0, 0.15, 0.2));
+            }
+
+            // Smoke (Both tiers)
+            const smokeB = new THREE.Object3D();
+            smokeB.position.set(0, 0.8, -0.2);
+            smokeB.userData = { anim: 'smoke' };
+            group.add(smokeB);
+            break;
+
+        case 'well': // 井戸 -> 給水所 (Water Works)
+            // Ground: Paving stones - Thin
+            group.add(createBox(0.8, 0.02, 0.8, MATERIALS.pavingStone, 0, 0.01, 0));
+
+            // Well Base
+            group.add(createCyl(0.35, 0.35, 0.3, MATERIALS.stone, 0, 0.15, 0, 0, 8));
+            group.add(createCyl(0.28, 0.28, 0.31, MATERIALS.water, 0, 0.15, 0, 0, 8));
+
+            if (tier >= 2) {
+                // Roof over well (Small shrine style) - 2 pillars
+                group.add(createPillar(0.7, -0.3, 0.35, 0));
+                group.add(createPillar(0.7, 0.3, 0.35, 0));
+                // Small Roof
+                group.add(createChineseRoof(0.8, 0.5, 0.3, MATERIALS.roofTileGreen, 0, 0.75, 0));
+
+                // Pulley system
+                group.add(createBox(0.6, 0.05, 0.05, MATERIALS.wood, 0, 0.5, 0));
+                // Bucket line
+                group.add(createCyl(0.005, 0.005, 0.3, MATERIALS.white, 0, 0.4, 0));
+            }
+
+            // Bucket
+            if (vizLevel >= 15 || tier >= 2) {
+                const bucket = createCyl(0.1, 0.08, 0.12, MATERIALS.wood, 0, tier >= 2 ? 0.25 : 0.3, 0);
+                if (tier >= 2) bucket.userData = { anim: 'bounceY', speed: 0.15, range: 0.05 };
+                group.add(bucket);
+            }
+            // Tier 1 props - Pulley Frame
+            if (tier === 1) {
+                // Simple wooden frame over well
+                group.add(createCyl(0.04, 0.04, 0.6, MATERIALS.wood, -0.25, 0.3, 0));
+                group.add(createCyl(0.04, 0.04, 0.6, MATERIALS.wood, 0.25, 0.3, 0));
+                group.add(createCyl(0.03, 0.03, 0.5, MATERIALS.wood, 0, 0.55, 0, 0, 0, Math.PI / 2));
+
+                if (vizLevel >= 5) {
+                    group.add(createBox(0.15, 0.05, 0.2, MATERIALS.wood, 0.3, 0.05, 0.3)); // Wash board/platform
+                }
+            }
+            break;
+
+        case 'inn': // 宿屋 -> 茶館/宿場 (Teahouse/Inn)
+            // Ground - Removed Foundation
+
+            if (tier === 1) { // Tier 1: Teahouse
+                // Open-front building
+                // Back wall and side walls
+                group.add(createBox(0.8, 0.5, 0.6, MATERIALS.wallWhite, 0, 0.25, 0));
+
+                // Overhanging roof for seating area
+                group.add(createBox(0.8, 0.05, 0.3, MATERIALS.roofStraw, 0, 0.4, 0.45));
+                group.add(createPillar(0.4, -0.35, 0.2, 0.55));
+                group.add(createPillar(0.4, 0.35, 0.2, 0.55));
+
+                // Main Roof
+                const roof = createCone(0.9, 0.6, MATERIALS.roofStraw, 0, 0.8, 0, Math.PI / 4);
+                roof.scale.z = 0.8;
+                group.add(roof);
+
+                // Tea bench outside
+                group.add(createBox(0.3, 0.1, 0.15, MATERIALS.wood, 0, 0.05, 0.5)); // Bench
+                group.add(createBox(0.3, 0.02, 0.15, MATERIALS.roof, 0, 0.11, 0.5)); // Red Cloth on bench
+                group.add(createBox(0.2, 0.2, 0.02, MATERIALS.tent, 0.2, 0.35, 0.31)); // Noren (Curtain)
+
+            } else { // Tier 2: Inn (2-Story with balconies)
+                // 1st Floor
+                group.add(createBox(0.8, 0.5, 0.8, MATERIALS.woodDark, 0, 0.25, 0));
+                // 2nd Floor (Slightly smaller)
+                group.add(createBox(0.7, 0.5, 0.7, MATERIALS.wallWhite, 0, 0.75, 0));
+
+                // Roofs
+                group.add(createChineseRoof(1.0, 1.0, 0.2, MATERIALS.roofTileBlack, 0, 0.5, 0)); // 1st floor roof skirting
+                group.add(createChineseRoof(0.9, 0.7, 0.5, MATERIALS.roofTileBlack, 0, 1.25, 0)); // Main roof
+
+                // Balcony (Wraparound)
+                group.add(createBox(0.8, 0.05, 0.1, MATERIALS.wood, 0, 0.5, 0.4)); // Floor
+                group.add(createBox(0.8, 0.15, 0.05, MATERIALS.wood, 0, 0.6, 0.45)); // Railing
+
+                // Lanterns
+                group.add(createLantern(0.4, 0.4, 0.45));
+                group.add(createLantern(-0.4, 0.4, 0.45));
+
+                // Signboard
+                const sign = createBox(0.15, 0.3, 0.05, MATERIALS.wood, 0.3, 0.25, 0.42);
+                group.add(sign);
+            }
+
+            // Horse props if high level
+            if (vizLevel >= 15) {
+                group.add(createBox(0.3, 0.05, 0.1, MATERIALS.wood, -0.3, 0.1, 0.4)); // Trough
+            }
+            break;
+
+        case 'clocktower': // 時計塔 -> 鐘楼 (Bell Tower)
+            // Ground - minimal
+            const towerH = tier >= 2 ? 1.4 : 1.0;
+
+            if (tier === 1) { // Tier 1: Watchtower (Wood) - Open frame
+                // Legs
+                group.add(createCyl(0.05, 0.08, towerH, MATERIALS.wood, 0.2, towerH / 2, 0.2));
+                group.add(createCyl(0.05, 0.08, towerH, MATERIALS.wood, -0.2, towerH / 2, 0.2));
+                group.add(createCyl(0.05, 0.08, towerH, MATERIALS.wood, 0.2, towerH / 2, -0.2));
+                group.add(createCyl(0.05, 0.08, towerH, MATERIALS.wood, -0.2, towerH / 2, -0.2));
+                // Cross braces
+                group.add(createBox(0.5, 0.05, 0.05, MATERIALS.wood, 0, towerH * 0.3, 0.2));
+                group.add(createBox(0.5, 0.05, 0.05, MATERIALS.wood, 0, towerH * 0.6, -0.2));
+
+                // Platform (railed)
+                group.add(createBox(0.5, 0.05, 0.5, MATERIALS.wood, 0, towerH, 0));
+                group.add(createBox(0.5, 0.2, 0.05, MATERIALS.wood, 0, towerH + 0.1, 0.22)); // Rail
+                group.add(createBox(0.5, 0.2, 0.05, MATERIALS.wood, 0, towerH + 0.1, -0.22)); // Rail
+
+                // Drum/Gong
+                group.add(createCyl(0.15, 0.15, 0.1, MATERIALS.wood, 0, towerH + 0.1, 0, Math.PI / 2));
+            } else { // Tier 2: Bell Tower (Stone Base, Open top)
+                // Stone Base - kept for Bell Tower as it IS the building
+                group.add(createBox(0.6, 0.8, 0.6, MATERIALS.stone, 0, 0.4, 0));
+
+                // Upper Wooden Frame
+                const upperY = 0.8;
+                const topY = upperY + 0.6;
+                // Pillars
+                group.add(createPillar(0.6, 0.25, upperY + 0.3, 0.25));
+                group.add(createPillar(0.6, -0.25, upperY + 0.3, 0.25));
+                group.add(createPillar(0.6, 0.25, upperY + 0.3, -0.25));
+                group.add(createPillar(0.6, -0.25, upperY + 0.3, -0.25));
+
+                // Big Bronze Bell
+                const bell = createCyl(0.2, 0.3, 0.3, MATERIALS.metal, 0, upperY + 0.3, 0);
+                bell.userData = { anim: 'sway', speed: 2.0, offset: 0 };
+                group.add(bell);
+
+                // Roof (Hip-and-Gable)
+                group.add(createChineseRoof(0.8, 0.8, 0.5, MATERIALS.roofTileGreen, 0, topY, 0, 1));
+            }
+            break;
+
+        case 'forest': // 森 -> 竹林 (Bamboo Grove)
+            // Forest Area (1x2). Slave tile at Z+3.0 equivalent distance logic
+            // Logic handles rendering at Master pos.
+
+            const addTree = (tx, tz, s) => {
+                if (tier >= 2) {
+                    // Bamboo
+                    const bamboo = new THREE.Group();
+                    bamboo.position.set(tx, 0, tz);
+                    bamboo.scale.set(s, s * 1.5, s);
+                    // Segments
+                    bamboo.add(createCyl(0.05, 0.06, 0.8, MATERIALS.leaf, 0, 0.4, 0));
+                    // Leaves
+                    bamboo.add(createCone(0.2, 0.3, MATERIALS.leaf, 0, 0.7, 0));
+                    bamboo.userData = { anim: 'sway', speed: 1.0 + Math.random(), offset: Math.random() * 10 };
+                    group.add(bamboo);
+                } else {
+                    // Normal Tree
+                    const trunk = createCyl(0.1 * s, 0.15 * s, 0.5 * s, MATERIALS.wood, tx, 0.25 * s, tz);
+                    group.add(trunk);
+                    const l1 = createCone(0.4 * s, 0.6 * s, MATERIALS.darkLeaf, tx, 0.6 * s, tz);
+                    group.add(l1);
+                    const l2 = createCone(0.3 * s, 0.5 * s, MATERIALS.darkLeaf, tx, 0.9 * s, tz);
+                    group.add(l2);
+                }
+            };
+
+            // Cabin removal - Tier 1 woods focus on nature
+            if (tier === 1) {
+                // Small Shrine / Landmark instead of House
+                group.add(createBox(0.2, 0.4, 0.2, MATERIALS.stone, 0, 0.2, 0.2));
+                group.add(createBox(0.3, 0.1, 0.3, MATERIALS.stone, 0, 0.45, 0.2));
+                // Fallen Log
+                group.add(createCyl(0.1, 0.1, 0.6, MATERIALS.wood, 0.4, 0.05, -0.4, Math.PI / 2, Math.PI / 6));
+            } else {
+                // Tier 2: Bamboo features - maybe a small fence?
+                group.add(createBox(0.05, 0.6, 0.05, MATERIALS.wood, 0.5, 0.3, 0.5));
+                group.add(createBox(0.05, 0.6, 0.05, MATERIALS.wood, -0.5, 0.3, 0.5));
+                group.add(createBox(1.0, 0.05, 0.05, MATERIALS.wood, 0, 0.4, 0.5));
+            }
+
+            // Scatter trees
+            const range = tier >= 2 ? 0.6 : 0.8; // Denser for bamboo
+            const dens = tier >= 2 ? 1.5 : 1.0;
+
+            // Master area (Local Z: -0.9 to 0.9)
+            addTree(-0.8, -0.8, 0.9);
+            addTree(0.8, -0.6, 0.8);
+            addTree(0.6, 0.8, 0.7);
+            if (tier >= 2) addTree(0.2, -0.9, 0.8);
+
+            // Slave area (Target Center Z: ~2.125 for baseScale 1.6)
+            // Previous values were > 3.0 which caused overflow (3.0 * 1.6 = 4.8, close to limit 4.85)
+            addTree(0, 2.1, 1.2);
+            addTree(-0.8, 1.8, 0.9);
+            addTree(0.8, 1.7, 0.8);
+            addTree(-0.7, 2.4, 0.7);
+            addTree(0.7, 2.5, 0.8);
+            if (tier >= 2) {
+                addTree(0.3, 1.9, 0.9);
+                addTree(-0.3, 2.3, 0.8);
+            }
+            break;
+
+        case 'bank': // 銀行 -> 金庫 (Vault)
+            // Ground - stone path under door?
+
+            if (tier === 1) { // Tier 1: Storehouse (Kurazukuri style)
+                // White walls, thick, small footprint high height
+                group.add(createBox(0.7, 0.7, 0.7, MATERIALS.wallWhite, 0, 0.35, 0));
+                // Black base (part of the building, not platform)
+                group.add(createBox(0.72, 0.2, 0.72, MATERIALS.dark, 0, 0.1, 0));
+                // Roof - Heavy Tiled, but simple
+                group.add(createChineseRoof(0.8, 0.8, 0.4, MATERIALS.roofTileBlack, 0, 0.9, 0));
+                // Heavy Door with no windows anywhere else
+                group.add(createBox(0.3, 0.35, 0.05, MATERIALS.metal, 0, 0.25, 0.36));
+            } else { // Tier 2: Stone Vault (Fortress-like)
+                // Heavy Stone Block (Chamfered look?)
+                group.add(createBox(0.8, 0.6, 0.8, MATERIALS.stone, 0, 0.3, 0));
+                // Reinforced Corners
+                group.add(createBox(0.15, 0.65, 0.15, MATERIALS.stoneWhite, 0.35, 0.32, 0.35));
+                group.add(createBox(0.15, 0.65, 0.15, MATERIALS.stoneWhite, -0.35, 0.32, 0.35));
+                group.add(createBox(0.15, 0.65, 0.15, MATERIALS.stoneWhite, 0.35, 0.32, -0.35));
+                group.add(createBox(0.15, 0.65, 0.15, MATERIALS.stoneWhite, -0.35, 0.32, -0.35));
+
+                // Flat Stone Roof / Battlements
+                group.add(createBox(0.9, 0.1, 0.9, MATERIALS.stoneWhite, 0, 0.65, 0));
+
+                // Gold Doors
+                group.add(createBox(0.4, 0.5, 0.05, MATERIALS.gold, 0, 0.25, 0.41));
+
+                // Gold accents
+                group.add(createBox(0.2, 0.2, 0.2, MATERIALS.gold, 0, 0.75, 0)); // Top ornament
+            }
+
+            if (tier >= 3) {
+                // Gold piles
+                group.add(createBox(0.2, 0.1, 0.2, MATERIALS.gold, 0.3, 0.1, 0.3));
+                group.add(createBox(0.2, 0.15, 0.2, MATERIALS.gold, -0.3, 0.1, 0.3));
+            }
+            break;
+
+        case 'granary': // 穀倉 (Granary)
+            // Ground - minimal
+
+            if (tier === 1) { // Tier 1: Raised Floor Granary (Takayuka)
+                // Stilts
+                group.add(createCyl(0.05, 0.05, 0.3, MATERIALS.wood, 0.3, 0.15, 0.3));
+                group.add(createCyl(0.05, 0.05, 0.3, MATERIALS.wood, -0.3, 0.15, 0.3));
+                group.add(createCyl(0.05, 0.05, 0.3, MATERIALS.wood, 0.3, 0.15, -0.3));
+                group.add(createCyl(0.05, 0.05, 0.3, MATERIALS.wood, -0.3, 0.15, -0.3));
+
+                // Main box
+                group.add(createBox(0.7, 0.5, 0.7, MATERIALS.wood, 0, 0.55, 0));
+                // Roof
+                group.add(createChineseRoof(0.8, 0.8, 0.5, MATERIALS.roofStraw, 0, 1.05, 0));
+                // Ladder
+                const ladder = createBox(0.2, 0.4, 0.05, MATERIALS.wood, 0, 0.2, 0.35);
+                ladder.rotation.x = -0.5;
+                group.add(ladder);
+            } else { // Tier 2: Large Granary Complex (Silos)
+                // 3 Round Silos instead of one house
+                const siloR = 0.25;
+                const siloH = 0.6;
+
+                const addSilo = (tx, tz) => {
+                    const s = new THREE.Group();
+                    s.position.set(tx, 0, tz);
+                    // Body (White plaster)
+                    s.add(createCyl(siloR, siloR, siloH, MATERIALS.wallWhite, 0, siloH / 2, 0));
+                    // Base
+                    s.add(createCyl(siloR + 0.02, siloR + 0.02, 0.1, MATERIALS.stone, 0, 0.05, 0));
+                    // Roof (Conical Straw)
+                    s.add(createCone(siloR + 0.1, 0.3, MATERIALS.roofStraw, 0, siloH + 0.15, 0));
+                    group.add(s);
+                };
+
+                addSilo(-0.25, -0.2);
+                addSilo(0.25, -0.2);
+                addSilo(0, 0.3); // Back one
+
+                // Rice Bales (Tawara) scattered
+                const baleGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.25, 8);
+                const makeBale = (x, z) => {
+                    const m = new THREE.Mesh(baleGeo, MATERIALS.roofStraw);
+                    m.rotation.z = Math.PI / 2;
+                    m.position.set(x, 0.125, z);
+                    return m;
+                };
+                group.add(makeBale(0.3, 0.3));
+                group.add(makeBale(-0.3, 0.3));
+                if (tier >= 3) {
+                    group.add(makeBale(0, -0.3));
+                }
+            }
+            break;
+
+        case 'lumber_hub': // 木材加工所 -> 大工 (Carpenter)
+            // Ground - minimal or wood shavings?
+            if (tier >= 2) group.add(createBox(1.0, 0.02, 1.0, MATERIALS.dirt, 0, 0.01, 0));
+
+            // Main Workshop area
+            // Main Workshop area
+            if (tier === 1) { // Workshop - Carpentry Shed
+                // 1. Simple Roof Structure (Distinguishes from Open Air Lumber Mill)
+                group.add(createPillar(0.7, -0.3, 0.3, -0.2));
+                group.add(createPillar(0.7, 0.3, 0.3, -0.2));
+                group.add(createPillar(0.7, -0.3, 0.3, 0.2));
+                group.add(createPillar(0.7, 0.3, 0.3, 0.2));
+                // Lattice Roof / Open Rafters
+                group.add(createBox(0.7, 0.05, 0.5, MATERIALS.wood, 0, 0.7, 0));
+
+                // 2. Workbench (Under roof)
+                group.add(createBox(0.4, 0.25, 0.2, MATERIALS.wood, 0, 0.125, -0.1)); // Bench
+                // Planer/Tools
+                group.add(createBox(0.05, 0.03, 0.08, MATERIALS.metal, 0, 0.26, -0.1));
+
+                // 3. Neat Stacks of Planks (Processed wood)
+                const plankL = 0.5;
+                const plankW = 0.3;
+                const stackH = 0.2;
+                // Stack 1
+                group.add(createBox(plankW, stackH, plankL, MATERIALS.wood, -0.2, stackH / 2, 0.2));
+                // Detail lines for planks
+                group.add(createBox(plankW + 0.01, 0.02, plankL, MATERIALS.woodDark, -0.2, 0.05, 0.2));
+                group.add(createBox(plankW + 0.01, 0.02, plankL, MATERIALS.woodDark, -0.2, 0.15, 0.2));
+
+            } else { // Carpenter - Large Shed (Roof, no walls)
+                // 4 Tall Pillars
+                const h = 0.9;
+                group.add(createPillar(h, -0.35, 0.45, -0.3));
+                group.add(createPillar(h, 0.35, 0.45, -0.3));
+                group.add(createPillar(h, -0.35, 0.45, 0.3));
+                group.add(createPillar(h, 0.35, 0.45, 0.3));
+
+                // Roof Area
+                group.add(createChineseRoof(0.9, 0.9, 0.3, MATERIALS.roofTileBlack, 0, h + 0.15, 0));
+
+                // Working area - Large Bench
+                group.add(createBox(0.6, 0.3, 0.3, MATERIALS.wood, 0, 0.15, 0));
+
+                // Lumber rack
+                group.add(createPillar(0.6, -0.3, 0.3, -0.3)); // reuse pillar func for rack post
+                group.add(createPillar(0.6, 0.3, 0.3, -0.3));
+                group.add(createBox(0.7, 0.05, 0.2, MATERIALS.wood, 0, 0.4, -0.3));
+
+                // Spinning Saw
+                const saw = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.02, 16), MATERIALS.metal);
+                saw.rotation.x = Math.PI / 2;
+                saw.userData = { anim: 'spinX', speed: 0.4 };
+                const sawGroup = new THREE.Group();
+                sawGroup.position.set(0.2, 0.35, 0.1);
+                sawGroup.add(saw);
+                group.add(sawGroup);
+            }
+            // Logs
+            group.add(createCyl(0.1, 0.1, 0.5, MATERIALS.wood, 0.3, 0.05, -0.3, Math.PI / 2));
+            break;
+
+        case 'stone_plant': // 石材加工所 -> 城壁建設現場 (Wall Construction)
+            // Ground - stone dust
+            if (tier >= 2) group.add(createBox(1.0, 0.02, 1.0, MATERIALS.stone, 0, 0.01, 0));
+
+            if (tier === 1) { // Stone Yard (Processing)
+                // Paved Work Area
+                group.add(createBox(0.8, 0.05, 0.6, MATERIALS.stone, 0, 0.025, 0));
+
+                // 1. Large Worked Stone Block (Centerpiece)
+                group.add(createBox(0.3, 0.25, 0.3, MATERIALS.stone, 0, 0.15, 0));
+                // Chips around it
+                group.add(createCone(0.1, 0.05, MATERIALS.stone, 0.2, 0.05, 0.2));
+                group.add(createCone(0.08, 0.04, MATERIALS.stone, -0.2, 0.05, 0.15));
+
+                // 2. Simple Wooden Hoist (Crane)
+                const hoist = new THREE.Group();
+                hoist.position.set(-0.3, 0, -0.2);
+                // A-Frame legs
+                hoist.add(createCyl(0.04, 0.04, 0.8, MATERIALS.wood, 0, 0.4, 0.15, 0, 0, 0.3));
+                hoist.add(createCyl(0.04, 0.04, 0.8, MATERIALS.wood, 0, 0.4, -0.15, 0, 0, -0.3));
+                // Crossbar
+                hoist.add(createCyl(0.03, 0.03, 0.4, MATERIALS.wood, 0, 0.7, 0, Math.PI / 2));
+                // Rope
+                hoist.add(createCyl(0.01, 0.01, 0.5, MATERIALS.roofStraw, 0, 0.5, 0));
+                // Hook/Stone suspended?
+                hoist.add(createBox(0.15, 0.1, 0.15, MATERIALS.stone, 0, 0.3, 0));
+                group.add(hoist);
+
+                // 3. Chisel Bench
+                group.add(createBox(0.3, 0.05, 0.15, MATERIALS.wood, 0.3, 0.1, 0.3)); // Low Bench
+                group.add(createBox(0.02, 0.15, 0.02, MATERIALS.metal, 0.3, 0.2, 0.3)); // Chisel
+                group.add(createBox(0.05, 0.03, 0.1, MATERIALS.wood, 0.35, 0.14, 0.3)); // Mallet
+            } else { // Wall Construction Site
+                // A larger stone wall section (looks like a wall, not a building)
+                group.add(createBox(0.9, 0.6, 0.3, MATERIALS.stone, 0, 0.3, -0.2));
+                // Crenellations
+                group.add(createBox(0.2, 0.1, 0.3, MATERIALS.stone, -0.35, 0.65, -0.2));
+                group.add(createBox(0.2, 0.1, 0.3, MATERIALS.stone, 0, 0.65, -0.2));
+                group.add(createBox(0.2, 0.1, 0.3, MATERIALS.stone, 0.35, 0.65, -0.2));
+
+                // Wooden Scaffolding wrapping around
+                const scaffold = new THREE.Group();
+                scaffold.position.set(0, 0, 0.2);
+                scaffold.add(createCyl(0.04, 0.04, 0.8, MATERIALS.wood, -0.4, 0.4, 0));
+                scaffold.add(createCyl(0.04, 0.04, 0.8, MATERIALS.wood, 0.4, 0.4, 0));
+                scaffold.add(createBox(0.9, 0.05, 0.2, MATERIALS.wood, 0, 0.4, 0)); // Platform
+                group.add(scaffold);
+
+                // Crane lifting stone
+                const crane = new THREE.Group();
+                crane.position.set(0.3, 0, 0.3);
+                crane.add(createCyl(0.05, 0.05, 1.2, MATERIALS.wood, 0, 0.6, 0)); // Tall mast
+                crane.add(createBox(0.6, 0.05, 0.05, MATERIALS.wood, -0.2, 1.1, 0)); // Jib
+
+                const block = createBox(0.15, 0.15, 0.15, MATERIALS.stoneWhite, -0.5, 0.8, 0); // Suspended high
+                crane.add(block);
+                crane.userData = { anim: 'rotateY', speed: 0.005 };
+                group.add(crane);
+            }
+            break;
+        case 'masonry_hub': // 石匠工房 (Master Mason's Workshop)
+            // Custom Materials (High Fidelity) - Generated on fly (or cached if optimized)
+            const matStoneBrick = new THREE.MeshStandardMaterial({ map: TextureGenerator.generateStoneBrick('#888888') });
+            const matAgedWood = new THREE.MeshStandardMaterial({ map: TextureGenerator.generateAgedWood('#5d4037') });
+            const matRoofTile = new THREE.MeshStandardMaterial({ map: TextureGenerator.generateRoofTile('#333333') });
+
+            // Ground: Paved Stone
+            group.add(createBox(1.0, 0.05, 1.0, matStoneBrick, 0, 0.025, 0));
+
+            if (tier === 1) { // Tier 1: Open-air Stone Yard
+                // 1. Large Central Crane (Wooden treadwheel crane style - simplified)
+                const crane = new THREE.Group();
+                crane.position.set(-0.2, 0, -0.2);
+                // Vertical Post
+                crane.add(createCyl(0.06, 0.08, 1.2, matAgedWood, 0, 0.6, 0));
+                // Horizontal Boom
+                crane.add(createCyl(0.04, 0.05, 0.8, matAgedWood, 0.3, 1.0, 0, 0, 0, -0.2));
+                // Rope & Block
+                crane.add(createCyl(0.01, 0.01, 0.6, MATERIALS.white, 0.6, 0.6, 0));
+                const suspendedStone = createBox(0.2, 0.15, 0.2, matStoneBrick, 0.6, 0.4, 0);
+                suspendedStone.rotation.y = 0.5;
+                crane.add(suspendedStone);
+                group.add(crane);
+
+                // 2. Work Stations
+                // Chisel Bench
+                group.add(createBox(0.4, 0.2, 0.2, matAgedWood, 0.3, 0.1, 0.3));
+                group.add(createBox(0.05, 0.02, 0.15, MATERIALS.metal, 0.3, 0.21, 0.3)); // Tools
+
+                // Raw Stone Blocks waiting
+                group.add(createBox(0.25, 0.25, 0.25, matStoneBrick, -0.3, 0.125, 0.3, 0.2));
+                group.add(createBox(0.2, 0.2, 0.2, matStoneBrick, -0.35, 0.1, 0.1, -0.1));
+
+                // 3. Workers (Static props for now)
+                // Maybe a small shelter
+                const shelter = new THREE.Group();
+                shelter.position.set(0.3, 0, -0.3);
+                shelter.add(createCyl(0.03, 0.03, 0.6, matAgedWood, -0.2, 0.3, -0.2));
+                shelter.add(createCyl(0.03, 0.03, 0.6, matAgedWood, 0.2, 0.3, -0.2));
+                shelter.add(createCyl(0.03, 0.03, 0.6, matAgedWood, -0.2, 0.3, 0.2));
+                shelter.add(createCyl(0.03, 0.03, 0.6, matAgedWood, 0.2, 0.3, 0.2));
+                shelter.add(createBox(0.5, 0.02, 0.5, matRoofTile, 0, 0.6, 0));
+                group.add(shelter);
+
+            } else { // Tier 2: Guild Compound (Walled)
+                // Stone Walls
+                const wH = 0.4;
+                const wThick = 0.1;
+                // North
+                group.add(createBox(1.0, wH, wThick, matStoneBrick, 0, wH / 2, -0.45));
+                // East
+                group.add(createBox(wThick, wH, 1.0, matStoneBrick, 0.45, wH / 2, 0));
+                // West
+                group.add(createBox(wThick, wH, 1.0, matStoneBrick, -0.45, wH / 2, 0));
+                // South (Gate)
+                group.add(createBox(0.3, wH, wThick, matStoneBrick, -0.35, wH / 2, 0.45));
+                group.add(createBox(0.3, wH, wThick, matStoneBrick, 0.35, wH / 2, 0.45));
+
+                // Gatehouse Roof
+                const gate = new THREE.Group();
+                gate.position.set(0, wH, 0.45);
+                gate.add(createChineseRoof(0.6, 0.4, 0.3, matRoofTile, 0, 0.2, 0));
+                group.add(gate);
+
+                // Interior: Master Workshop
+                const mainShop = new THREE.Group();
+                mainShop.position.set(0, 0, -0.1);
+                // Pillars
+                mainShop.add(createPillar(0.6, -0.3, 0.3, 0));
+                mainShop.add(createPillar(0.6, 0.3, 0.3, 0));
+                // Roof
+                mainShop.add(createChineseRoof(0.8, 0.6, 0.3, matRoofTile, 0, 0.6, 0));
+
+                // Internal details: Polished Statues/Pillars
+                mainShop.add(createCyl(0.1, 0.1, 0.3, MATERIALS.stoneWhite, 0, 0.15, 0)); // Masterpiece
+
+                group.add(mainShop);
+
+                // Heavy Crane
+                const heavyCrane = new THREE.Group();
+                heavyCrane.position.set(0.3, 0, 0.2);
+                heavyCrane.add(createCyl(0.08, 0.1, 0.8, matAgedWood, 0, 0.4, 0));
+                heavyCrane.add(createBox(0.4, 0.05, 0.05, matAgedWood, -0.1, 0.7, 0, 0, 0, 0.3));
+                group.add(heavyCrane);
+            }
+
+        case 'directorate': // 造営司 (Construction Directorate)
+            // Ground
+            group.add(createFoundation(0.9, 0.9));
+
+            if (vizLevel <= 10) {
+                // Tier 1: Field HQ (Tent/Pavilion)
+                // Simple pillars holding a fabric roof
+                group.add(createPillar(0.5, 0.3, 0.25, 0.3));
+                group.add(createPillar(0.5, -0.3, 0.25, 0.3));
+                group.add(createPillar(0.5, 0.3, 0.25, -0.3));
+                group.add(createPillar(0.5, -0.3, 0.25, -0.3));
+
+                // Roof (Cloth/Straw look) using ChineseRoof logic but scaled flat
+                // Or simple Cone?
+                // Let's use the ChineseRoof but with 'tent' color (Straw/White)
+                // Assuming MATERIALS.roofStraw exists
+                group.add(createChineseRoof(0.9, 0.9, 0.4, MATERIALS.roofStraw, 0, 0.6, 0, 1));
+
+                // Props: Table with Map
+                const table = new THREE.Group();
+                table.position.set(0, 0.2, 0);
+                table.add(createBox(0.4, 0.05, 0.3, MATERIALS.wood, 0, 0.2, 0)); // Top
+                table.add(createBox(0.05, 0.2, 0.05, MATERIALS.woodDark, 0.15, 0.1, 0.1));
+                table.add(createBox(0.05, 0.2, 0.05, MATERIALS.woodDark, -0.15, 0.1, 0.1));
+                table.add(createBox(0.05, 0.2, 0.05, MATERIALS.woodDark, 0.15, 0.1, -0.1));
+                table.add(createBox(0.05, 0.2, 0.05, MATERIALS.woodDark, -0.15, 0.1, -0.1));
+                // Scroll/Map on table
+                table.add(createBox(0.2, 0.01, 0.15, MATERIALS.white, 0, 0.23, 0));
+                group.add(table);
+
+                // Banner
+                const banner = new THREE.Group();
+                banner.position.set(-0.35, 0, -0.35);
+                banner.add(createCyl(0.03, 0.03, 0.8, MATERIALS.wood, 0, 0.4, 0)); // Pole
+                banner.add(createBox(0.3, 0.4, 0.02, MATERIALS.white, 0.15, 0.6, 0)); // Flag
+                group.add(banner);
+
+            } else if (vizLevel <= 20) {
+                // Tier 2: Regional Office (Tiled Roof, Wood Walls)
+                // Walls
+                group.add(createBox(0.8, 0.5, 0.6, MATERIALS.wood, 0, 0.35, 0));
+
+                // Roof (Black Tile)
+                group.add(createChineseRoof(1.1, 0.9, 0.5, MATERIALS.roofTileBlack, 0, 0.8, 0, 1));
+
+                // Entrance
+                group.add(createBox(0.2, 0.4, 0.05, MATERIALS.woodDark, 0, 0.2, 0.31));
+
+                // Drum (Signal Drum)
+                const drum = new THREE.Group();
+                drum.position.set(0.3, 0.1, 0.3);
+                const stand = createBox(0.2, 0.1, 0.1, MATERIALS.woodDark, 0, 0.05, 0);
+                drum.add(stand);
+                const body = createCyl(0.12, 0.12, 0.15, MATERIALS.wood, 0, 0.15, 0, 0, 16);
+                body.rotation.z = Math.PI / 2; // Sideways drum
+                drum.add(body);
+                group.add(drum);
+
+                // Stacks of materials
+                group.add(createBox(0.2, 0.2, 0.2, MATERIALS.stone, -0.3, 0.1, 0.3));
+
+            } else {
+                // Tier 3: Ministry HQ (Palace style)
+                // Vermilion Pillars
+                const ph = 0.6;
+                group.add(createPillar(ph, 0.4, ph / 2, 0.3));
+                group.add(createPillar(ph, -0.4, ph / 2, 0.3));
+                group.add(createPillar(ph, 0.4, ph / 2, -0.3));
+                group.add(createPillar(ph, -0.4, ph / 2, -0.3));
+
+                // Inner Wall
+                group.add(createBox(0.7, ph, 0.5, MATERIALS.wallWhite, 0, ph / 2, 0));
+
+                // Roof (Gold/Green - using Gold for 'Imperial' look)
+                group.add(createChineseRoof(1.3, 1.1, 0.7, MATERIALS.gold, 0, ph + 0.35, 0, 2));
+
+                // Large Bell or Ornament
+                const bell = new THREE.Group();
+                bell.position.set(0, 0, 0.4);
+                bell.add(createBox(0.3, 0.05, 0.1, MATERIALS.woodDark, 0, 0.4, 0)); // Beam
+                bell.add(createCyl(0.02, 0.02, 0.4, MATERIALS.woodDark, -0.14, 0.2, 0)); // Post
+                bell.add(createCyl(0.02, 0.02, 0.4, MATERIALS.woodDark, 0.14, 0.2, 0)); // Post
+                bell.add(createCyl(0.08, 0.12, 0.15, MATERIALS.metal, 0, 0.3, 0)); // Bell
+                group.add(bell);
+
+                // Lanterns
+                group.add(createLantern(0.5, 0.5, 0.4));
+                group.add(createLantern(-0.5, 0.5, 0.4));
+            }
+            break;
+    }
+    return group;
+}
+
+let _lastAnimTime = null; // For delta time calculation
+function animate3D() {
+    requestAnimationFrame(animate3D);
+    const time = Date.now() * 0.001;
+    const dt = _lastAnimTime ? time - _lastAnimTime : 0.016; // Default to ~60fps
+    _lastAnimTime = time;
+
+    tileMeshes.forEach((t, i) => {
+        t.particles.update();
+
+        if (t.buildingGroup.visible) {
+            t.buildingGroup.traverse((obj) => {
+                if (obj.userData && obj.userData.anim) {
+                    const data = obj.userData;
+                    switch (data.anim) {
+                        case 'sway':
+                            obj.rotation.z = Math.sin(time * data.speed + data.offset) * 0.1;
+                            break;
+                        case 'rotateY':
+                            obj.rotation.y += data.speed;
+                            break;
+                        case 'rotateZ':
+                            obj.rotation.z -= data.speed;
+                            break;
+                        case 'spinX':
+                            obj.rotation.x += data.speed;
+                            break;
+                        case 'blink':
+                            obj.visible = Math.sin(time * 10 * data.speed) > 0;
+                            break;
+                        case 'bounceY':
+                            obj.position.y = 0.35 + Math.abs(Math.sin(time * 5)) * data.range;
+                            break;
+                        case 'shuttleX':
+                            obj.position.x = Math.sin(time * data.speed * 20) * data.range;
+                            break;
+                        case 'shuttleY':
+                            obj.position.y = Math.sin(time * data.speed * 20) * data.range;
+                            break;
+                        case 'sawMove':
+                            obj.position.z = Math.sin(time * 5) * 0.15;
+                            break;
+                        case 'hammer':
+                            const cycle = (time * 3) % Math.PI;
+                            obj.rotation.z = Math.PI / 4 + Math.sin(cycle) * Math.PI / 4;
+                            break;
+                        case 'smoke':
+                            if (Math.random() < 0.05) {
+                            }
+                            break;
+                        case 'hammerWork':
+                            obj.rotation.z = -Math.PI / 4 + Math.abs(Math.sin(time * 10)) * 1.5;
+                            break;
+                        case 'workerBow':
+                            // 上半身のわずかな動き（腕の動きに連動）
+                            const bowCycle = Math.sin(time * 5 + (data.offset || 0));
+                            obj.rotation.x = bowCycle * 0.08; // 軽い前傾のみ
+                            break;
+                        case 'hammerSwing':
+                            // 旧アニメーション（互換性のため残す）
+                            const swingCycleLegacy = Math.sin(time * 5 + (data.offset || 0));
+                            obj.rotation.z = -Math.PI / 4 - swingCycleLegacy * 0.8;
+                            break;
+                        case 'armSwing':
+                            // ハンマーを持つ腕の振り（肩を中心にX軸回転）
+                            // 上（後ろに振りかぶる） → 下（前に振り下ろす）
+                            // 正のX回転 = 腕が後ろに上がる、負のX回転 = 腕が前に下がる
+                            const armPhase = time * 5 + (data.offset || 0);
+                            // 振りかぶり → 振り下ろしのサイクル
+                            const armCycle = Math.cos(armPhase); // cos: 1→-1→1
+                            obj.rotation.x = 0.5 + armCycle * 0.7; // 1.2(振りかぶり) → -0.2(振り下ろし)
+                            break;
+                        case 'armAssist':
+                            // 補助腕の小さな動き（メイン腕と逆方向）
+                            const assistCycle = Math.sin(time * 5 + (data.offset || 0));
+                            obj.rotation.x = assistCycle * 0.15; // 小さな動き
+                            break;
+                    }
+                }
+            });
+        }
+    });
+
+    pedestrians.forEach(p => {
+        p.update();
+        p.updateAnimation(dt); // Pass delta time for frame-rate independent animation
+    });
+    if (renderer && scene && camera) {
+        renderer.render(scene, camera);
+    }
+    updateOverlayPositions();
+}
+
+function updateOverlayPositions() {
+    if (!camera) return;
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const widthHalf = width / 2;
+    const heightHalf = height / 2;
+
+    tileMeshes.forEach((t, i) => {
+        const pos = t.mesh.position.clone();
+
+        // アイコン高さ調整（土台削除に伴い少し下げる）
+        if (gameState.tiles[i] && !gameState.tiles[i].unlocked) {
+            pos.y += 0.5;
+        } else {
+            pos.y += 1.0;
+        }
+
+        pos.project(camera);
+
+        const x = (pos.x * widthHalf) + widthHalf;
+        const y = -(pos.y * heightHalf) + heightHalf;
+
+        // 移動モード中のハイライト
+        if (moveMode.active) {
+            if (moveMode.sourceIndex === i) {
+                t.overlayEl.innerHTML = `<div style="background:rgba(231, 76, 60, 0.9); color:white; padding:5px 10px; border-radius:15px; font-weight:bold; font-size:0.8em; box-shadow:0 0 10px rgba(231, 76, 60, 0.5);">移動元</div>`;
+                t.overlayEl.style.display = 'flex';
+            } else if (!t.overlayEl.innerHTML && t.mesh.visible && gameState.tiles[i].unlocked) {
+                // 何もない場所（移動先候補）にガイドを表示させたい場合
+                // ここではシンプルにするため、ソース選択後は何もしない（クリックで反応させる）
+            }
+        }
+
+        if (x < -100 || x > width + 100 || y < -100 || y > height + 100) {
+            t.overlayEl.style.display = 'none';
+        } else {
+            t.overlayEl.style.display = 'flex';
+            t.overlayEl.style.left = `${x}px`;
+            t.overlayEl.style.top = `${y}px`;
+        }
+    });
+}
+
+function sync3DState() {
+    const reqRank = getRequiredRankForExpansion();
+
+    gameState.tiles.forEach((tile, i) => {
+        const tObj = tileMeshes[i];
+        const mesh = tObj.mesh; // 透明ヒットボックス
+        const overlay = tObj.overlayEl;
+        const ground = tObj.groundMesh;
+
+        if (!tile.unlocked) {
+            // 未開拓地
+            ground.material = MATERIALS.grassLocked;
+            tObj.buildingGroup.visible = true;
+            tObj.particles.active = false;
+
+            const stateKey = `wild`;
+            if (tObj.currentType !== stateKey) {
+                while (tObj.buildingGroup.children.length > 0) {
+                    tObj.buildingGroup.remove(tObj.buildingGroup.children[0]);
+                }
+                const newModel = createBuildingMesh('wild', 0);
+                tObj.buildingGroup.add(newModel);
+                tObj.currentType = stateKey;
+            }
+
+            // ロックマークは表示しない
+            overlay.innerHTML = "";
+        } else {
+            // 開拓地 - 建物がある場所は石畳で覆う、空きは道路（ベースレイヤー）が見える
+            if (tile.type) {
+                // 建物あり → 石畳を表示
+                ground.visible = true;
+                ground.material = MATERIALS.cobblestone;
+
+                // マルチタイル施設の場合のみ、地面を拡大して隙間を埋める
+                let isMultiTilePart = tile.type.endsWith('_part');
+                let isMultiTileMaster = false;
+                if (!isMultiTilePart && tile.type) {
+                    const buildCfg = BUILDINGS[tile.type];
+                    if (buildCfg && ((buildCfg.w || 1) > 1 || (buildCfg.h || 1) > 1)) {
+                        isMultiTileMaster = true;
+                    }
+                }
+
+                // 地面の基準位置を取得
+                const size = gameState.gridSize;
+                const offset = 3.4;
+                const tileStart = -offset * (size - 1) / 2;
+                const row = Math.floor(i / size);
+                const col = i % size;
+                const baseX = tileStart + col * offset;
+                const baseZ = tileStart + row * offset;
+
+                if (isMultiTilePart || isMultiTileMaster) {
+                    // 片側のみに拡大するため、スケールと位置オフセットを計算
+                    const expandRatio = 3.4 / 2.9;
+                    const expandAmount = (3.4 - 2.9) / 2; // 片側に追加する量 = 0.25
+
+                    let scaleX = 1;
+                    let scaleZ = 1;
+                    let offsetX = 0;
+                    let offsetZ = 0;
+
+                    if (isMultiTilePart) {
+                        // パーツタイル: マスターの方向に向かって拡大
+                        const masterIdx = tile.masterIndex;
+                        if (masterIdx !== undefined) {
+                            const masterRow = Math.floor(masterIdx / size);
+                            const masterCol = masterIdx % size;
+
+                            if (masterRow < row) {
+                                // マスターが上にある → 上方向（-Z）に拡大
+                                scaleZ = expandRatio;
+                                offsetZ = -expandAmount;
+                            } else if (masterRow > row) {
+                                // マスターが下にある → 下方向（+Z）に拡大
+                                scaleZ = expandRatio;
+                                offsetZ = expandAmount;
+                            }
+
+                            if (masterCol < col) {
+                                // マスターが左にある → 左方向（-X）に拡大
+                                scaleX = expandRatio;
+                                offsetX = -expandAmount;
+                            } else if (masterCol > col) {
+                                // マスターが右にある → 右方向（+X）に拡大
+                                scaleX = expandRatio;
+                                offsetX = expandAmount;
+                            }
+                        }
+                    } else if (isMultiTileMaster) {
+                        // マスタータイル: パーツの方向を判定して拡大
+                        const buildCfg = BUILDINGS[tile.type];
+                        const bw = buildCfg.w || 1;
+                        const bh = buildCfg.h || 1;
+                        const rot = tile.rotation || 0;
+
+                        // 回転を考慮した実効サイズ
+                        let effectiveW = bw, effectiveH = bh;
+                        if (rot === 1 || rot === 3) {
+                            effectiveW = bh;
+                            effectiveH = bw;
+                        }
+
+                        // パーツの方向を計算（マスターから見てどちらに伸びるか）
+                        // 回転0: 右(+X)と下(+Z)方向に伸びる
+                        // 回転1: 下(+Z)と左(-X)方向
+                        // 回転2: 左(-X)と上(-Z)方向
+                        // 回転3: 上(-Z)と右(+X)方向
+
+                        if (effectiveW > 1) {
+                            scaleX = expandRatio;
+                            // 回転によりパーツがどちら側にあるか
+                            if (rot === 0 || rot === 3) {
+                                offsetX = expandAmount; // 右方向
+                            } else {
+                                offsetX = -expandAmount; // 左方向
+                            }
+                        }
+                        if (effectiveH > 1) {
+                            scaleZ = expandRatio;
+                            // 回転によりパーツがどちら側にあるか
+                            if (rot === 0 || rot === 1) {
+                                offsetZ = expandAmount; // 下方向
+                            } else {
+                                offsetZ = -expandAmount; // 上方向
+                            }
+                        }
+                    }
+
+                    ground.scale.set(scaleX, scaleZ, 1);
+                    ground.position.set(baseX + offsetX, -0.05, baseZ + offsetZ);
+                } else {
+                    ground.scale.set(1, 1, 1);
+                    ground.position.set(baseX, -0.05, baseZ);
+                }
+            } else {
+                // 建物なし → 地面を非表示にしてベースの道路を見せる
+                ground.visible = false;
+                ground.scale.set(1, 1, 1);
+            }
+
+            if (tile.type) {
+                tObj.buildingGroup.visible = true;
+                const isBuilding = !!tile.finishTime;
+                const stateKey = `${tile.type}_${tile.level}_${isBuilding ? 'b' : ''}${tile.ascended ? '_asc' : ''}`;
+                if (tObj.currentType !== stateKey) {
+                    while (tObj.buildingGroup.children.length > 0) {
+                        tObj.buildingGroup.remove(tObj.buildingGroup.children[0]);
+                    }
+
+                    // Lv0(新規)なら建物なし、Lv1以上ならそのレベルの建物を表示
+                    if (tile.level > 0) {
+                        try {
+                            const newModel = createBuildingMesh(tile.type, tile.level, tile.ascended);
+                            tObj.buildingGroup.add(newModel);
+                        } catch (meshErr) {
+                            console.error(`Failed to create mesh for tile ${i} (${tile.type}, Lv${tile.level}, asc:${tile.ascended}):`, meshErr);
+                            // Do NOT modify tile.ascended here — game state should not be changed in rendering
+                            // Just render the fallback model without changing data
+                            try {
+                                const fallbackModel = createBuildingMesh(tile.type, tile.level, false);
+                                tObj.buildingGroup.add(fallbackModel);
+                            } catch (e2) {
+                                console.error(`Fallback mesh also failed for tile ${i}:`, e2);
+                            }
+                        }
+                    }
+
+                    // 工事中ならシートと作業員を追加
+                    if (isBuilding) {
+                        const construction = createConstructionSite(tile.type);
+                        tObj.buildingGroup.add(construction);
+                    }
+
+                    tObj.currentType = stateKey;
+                }
+
+                // 回転の適用 (0, 1, 2, 3 -> 0, -90, -180, -270)
+                if (tile.rotation) {
+                    tObj.buildingGroup.rotation.y = -Math.PI / 2 * tile.rotation;
+                } else {
+                    tObj.buildingGroup.rotation.y = 0;
+                }
+
+                if (tile.finishTime) {
+                    tObj.particles.active = true;
+                    const remaining = Math.max(0, (tile.finishTime - Date.now()));
+                    const total = getBuildTime(tile.type, tile.level, !!tile.ascended);
+                    const percent = Math.min(100, Math.max(0, 100 - (remaining / total * 100)));
+
+                    overlay.innerHTML = `
+                    <div class="tile-timer">${formatTime(remaining / 1000)}</div>
+                    <div class="progress-bar-container"><div class="progress-fill" style="width:${percent}%"></div></div>
+                `;
+                } else {
+                    tObj.particles.active = false;
+
+                    let content = "";
+                    let hasResource = false;
+                    let maxRes = ""; let maxVal = 0;
+                    const canCollect = (Date.now() - (tile.lastCollectTime || 0)) >= CONFIG.collectCooldown;
+
+                    if (tile.stored && canCollect) {
+                        for (let r in tile.stored) {
+                            if (tile.stored[r] >= 1) {
+                                hasResource = true;
+                                if (tile.stored[r] > maxVal) { maxVal = tile.stored[r]; maxRes = r; }
+                            }
+                        }
+                    }
+                    if (hasResource) {
+                        const icon = (maxRes == 'money' ? '💰' : maxRes == 'food' ? '🌾' : maxRes == 'wood' ? '🌲' : maxRes == 'stone' ? '🪨' : maxRes == 'iron' ? '🔩' : (maxRes == 'time_reduction' ? '📜' : '💧'));
+                        content = `<div class="harvest-bubble" onclick="collectResourceUI(${i}, event)">${icon}</div>`;
+                    }
+                    overlay.innerHTML = content;
+                }
+            } else {
+                tObj.buildingGroup.visible = false;
+                tObj.particles.active = false;
+                tObj.currentType = null;
+                overlay.innerHTML = "";
+            }
+        }
+
+        // 選択時のハイライト (地面を光らせる)
+        let isHighlight = (selectedTileIndex === i) || (moveMode.active && moveMode.sourceIndex === i);
+
+        // 地面が非表示の場合はハイライト処理をスキップ
+        if (!ground.visible) {
+            // 選択時は一時的に表示してハイライト
+            if (isHighlight) {
+                ground.visible = true;
+                ground.material = MATERIALS.dirtRoad.clone();
+                ground.material.emissive.setHex(moveMode.active && moveMode.sourceIndex === i ? 0xe74c3c : 0x3498db);
+                ground.material.emissiveIntensity = 0.4;
+            }
+        } else if (isHighlight) {
+            // マテリアルが共有されているので一時的にクローンして光らせる
+            if (ground.material.uuid === MATERIALS.cobblestone.uuid || ground.material.uuid === MATERIALS.grassLocked.uuid) {
+                ground.material = ground.material.clone();
+            }
+            if (moveMode.active && moveMode.sourceIndex === i) {
+                ground.material.emissive.setHex(0xe74c3c); // 赤く光らせる（移動元）
+            } else {
+                ground.material.emissive.setHex(0x3498db); // 青く光らせる（通常選択）
+            }
+            ground.material.emissiveIntensity = 0.4;
+        } else {
+            // 光っていない状態に戻す（共有マテリアルを再割り当て）
+            if (!tile.unlocked) {
+                ground.material = MATERIALS.grassLocked;
+            } else if (tile.type) {
+                ground.material = MATERIALS.cobblestone;
+            }
+            // 空きタイルは既にvisible=falseなのでここには来ない
+        }
+    });
+
+    // 道路の可視性を更新（マルチタイル施設の間は隠す）
+    roadMeshes.forEach(road => {
+        const idxA = road.rowA * gameState.gridSize + road.colA;
+        const idxB = road.rowB * gameState.gridSize + road.colB;
+        const tileA = gameState.tiles[idxA];
+        const tileB = gameState.tiles[idxB];
+
+        // 両方のタイルが同じマルチタイル施設に属しているか確認
+        let hideRoad = false;
+        if (tileA && tileB) {
+            // マスターインデックスを取得
+            const getMaster = (t, idx) => {
+                if (!t.type) return null;
+                if (t.type.endsWith('_part')) return t.masterIndex;
+                return idx;
+            };
+            const masterA = getMaster(tileA, idxA);
+            const masterB = getMaster(tileB, idxB);
+
+            // 同じマスターに属する場合は道を隠す
+            if (masterA !== null && masterB !== null && masterA === masterB) {
+                hideRoad = true;
+            }
+        }
+
+        road.mesh.visible = !hideRoad;
+    });
+}
+
+// --- Production Helper Functions ---
+function getGlobalBuffs() {
+    let buffs = { speed: 1.0, bank: 1.0, granary: 1.0, lumber_hub: 1.0, masonry_hub: 1.0 };
+
+    // Clocktower (Speed)
+    gameState.tiles.forEach(t => {
+        if (t.type === 'clocktower' && !t.finishTime && t.level > 0) {
+            buffs.speed += 0.02 + (t.level - 1) * 0.006;
+        }
+    });
+
+    // Boosters (Bank, Granary, Lumber Hub, Masonry Hub)
+    const calcBoost = (type) => {
+        let add = 0;
+        gameState.tiles.forEach(t => {
+            if (t.type === type && t.level > 0) {
+                add += 0.27 + (t.level * 0.03);
+            }
+        });
+        return 1.0 + add;
+    };
+
+    buffs.bank = calcBoost('bank');
+    buffs.granary = calcBoost('granary');
+    buffs.lumber_hub = calcBoost('lumber_hub');
+    buffs.masonry_hub = calcBoost('masonry_hub');
+    return buffs;
+}
+
+// Weighted Buffs for Offline: Accounts for buildings finishing mid-offline
+function getWeightedGlobalBuffs(totalSeconds, lastSaveTime, completionTimes) {
+    let buffs = { speed: 1.0, bank: 1.0, granary: 1.0, lumber_hub: 1.0, masonry_hub: 1.0 };
+
+    // Helper to integrate bonus over time
+    const integrateBonus = (tile, idx, baseBonusPerLevel, levelScale) => {
+        let duration = totalSeconds;
+
+        // Check if it finished during this session
+        const finishedAt = completionTimes ? completionTimes.get(idx) : null;
+
+        if (finishedAt) {
+            // Finished during offline (Lv0 -> Lv1 or LvX -> LvX+1)
+            // Active at CURRENT level only for (Now - FinishedAt)
+            const finishDelay = (finishedAt - lastSaveTime) / 1000;
+            duration = totalSeconds - finishDelay;
+            if (duration < 0) duration = 0;
+        } else if (tile.finishTime) {
+            // Still building (Future finish)
+            duration = totalSeconds;
+        }
+
+        let bonus = 0;
+        // Post-term (Current Level) - applies for 'duration'
+        if (tile.level > 0) {
+            bonus += duration * (baseBonusPerLevel + tile.level * levelScale);
+        }
+
+        // Pre-term (Previous Level) - applies for (total - duration)
+        if (finishedAt) {
+            const preDuration = totalSeconds - duration;
+            const preLevel = Math.max(0, tile.level - 1);
+            if (preLevel > 0) {
+                bonus += preDuration * (baseBonusPerLevel + preLevel * levelScale);
+            }
+        }
+
+        return bonus;
+    };
+
+    let totalSpeedBonusSeconds = 0;
+    gameState.tiles.forEach((t, i) => {
+        if (t.type === 'clocktower') {
+            totalSpeedBonusSeconds += integrateBonus(t, i, 0.014, 0.006); // 0.02 base = 0.014 + 0.006*1
+        }
+    });
+    buffs.speed += (totalSpeedBonusSeconds / totalSeconds);
+
+    const calcWeightedBoost = (type) => {
+        let totalAddSeconds = 0;
+        gameState.tiles.forEach((t, i) => {
+            if (t.type === type) {
+                totalAddSeconds += integrateBonus(t, i, 0.27, 0.03);
+            }
+        });
+        return 1.0 + (totalAddSeconds / totalSeconds);
+    };
+
+    buffs.bank = calcWeightedBoost('bank');
+    buffs.granary = calcWeightedBoost('granary');
+    buffs.lumber_hub = calcWeightedBoost('lumber_hub');
+    buffs.masonry_hub = calcWeightedBoost('masonry_hub');
+
+    return buffs;
+}
+
+function getTileProductionMultiplier(index, globalBuffs, isOffline = false, offlineCtx = null) {
+    const tile = gameState.tiles[index];
+    if (!tile || !tile.type || tile.level <= 0) return 0;
+
+    const getWeightedLevel = (t, idx) => {
+        if (!isOffline || !offlineCtx) return t.level;
+        const { totalSeconds, lastSaveTime, completionTimes } = offlineCtx;
+
+        let wL = t.level; // Current Level (High)
+
+        const finishedAt = completionTimes ? completionTimes.get(idx) : null;
+        if (finishedAt) {
+            // Weighted Average of (Level - 1) and (Level)
+            const finishDelay = (finishedAt - lastSaveTime) / 1000;
+            const durHigh = Math.max(0, totalSeconds - finishDelay);
+            const durLow = Math.max(0, totalSeconds - durHigh);
+
+            const lowL = Math.max(0, t.level - 1);
+            wL = (lowL * durLow + t.level * durHigh) / totalSeconds;
+        }
+        // If still building (finishTime exists), t.level is Base Level (Low). Correct.
+
+        return wL;
+    };
+
+    const getActiveDurationRatio = (t, idx) => {
+        if (!isOffline || !offlineCtx) {
+            // level > 0 なら稼働中とみなす（アップグレード中でも隣接ボーナスを維持）
+            return (t.level > 0) ? 1.0 : 0.0;
+        }
+        const { totalSeconds, lastSaveTime, completionTimes } = offlineCtx;
+
+        const finishedAt = completionTimes ? completionTimes.get(idx) : null;
+        if (finishedAt) {
+            // Finished during offline.
+            // If it was Lv0 -> Lv1, active only after finish.
+            // If it was Lv X -> X+1, active whole time.
+            if (t.level === 1) {
+                const finishDelay = (finishedAt - lastSaveTime) / 1000;
+                const activeDur = Math.max(0, totalSeconds - finishDelay);
+                return activeDur / totalSeconds;
+            } else {
+                return 1.0;
+            }
+        }
+
+        if (t.finishTime) return 0.0; // Still building
+        if (t.level > 0) return 1.0;  // Active whole time
+        return 0.0;
+    };
+
+    let mult = globalBuffs.speed;
+
+    // 1. Well -> Farm
+    if (tile.type === 'farm') {
+        const gridSize = gameState.gridSize;
+        const checkOffsets = [-1, 1, -gridSize, gridSize];
+
+        let maxAvgBonus = 0;
+
+        checkOffsets.forEach(offset => {
+            const nIdx = index + offset;
+            // Check bounds (basic) - assuming valid grid linear logic (pseudo-valid)
+            // Better: check if nIdx is valid and adjacent in 2D
+            // But for now relying on checking gameState.tiles[nIdx] existence
+            if (gameState.tiles[nIdx]) {
+                const t = gameState.tiles[nIdx];
+                if (t && t.type === 'well') {
+                    const wL = getWeightedLevel(t, nIdx);
+                    if (wL > 0) {
+                        const bonus = (wL < 1) ? wL * 0.3 : 0.3 + (wL - 1) * 0.03;
+                        if (bonus > maxAvgBonus) maxAvgBonus = bonus;
+                    }
+                }
+            }
+        });
+
+        if (maxAvgBonus > 0) mult *= (1 + maxAvgBonus);
+    }
+
+    // 2. Inn Condition
+    if (tile.type === 'inn') {
+        const gridSize = gameState.gridSize;
+        const checkOffsets = [-1, 1, -gridSize, gridSize];
+
+        let maxMarketRatio = 0.0;
+        let maxHouseRatio = 0.0;
+
+        checkOffsets.forEach(offset => {
+            const nIdx = index + offset;
+            if (gameState.tiles[nIdx]) {
+                const t = gameState.tiles[nIdx];
+                if (t) {
+                    if (t.type === 'market') maxMarketRatio = Math.max(maxMarketRatio, getActiveDurationRatio(t, nIdx));
+                    if (t.type === 'house') maxHouseRatio = Math.max(maxHouseRatio, getActiveDurationRatio(t, nIdx));
+                }
+            }
+        });
+
+        // Effective ratio is min of requirement existences
+        const ratio = Math.min(maxMarketRatio, maxHouseRatio);
+        if (ratio <= 0) return 0;
+        mult *= ratio;
+    }
+
+    // 3. Forest Synergy
+    if (tile.type === 'forest') {
+        const gridSize = gameState.gridSize;
+        const slaveOffset = (tile.rotation % 2 === 0) ? gridSize : 1;
+        const slaveIdx = index + slaveOffset;
+
+        const checkIdxs = new Set();
+        [index, slaveIdx].forEach(center => {
+            [-1, 1, -gridSize, gridSize].forEach(offset => checkIdxs.add(center + offset));
+        });
+
+        let weightedCount = 0;
+        checkIdxs.forEach(nIdx => {
+            const t = gameState.tiles[nIdx];
+            if (t && t.type === 'lumber') {
+                const wL = getWeightedLevel(t, nIdx);
+                weightedCount += Math.min(1, wL);
+            }
+        });
+
+        if (weightedCount > 0) {
+            mult *= (1 + 0.2 * weightedCount);
+        }
+    }
+
+    return mult;
+}
+
+function gameLogicLoop() {
+    const now = Date.now();
+    let dirty = false;
+
+    const globalBuffs = getGlobalBuffs();
+
+    gameState.tiles.forEach((tile, i) => {
+        if (tile.unlocked) {
+            if (tile.finishTime && now >= tile.finishTime) {
+                tile.level++;
+                tile.finishTime = null;
+                const xp = Math.floor(getBuildTime(tile.type, tile.level - 1, !!tile.ascended) / 1000);
+                addXP(xp);
+                dirty = true;
+                if (selectedTileIndex !== null) updatePanelUI();
+            }
+
+            if (tile.type && tile.level > 0 && !tile.finishTime) {
+                const b = BUILDINGS[tile.type];
+                if (!b) return;
+
+                // Stone Processing Plant Logic
+                if (tile.type === 'stone_plant') {
+                    if (tile.isActive) {
+                        const costScale = tile.level * Math.pow(1.05, tile.level - 1);
+                        const moneyCost = (b.consume.money || 0) * costScale;
+                        const foodCost = (b.consume.food || 0) * costScale;
+                        const woodCost = (b.consume.wood || 0) * costScale;
+
+                        // Check Affordability
+                        if (gameState.resources.money >= moneyCost &&
+                            gameState.resources.food >= foodCost &&
+                            gameState.resources.wood >= woodCost) {
+
+                            // Consume
+                            gameState.resources.money -= moneyCost;
+                            gameState.resources.food -= foodCost;
+                            gameState.resources.wood -= woodCost;
+
+                            // Produce Stone
+                            // Spec: 20 base * level logic
+                            const stoneProd = (b.prod.stone || 0) * tile.level * Math.pow(1.05, tile.level - 1) * globalBuffs.masonry_hub;
+
+                            // Add Stone directly to GLOBAL resources (no storage limit mentioned for this converter, or use stored?)
+                            // "Produce stone" - typically goes to storage? 
+                            // Spec says "Converts resources... to produce stone".
+                            // Standard buildings use storage. Let's use storage to be consistent with harvest logic?
+                            // OR directly add to global because it consumes global?
+                            // Standard logic is: Produce -> Storage -> Manual Collect.
+                            // If it consumes AUTOMATICALLY from global, maybe it should produce to Storage.
+                            // Let's use Storage.
+
+                            const caps = getStorageCapacity(tile.type, tile.level, i);
+                            if (!tile.stored.stone) tile.stored.stone = 0;
+
+                            // If full, stop consuming? Or waste?
+                            // Let's stop if full to be kind.
+                            if (tile.stored.stone < caps.stone) {
+                                tile.stored.stone += stoneProd;
+                                if (tile.stored.stone > caps.stone) tile.stored.stone = caps.stone;
+                                dirty = true;
+                            }
+                        } else {
+                            // Auto Turn Off
+                            tile.isActive = false;
+                            showToast(`⚠️ 素材不足のため石材加工場(Lv.${tile.level})が停止しました`);
+                            dirty = true;
+                            if (selectedTileIndex === i) updatePanelUI();
+                        }
+                    }
+                    return; // Skip standard logic for this special building
+                }
+
+                // Directorate Production (dedicated handler)
+                if (tile.type === 'directorate') {
+                    const efficiency = getTileProductionMultiplier(i, globalBuffs);
+                    if (efficiency > 0) {
+                        const caps = getStorageCapacity(tile.type, tile.level, i);
+                        // Base 0.4 * 1.10^(L-1) — dedicated growth rate
+                        const rate = 0.4 * Math.pow(1.10, tile.level - 1) * efficiency;
+
+                        if (!tile.stored.time_reduction) tile.stored.time_reduction = 0;
+                        if (tile.stored.time_reduction < caps.time_reduction) {
+                            tile.stored.time_reduction += rate; // +rate seconds per second
+                            if (tile.stored.time_reduction > caps.time_reduction) tile.stored.time_reduction = caps.time_reduction;
+                            dirty = true;
+                        }
+                    }
+                    return; // Skip standard logic for this special building
+                }
+
+                // Calculate efficiency
+                const efficiency = getTileProductionMultiplier(i, globalBuffs);
+
+                if (efficiency > 0) {
+                    const isAsc = tile.ascended;
+                    const prodBase = (isAsc && ASCENSION_BASE_STATS[tile.type]) ? ASCENSION_BASE_STATS[tile.type].prod : b.prod;
+                    const growth = (isAsc && ASCENSION_BASE_STATS[tile.type]) ? 1.10 : 1.05;
+
+                    const caps = getStorageCapacity(tile.type, tile.level, i); // Pass index for adjacency
+                    for (let r in prodBase) {
+                        if (prodBase[r] > 0) {
+                            let finalMult = efficiency;
+
+                            if (r === 'money' && ['house', 'market', 'blacksmith', 'inn'].includes(tile.type)) finalMult *= globalBuffs.bank;
+                            if (r === 'food' && ['farm'].includes(tile.type)) finalMult *= globalBuffs.granary;
+                            if (r === 'wood' && ['lumber', 'forest'].includes(tile.type)) finalMult *= globalBuffs.lumber_hub;
+                            if (r === 'stone' && ['quarry', 'stone_plant'].includes(tile.type)) finalMult *= globalBuffs.masonry_hub;
+
+                            // Add to storage
+                            const amount = prodBase[r] * tile.level * Math.pow(growth, tile.level - 1) * finalMult;
+
+                            // Update storage
+                            if (!tile.stored[r]) tile.stored[r] = 0;
+                            if (tile.stored[r] < caps[r]) {
+                                tile.stored[r] = Math.min(caps[r], tile.stored[r] + amount);
+                                if (Math.floor(tile.stored[r]) >= 1) dirty = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    if (dirty) saveGame();
+    sync3DState();
+    updateHeader();
+}
+
+function onPointerDown(event) {
+    pointerDownPos.set(event.clientX, event.clientY);
+    lastPointerPos.set(event.clientX, event.clientY);
+    isDragging = false;
+
+    if (event.button === 0 || event.pointerType === 'touch') {
+        isPanning = true;
+    }
+}
+
+function onPointerMove(event) {
+    if (!isDragging && (Math.abs(event.clientX - pointerDownPos.x) > 5 || Math.abs(event.clientY - pointerDownPos.y) > 5)) {
+        isDragging = true;
+    }
+    if (isPanning) {
+        const deltaX = event.clientX - lastPointerPos.x;
+        const deltaY = event.clientY - lastPointerPos.y;
+        lastPointerPos.set(event.clientX, event.clientY);
+
+        if (touchStartDist > 0) return;
+
+        moveCamera(deltaX, deltaY);
+    }
+}
+
+function onPointerUp(event) {
+    isPanning = false;
+
+    if (isDragging) return;
+
+    event.preventDefault();
+
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+    raycaster.setFromCamera(mouse, camera);
+
+    const targetObjects = tileMeshes.map(t => t.mesh);
+    const intersects = raycaster.intersectObjects(targetObjects, true);
+
+    if (intersects.length > 0) {
+        let target = intersects[0].object;
+        while (target && target.userData.index === undefined && target.parent) {
+            target = target.parent;
+        }
+
+        if (target && target.userData.index !== undefined) {
+            const idx = target.userData.index;
+
+            // 移動モードの処理
+            if (moveMode.active) {
+                handleMoveInput(idx);
+                return;
+            }
+
+            const collected = collectResource(idx);
+            if (!collected) {
+                selectTile(idx);
+            }
+        }
+    } else {
+        // 背景クリックなどでパネルを閉じる（移動モード以外）
+        if (!moveMode.active) {
+            closePanel();
+        }
+    }
+}
+
+// --- Move Mode Logic ---
+window.startMoveMode = function () {
+    closeModal('modal-menu');
+    closePanel();
+    moveMode.active = true;
+    moveMode.sourceIndex = null;
+
+    document.getElementById('action-mode-bar').style.display = 'flex';
+    document.getElementById('action-mode-text').innerText = "移動する施設を選択してください";
+
+    sync3DState(); // ハイライト解除など
+};
+
+window.actRotate = function () {
+    if (moveMode.sourceIndex === null) return;
+    const tile = gameState.tiles[moveMode.sourceIndex];
+    if (!tile.rotation) tile.rotation = 0;
+    tile.rotation = (tile.rotation + 1) % 4;
+    sync3DState();
+};
+
+window.cancelMoveMode = function () {
+    moveMode.active = false;
+    moveMode.sourceIndex = null;
+    document.getElementById('action-mode-bar').style.display = 'none';
+    document.getElementById('action-rotate-btn').style.display = 'none'; // Hide rotate button
+    sync3DState();
+};
+
+function handleMoveInput(index) {
+    const tile = gameState.tiles[index];
+
+    // 未開拓地は対象外
+    if (!tile.unlocked) {
+        showToast("未開拓地は操作できません");
+        return;
+    }
+
+    // Redirect slave to master
+    if (tile.type && tile.type.endsWith('_part') && tile.masterIndex !== undefined) {
+        handleMoveInput(tile.masterIndex);
+        return;
+    }
+
+    if (moveMode.sourceIndex === null) {
+        // ソース選択（施設がある場所のみ）
+        if (!tile.type && !tile.finishTime) {
+            showToast("移動させる施設がありません");
+            return;
+        }
+
+        // Prevent moving multi-tile
+        const size = getBuildingSize(tile.type);
+        // Note: getBuildingSize returns {w,h}. If simple building, returns {w:1,h:1}.
+        // Forest returns {w:1,h:2} (static). But wait, existing building might be rotated?
+        // getBuildingSize helper reads from BUILDINGS config, which is static.
+        // It returns the base dimensions.
+        // If w>1 or h>1, it's multi-tile.
+        if (size.w > 1 || size.h > 1) {
+            showToast("大型施設は移動できません(売却→建直のみ)");
+            return;
+        }
+
+        moveMode.sourceIndex = index;
+        document.getElementById('action-mode-text').innerText = "移動先を選択してください";
+        document.getElementById('action-rotate-btn').style.display = 'block'; // Show rotate button
+        sync3DState(); // ハイライト更新
+    } else {
+        // ターゲット選択
+        if (moveMode.sourceIndex === index) {
+            // 同じ場所を選択 -> キャンセル（選択解除）
+            moveMode.sourceIndex = null;
+            document.getElementById('action-mode-text').innerText = "移動する施設を選択してください";
+            document.getElementById('action-rotate-btn').style.display = 'none'; // Hide rotate button
+            sync3DState();
+            return;
+        }
+
+        // ターゲット選択
+        if (moveMode.sourceIndex === index) {
+            // 同じ場所を選択 -> キャンセル（選択解除）
+            moveMode.sourceIndex = null;
+            document.getElementById('action-mode-text').innerText = "移動する施設を選択してください";
+            document.getElementById('action-rotate-btn').style.display = 'none'; // Hide rotate button
+            sync3DState();
+            return;
+        }
+
+        // 移動実行 (Swap)
+        swapTiles(moveMode.sourceIndex, index);
+
+        // モード終了
+        cancelMoveMode();
+        showToast("施設を移動しました！");
+    }
+}
+
+function swapTiles(idx1, idx2) {
+    const t1 = gameState.tiles[idx1];
+    const t2 = gameState.tiles[idx2];
+
+    // 土地(unlocked)以外の建物データを交換
+    const temp = {
+        type: t1.type,
+        level: t1.level,
+        finishTime: t1.finishTime,
+        stored: t1.stored,
+        lastCollectTime: t1.lastCollectTime,
+        rotation: t1.rotation || 0
+    };
+
+    // t1 <- t2
+    t1.type = t2.type;
+    t1.level = t2.level;
+    t1.finishTime = t2.finishTime;
+    t1.stored = t2.stored;
+    t1.lastCollectTime = t2.lastCollectTime;
+    t1.rotation = t2.rotation || 0;
+
+    // t2 <- temp
+    t2.type = temp.type;
+    t2.level = temp.level;
+    t2.finishTime = temp.finishTime;
+    t2.stored = temp.stored;
+    t2.lastCollectTime = temp.lastCollectTime;
+    t2.rotation = temp.rotation;
+
+    saveGame();
+    sync3DState();
+}
+
+// コスト表示用ヘルパー（不足分を赤字にする）
+function formatCostWithColor(cost) {
+    let html = [];
+    for (let r in cost) {
+        if (cost[r] > 0) {
+            const val = cost[r];
+            const has = gameState.resources[r] || 0;
+            const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧');
+
+            if (has < val) {
+                html.push(`<span style="color:red; font-weight:bold;">${icon}${val.toLocaleString()}</span>`);
+            } else {
+                html.push(`${icon}${val.toLocaleString()}`);
+            }
+        }
+    }
+    return html.join(' ');
+}
+
+// 施設効果のHTML生成（Utility施設対応）
+
+function moveCamera(dx, dy) {
+    if (!camera) return;
+
+    const speed = 0.05 / camera.zoom;
+
+    const vec = new THREE.Vector3();
+    const quat = camera.quaternion.clone();
+
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quat);
+    right.y = 0; right.normalize();
+
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(quat);
+    up.y = 0; up.normalize();
+
+    camera.position.addScaledVector(right, -dx * speed);
+    camera.position.addScaledVector(up, dy * speed);
+}
+
+function setCameraZoom(val) {
+    if (!camera) return;
+    const minZoom = 0.5;
+    const maxZoom = 2.5;
+    camera.zoom = Math.max(minZoom, Math.min(maxZoom, val));
+    camera.updateProjectionMatrix();
+}
+
+function onMouseWheel(event) {
+    event.preventDefault();
+    const zoomSpeed = 0.001;
+    const newZoom = camera.zoom - event.deltaY * zoomSpeed;
+    setCameraZoom(newZoom);
+}
+
+let touchStartDist = 0;
+let touchStartZoom = 1;
+
+function onTouchStart(event) {
+    if (event.touches.length === 2) {
+        isPanning = false;
+        const dx = event.touches[0].pageX - event.touches[1].pageX;
+        const dy = event.touches[0].pageY - event.touches[1].pageY;
+        touchStartDist = Math.sqrt(dx * dx + dy * dy);
+        touchStartZoom = camera.zoom;
+    }
+}
+
+function onTouchMove(event) {
+    if (event.target === renderer.domElement) {
+        event.preventDefault();
+    }
+
+    if (event.touches.length === 2) {
+        const dx = event.touches[0].pageX - event.touches[1].pageX;
+        const dy = event.touches[0].pageY - event.touches[1].pageY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (touchStartDist > 0) {
+            const scale = dist / touchStartDist;
+            setCameraZoom(touchStartZoom * scale);
+        }
+    }
+}
+
+function onTouchEnd(event) {
+    if (event.touches.length < 2) {
+        touchStartDist = 0;
+    }
+}
+
+window.collectResourceUI = function (index, e) {
+    // 移動モード中は資源回収UIを無効化（誤タップ防止）
+    if (moveMode.active) return;
+
+    e.stopPropagation();
+    collectResource(index);
+};
+
+function selectTile(index) {
+    const t = gameState.tiles[index];
+    if (t && t.type && t.type.endsWith('_part') && t.masterIndex !== undefined) {
+        selectTile(t.masterIndex);
+        return;
+    }
+    selectedTileIndex = index;
+    sync3DState();
+    showPanel(index);
+}
+
+window.closePanel = function () {
+    selectedTileIndex = null;
+    document.getElementById('control-panel').classList.remove('active');
+    SoundManager.playSE('cancel');
+    sync3DState();
+};
+
+// Helper for Confirm Modal
+window.showConfirmModal = function (msg, onYes) {
+    document.getElementById('modal-confirm-msg').innerText = msg;
+    const yesBtn = document.getElementById('modal-confirm-yes');
+    // Remove old listeners by cloning
+    const newBtn = yesBtn.cloneNode(true);
+    yesBtn.parentNode.replaceChild(newBtn, yesBtn);
+    newBtn.addEventListener('click', () => {
+        if (window.SoundManager) SoundManager.playSE('select');
+        document.getElementById('modal-confirm').style.display = 'none';
+        onYes();
+    });
+    document.getElementById('modal-confirm').style.display = 'flex';
+    if (window.SoundManager) SoundManager.playSE('select');
+};
+
+window.closeModal = function (id) {
+    SoundManager.playSE('cancel');
+    document.getElementById(id).style.display = 'none';
+};
+
+    const base = r * 500;
+    if (r >= 12) return base * 4 * 3;
+    if (r >= 10) return base * 4;
+    return base;
+}
+
+function getBuildTime(t, l, isAscended = false) {
+    // Ascended Logic
+    if (isAscended) {
+        const base = ASCENSION_BASE_STATS[t] ? ASCENSION_BASE_STATS[t].time : (BUILDINGS[t].baseTime * 1500);
+        // Formula: Base * 1.08^(L-1)
+        // L is target level.
+        // If L=1 (Building Lv.1), time = Base.
+        const tl = l + 1;
+        // Wait, if l=0 (building new), tl=1.
+        // If l=1 (upgrading to 2), tl=2.
+        // Formula is 1.08^(tl-1).
+
+        let time = base * Math.pow(1.08, tl - 1);
+
+        // Cap Checks (Safety)
+        // If time > 24h/48h, the formula 1.08 is already < 1.1/1.3 so it is safe.
+        // 1.08 is 8% growth. 
+        // Constraints: >24h: <30% (ok), >48h: <10% (ok).
+        // So simple formula is sufficient.
+
+        return Math.floor(time);
+    }
+
+    const tl = l + 1; // Target Level
+    const base = BUILDINGS[t].baseTime;
+
+    // Optimization: If simple calculation is less than 1 day, use standard formula
+    const simpleTime = base * Math.pow(tl, 2.8);
+    if (simpleTime <= 86400000) {
+        return Math.floor(simpleTime);
+    }
+
+    // Iterative calculation for longer times
+    // 1日を超えるまでは通常式、超えたら成長率を最大30%(1.3倍)に抑える
+    let time = base;
+    for (let i = 2; i <= tl; i++) {
+        // Special Rule for Directorate
+        if (t === 'directorate') {
+            // Rule: 
+            // < 24h: Normal (N/A since base is 26h)
+            // > 24h: < 30%
+            // > 48h: < 10%
+            let rate = 1.3; // Default cap 30%
+            if (time >= 172800000) { // 48 hours
+                rate = 1.1; // Max 10%
+            }
+
+            // Base growth is usually high (Power 2.8), so we just clamp it hard
+            // Actually, let's use the explicit table logic roughly
+            // But effectively: Previous * Rate.
+            time = time * rate;
+        } else {
+            const polyRate = Math.pow(i / (i - 1), 2.8);
+            let rate = polyRate;
+
+            if (time >= 172800000) { // 2 days
+                rate = Math.min(polyRate, 1.1); // Max 10%
+            } else if (time >= 86400000) { // 1 day
+                rate = Math.min(polyRate, 1.3); // Max 30%
+            }
+            time = time * rate;
+        }
+    }
+    return Math.floor(time);
+}
+
+function getCost(t, l, isAscended = false) {
+    if (isAscended) {
+        const baseCost = ASCENSION_BASE_STATS[t] ? ASCENSION_BASE_STATS[t].cost : {};
+        // Formula: Base * 1.08^(L-1)
+        // Cost is usually for the *next* level (current L -> L+1).
+        // In normal logic, it uses L (current level). e.g. Lv.1 -> Lv.2 uses l=1.
+        // Our formula 1.08^(L-1) assumes L=1 is Base.
+        // So if we are at Lv.1 (l=1), we want the cost to reach Lv.2.
+        // Let's assume cost scales with the level we are *at* or *going to*.
+        // Standard logic: Math.pow(1.6, l). If l=1, 1.6^1. 
+        // Ascended Spec: Lv.1 Cost = Base. 
+        // So at l=1 (Ascended Lv.1), getting to Lv.2 should cost Base.
+        // If input l=1, we want result Base.
+        // So multiplier should be 1.08^(l-1).
+
+        const mult = Math.pow(1.08, l - 1);
+        const r = {};
+        for (let k in baseCost) {
+            r[k] = Math.floor(baseCost[k] * mult);
+        }
+        return r;
+    }
+
+    let m = Math.pow(1.6, l) * 1.5;
+    if (l >= 10) m *= 10;
+    const r = {};
+    for (let k in BUILDINGS[t].cost) r[k] = Math.floor(BUILDINGS[t].cost[k] * m);
+    return r;
+}
+
+function getStorageCapacity(t, l, tileIndex = -1, passedBuffs = null, isAscended = false) {
+    const b = BUILDINGS[t];
+    const s = CONFIG.storageHours * 3600;
+    const c = {};
+    // Use passed (weighted) buffs if available, else static global
+    const globalBuffs = passedBuffs || getGlobalBuffs();
+
+    // Auto-detect ascended if tileIndex provided
+    if (tileIndex >= 0 && gameState.tiles[tileIndex] && gameState.tiles[tileIndex].ascended) {
+        isAscended = true;
+    }
+
+    // Adjacency for Storage
+    let adjacencyMult = 1.0;
+    if (tileIndex >= 0) {
+        if (t === 'farm') {
+            const adj = getAdjacentTiles(tileIndex);
+            const maxWell = adj.reduce((max, t) => (t && t.type === 'well' && t.level > 0 && !t.finishTime) ? Math.max(max, t.level) : max, 0);
+            if (maxWell > 0) adjacencyMult *= (1.3 + (maxWell - 1) * 0.03);
+        } else if (t === 'lumber') {
+            const adj = getAdjacentTiles(tileIndex);
+            if (adj.some(t => t && t.type === 'forest')) adjacencyMult *= 1.2;
+        }
+    }
+
+    // Determine Prod Base and Formula
+    let prodBase = b.prod;
+    let growthRate = 1.05;
+
+    if (isAscended && ASCENSION_BASE_STATS[t]) {
+        prodBase = ASCENSION_BASE_STATS[t].prod;
+        growthRate = 1.10;
+    }
+
+    for (let r in prodBase) {
+        if (prodBase[r] > 0) {
+            let capMult = 1.0;
+            if (r === 'money' && ['house', 'market', 'blacksmith', 'inn'].includes(t)) capMult *= globalBuffs.bank;
+            if (r === 'food' && ['farm'].includes(t)) capMult *= globalBuffs.granary;
+            if (r === 'wood' && ['lumber', 'forest'].includes(t)) capMult *= globalBuffs.lumber_hub;
+            if (r === 'stone' && ['quarry', 'stone_plant'].includes(t)) capMult *= globalBuffs.masonry_hub;
+
+            if (r === 'food') capMult *= adjacencyMult;
+            if (r === 'wood') capMult *= adjacencyMult;
+
+            c[r] = prodBase[r] * l * Math.pow(growthRate, l - 1) * s * capMult;
+        }
+    }
+
+    // Directorate Capacity
+    if (t === 'directorate') {
+        // Rate * 8 hours
+        // Rate = 0.4 * 1.10^(l-1)
+        const rate = 0.4 * Math.pow(1.10, l - 1);
+        c.time_reduction = rate * s; // s is storageSeconds (8h)
+    }
+
+    return c;
+}
+
+function getExpandCost(r) {
+    const reqRank = getRequiredRankForExpansion();
+    const virtualUnlockedCount = reqRank + 2;
+
+    let b;
+    const thresholdRank = 22;
+    // virtualUnlockedCount = reqRank + 2
+    // Threshold count = 24
+
+    if (reqRank < thresholdRank) {
+        b = 500 * Math.pow(1.5, virtualUnlockedCount - 4);
+    } else {
+        // Base at threshold (Rank 22 / Count 24) -> 1.5^20
+        // Then grow by 1.3
+        const baseAtThreshold = 500 * Math.pow(1.5, (thresholdRank + 2) - 4);
+        b = baseAtThreshold * Math.pow(1.3, virtualUnlockedCount - (thresholdRank + 2));
+    }
+
+    if (reqRank >= 6) b *= 20;
+
+    let cost = {
+        money: Math.floor(b),
+        food: Math.floor(b * 0.5),
+        wood: Math.floor(b * 0.3),
+        stone: Math.floor(b * 0.1),
+        iron: 0
+    };
+
+    if (reqRank >= 12) {
+        cost.money *= 20;
+        cost.food *= 20;
+        cost.wood *= 5;
+        cost.stone *= 5;
+    }
+
+    return cost;
+}
+
+function getRequiredRankForExpansion() {
+    const unlockedCount = gameState.tiles.filter(t => t.unlocked).length;
+    const baseReq = Math.max(2, unlockedCount - 2);
+
+    if (baseReq <= 10) {
+        return baseReq;
+    } else {
+        return 10 + (baseReq - 10) * 2;
+    }
+}
+
+function checkAfford(c) { for (let k in c) if ((gameState.resources[k] || 0) < c[k]) return false; return true; }
+function payCost(c) { for (let k in c) gameState.resources[k] -= c[k]; updateHeader(); }
+function getUnlockRank(type) {
+    if (type === 'forest') return 20;
+    if (type === 'bank') return 22;
+    if (type === 'granary') return 24;
+    if (type === 'lumber_hub') return 26;
+    if (type === 'stone_plant') return 28;
+    if (type === 'masonry_hub') return 33;
+    if (type === 'well') return 10;
+    if (type === 'inn' || type === 'clocktower') return 15;
+    if (type === 'directorate') return 30;
+    return 1;
+}
+
+function addXP(a) {
+    const oldRank = gameState.rank;
+    gameState.xp += a;
+    while (gameState.xp >= getNextRankXP(gameState.rank)) {
+        gameState.xp -= getNextRankXP(gameState.rank);
+        gameState.rank++;
+    }
+
+    if (gameState.rank > oldRank) {
+        document.getElementById('levelup-rank').innerText = gameState.rank;
+        document.getElementById('modal-levelup').style.display = 'flex';
+        SoundManager.playSE('levelup');
+
+        // Check for new unlocks
+        let unlockedNames = [];
+        for (let k in BUILDINGS) {
+            const r = getUnlockRank(k);
+            if (r > oldRank && r <= gameState.rank) {
+                unlockedNames.push(BUILDINGS[k].name);
+            }
+        }
+        if (unlockedNames.length > 0) {
+            showToast(`🎉 新しい施設が解放されました: ${unlockedNames.join(', ')}`);
+        }
+    }
+}
+
+function getActiveBuilders() {
+    return gameState.tiles.filter(t => t.finishTime !== null).length;
+}
+
+function getBuilderCost() {
+    const current = gameState.maxBuilders;
+    const target = current + 1;
+
+    // 10人目までは通常計算 (20万 * 1.5^(N-5))
+    if (target <= 10) {
+        const extra = Math.max(0, current - 4);
+        return Math.floor(200000 * Math.pow(1.5, extra));
+    }
+
+    // 10人目のコスト（基準）
+    const cost10 = Math.floor(200000 * Math.pow(1.5, 5));
+
+    // 11人目は前回の100倍
+    if (target === 11) {
+        return cost10 * 100;
+    }
+
+    // 12人目以降は前回の3倍
+    // C(N) = C(11) * 3^(N-11)
+    const cost11 = cost10 * 100;
+    return cost11 * Math.pow(3, target - 11);
+}
+
+function collectResource(index) {
+    const t = gameState.tiles[index];
+    if (!t || !t.stored) return false;
+
+    const now = Date.now();
+    if ((now - (t.lastCollectTime || 0)) < CONFIG.collectCooldown) {
+        return false;
+    }
+
+
+
+    // Special: Directorate (Time Reduction)
+    if (t.type === 'directorate' && t.stored && t.stored.time_reduction > 0) {
+        const reduceSec = t.stored.time_reduction;
+        if (reduceSec <= 0) return false;
+
+        let affectedCount = 0;
+        gameState.tiles.forEach((target, tidx) => {
+            if (target.finishTime) {
+                const oldRem = Math.max(0, target.finishTime - now);
+                if (oldRem > 0) {
+                    target.finishTime -= reduceSec * 1000;
+                    if (target.finishTime < now) target.finishTime = now; // Finish immediately on next tick
+                    affectedCount++;
+                }
+            }
+        });
+
+        if (affectedCount > 0 || reduceSec > 0) {
+            t.stored.time_reduction = 0;
+            t.lastCollectTime = now;
+            SoundManager.playSE('collect');
+            saveGame();
+            updateHeader();
+            sync3DState(); // Updates timers
+
+            const overlay = tileMeshes[index].overlayEl;
+            const el = document.createElement('div');
+            el.className = 'float-text';
+            el.innerText = `⏳全工事-${formatTime(reduceSec)}`;
+            el.style.color = '#3498db';
+            overlay.appendChild(el);
+            setTimeout(() => el.remove(), 1500);
+            showToast(`🏗️ 全建設現場の時間を ${formatTime(reduceSec)} 短縮しました`);
+            return true;
+        }
+        return false;
+    }
+
+    let total = 0;
+    let txt = "";
+    const validResources = ['money', 'food', 'wood', 'stone', 'iron', 'water'];
+
+    for (let r in t.stored) {
+        if (!validResources.includes(r)) continue;
+
+        const val = Math.floor(t.stored[r]);
+        if (val > 0) {
+            if (gameState.resources[r] === undefined) gameState.resources[r] = 0;
+            gameState.resources[r] += val;
+            t.stored[r] = 0;
+            total += val;
+            const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧');
+            txt += `${icon}+${val} `;
+        }
+    }
+    if (total > 0) {
+        t.lastCollectTime = now;
+        SoundManager.playSE('collect');
+        saveGame(); // 即座に保存
+        updateHeader();
+        sync3DState();
+        const overlay = tileMeshes[index].overlayEl;
+        const el = document.createElement('div');
+        el.className = 'float-text';
+        el.innerText = txt;
+        overlay.appendChild(el);
+        setTimeout(() => el.remove(), 1000);
+        return true;
+    }
+    return false;
+}
+
+function checkAndExpandWorld() {
+    const allUnlocked = gameState.tiles.every(t => t.unlocked);
+    if (allUnlocked) {
+        expandWorldSize();
+    }
+}
+
+function expandWorldSize() {
+    const oldSize = gameState.gridSize;
+    const newSize = oldSize + 1;
+    const newTiles = [];
+
+    for (let i = 0; i < newSize * newSize; i++) {
+        const row = Math.floor(i / newSize);
+        const col = i % newSize;
+
+        if (row < oldSize && col < oldSize) {
+            const oldIdx = row * oldSize + col;
+            newTiles.push(gameState.tiles[oldIdx]);
+        } else {
+            newTiles.push({
+                type: null, level: 0, finishTime: null,
+                unlocked: false,
+                stored: {},
+                lastCollectTime: 0
+            });
+        }
+    }
+
+    gameState.tiles = newTiles;
+    gameState.gridSize = newSize;
+
+    remapMasterIndices(gameState.tiles, oldSize, newSize);
+    sanitizeGameState(); // Ensure integrity
+
+    createTiles();
+    createSurroundingEnvironment(); // 環境再生成
+    showToast(`🎉 世界が広がりました！ (${newSize}x${newSize})`);
+
+    initPedestrians();
+    saveGame();
+}
+
+function remapMasterIndices(tiles, oldSize, newSize) {
+    // Re-calculate masterIndex for all slave tiles when grid resizes
+    tiles.forEach(t => {
+        if (t.type && t.type.endsWith('_part') && t.masterIndex !== undefined) {
+            const ox = t.masterIndex % oldSize;
+            const oy = Math.floor(t.masterIndex / oldSize);
+            const ni = oy * newSize + ox;
+            t.masterIndex = ni;
+        }
+    });
+}
+
+
+
+function validateAndFixState() {
+    // Fix 1: Multi-tile integrity
+    gameState.tiles.forEach((t, i) => {
+        if (!t.type) {
+            // Ensure clean state if empty
+            if (t.masterIndex !== undefined) delete t.masterIndex;
+            if (t.mas) delete t.mas;
+            return;
+        }
+
+        if (t.type.endsWith('_part')) {
+            // Slave check
+            const mIdx = t.masterIndex;
+            const validMaster = mIdx !== undefined && gameState.tiles[mIdx];
+            if (!validMaster || !gameState.tiles[mIdx].type || !t.type.startsWith(gameState.tiles[mIdx].type)) {
+                console.warn("Found orphan slave part at", i, "cleaning...");
+                t.type = null;
+                t.level = 0;
+                t.finishTime = null;
+                delete t.masterIndex;
+            }
+        } else if (t.mas) {
+            // Master check (optional: verify slaves exist?)
+            // For now, assume if slave is missing, it's just a visual/logic glitch but less critical 
+            // than slave pointing to wrong things.
+            // But we should verify.
+            // If we find a Master whose slaves are missing/wrong, strictly we should clear it or restore them.
+            // Let's clear to be safe against overlaps.
+            const size = getBuildingSize(t.type);
+            const rot = t.rotation || 0;
+            const w = (rot % 2 === 0) ? size.w : size.h;
+            const h = (rot % 2 === 0) ? size.h : size.w;
+            const origin = getGridPos(i);
+            let healthy = true;
+
+            for (let dy = 0; dy < h; dy++) {
+                for (let dx = 0; dx < w; dx++) {
+                    if (dx === 0 && dy === 0) continue;
+                    const sIdx = getIndexFromPos(origin.x + dx, origin.y + dy);
+                    if (sIdx === -1) { healthy = false; break; }
+                    const slave = gameState.tiles[sIdx];
+                    if (!slave || slave.masterIndex !== i) { healthy = false; break; }
+                }
+            }
+            if (!healthy) {
+                console.warn("Found broken master at", i, "cleaning...");
+                // Can't use clearMultiTile safely here as it might recurse. Manual clear.
+                t.type = null;
+                t.level = 0;
+                t.finishTime = null;
+                delete t.mas;
+                // We don't chase slaves here, they will be caught by orphan check on next pass or if we run multiple passes.
+                // Better: Loop again? Or just let it slide for one frame. 
+                // To be safe, just invalidating Master turns it into a 'ghost' or 'orphan' scenario eventually fixed.
+                // But if we null the type, the visual won't render. Current orphan check handles slaves.
+            }
+        }
+    });
+}
+
+function showPanel(index) {
+    const tile = gameState.tiles[index];
+    const p = document.getElementById('control-panel');
+    const content = document.getElementById('panel-content');
+    SoundManager.playSE('select');
+    p.classList.add('active');
+    updatePanelUI();
+}
+
+function updatePanelUI() {
+    if (selectedTileIndex === null) return;
+    const tile = gameState.tiles[selectedTileIndex];
+    const content = document.getElementById('panel-content');
+    if (!content) return;
+
+    if (!tile.unlocked) {
+        const req = getRequiredRankForExpansion();
+        const cost = getExpandCost(gameState.rank);
+        const ok = gameState.rank >= req;
+        const afford = checkAfford(cost);
+        content.innerHTML = `
+        <div style="text-align:center;">
+            <p><strong>未開拓の土地</strong></p>
+            <div style="background:#eee; padding:10px; border-radius:5px; text-align:left; font-size:0.9em;">
+                条件: ランク${req} (${ok ? '✅' : '❌'})<br>
+                費用: ${formatCostWithColor(cost)}
+            </div>
+            <button class="action-btn" onclick="actExpand()" ${ok && afford ? '' : 'disabled'}>拡張</button>
+            ${!ok ? '<p style="color:red;font-size:0.8em">ランク不足</p>' : ''}
+        </div>`;
+        return;
+    }
+
+    if (!tile.type) {
+        let html = "";
+        if (getActiveBuilders() >= gameState.maxBuilders) {
+            html += `<div style="color:var(--danger-color); font-size:0.9em; font-weight:bold; margin-bottom:5px; text-align:center;">⚠️ 工事がいっぱいです！</div>`;
+        }
+
+        if (gameState.inventory && gameState.inventory.length > 0) {
+            html += `<div class="inventory-section"><div class="inventory-title">📦 保管庫から再設置</div>`;
+            gameState.inventory.forEach((item, idx) => {
+                const b = BUILDINGS[item.type];
+                const timeSec = getBuildTime(item.type, item.level - 1, !!item.ascended) / 1000;
+                // Restoration is always allowed (already counted in limit)
+                const disabledAttr = '';
+                const warnText = '';
+
+                html += `
+                <div class="building-item" style="background:#fff8e1;">
+                    <div class="building-info">
+                        <strong>${b.icon} ${b.name} (Lv.${item.level}) ${warnText}</strong>
+                        <span class="res-cost">⏳${formatTime(timeSec)}</span>
+                    </div>
+                    <button onclick="actRestore(${idx})" style="background-color:#f39c12;" ${disabledAttr}>配置</button>
+                </div>
+            `;
+            });
+            html += `</div><div class="inventory-title" style="margin-top:10px;">✨ 新規建設</div>`;
+        }
+
+        for (let k in BUILDINGS) {
+            const b = BUILDINGS[k];
+            const c = getCost(k, 0);
+            const afford = checkAfford(c);
+            // Use helper for color check
+            const costStr = formatCostWithColor(c);
+
+            const canBuild = checkBuildingLimit(k);
+            const disabledAttr = (afford && canBuild) ? '' : 'disabled';
+
+            let limitNum = 4;
+            // 正確な制限数を表示するためのロジック一致
+            const kIdx = BUILDING_KEYS.indexOf(k);
+            if (['well', 'inn', 'clocktower', 'bank', 'granary', 'lumber_hub', 'stone_plant'].includes(k)) {
+                limitNum = 2;
+            } else if (kIdx >= LIMIT_START_INDEX) {
+                limitNum = 4;
+            } else {
+                limitNum = 999; // 制限なし
+            }
+
+            const limitText = canBuild ? '' : `<br><span style="color:red; font-size:0.8em;">⚠️ 上限(${limitNum}つ)に達しています</span>`;
+
+            html += `
+            <div class="building-item">
+                <div class="building-info">
+                    <strong>${b.icon} ${b.name}</strong>
+                    <p style="font-size:0.8em; color:#666; margin:2px 0;">${b.desc}</p>
+                    <span class="res-cost">${costStr}</span>
+                    <span class="res-cost">⏳${formatTime(getBuildTime(k, 0) / 1000)}</span>
+                    ${limitText}
+                </div>
+                <button onclick="actBuild('${k}')" ${disabledAttr}>建設</button>
+            </div>`;
+        }
+        content.innerHTML = html;
+        return;
+    }
+
+    const b = BUILDINGS[tile.type];
+    if (tile.finishTime) {
+        const rem = Math.max(0, (tile.finishTime - Date.now()));
+
+        const prodDiff = getBuildingEffectHtml(tile.type, tile.level, tile.level + 1, !!tile.ascended);
+
+        const c = getCost(tile.type, tile.level, !!tile.ascended);
+        let refund = [];
+        for (let r in c) if (c[r] > 0) refund.push(`${(r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧')}${Math.floor(c[r] * 0.5).toLocaleString()}`);
+
+        content.innerHTML = `
+        <div style="text-align:center;">
+            <h3>${b.name} (Lv.${tile.level} ➞ ${tile.level + 1})</h3>
+            <div style="background:#f9f9f9; padding:5px; border-radius:5px; margin:5px 0; font-size:0.9em;">
+                <strong>工事後の性能:</strong>
+                ${prodDiff}
+            </div>
+            <div style="color:var(--accent-color); font-size:1.4em; font-weight:bold; margin:10px 0;">${formatTime(rem / 1000)}</div>
+            <p>工事中...</p>
+            <button class="action-btn store-btn" onclick="actStore()">📦 回収（保管庫へ）</button>
+            <button class="action-btn" style="background-color:var(--danger-color); margin-top:5px;" onclick="actCancelBuild()">🚫 工事中止 (返還: ${refund.join(' ')})</button>
+        </div>`;
+    } else {
+        const next = tile.level + 1;
+        const c = getCost(tile.type, tile.level, !!tile.ascended);
+        const afford = checkAfford(c);
+        const caps = getStorageCapacity(tile.type, tile.level, selectedTileIndex);
+        // Use helper for upgrade cost
+        const costStr = formatCostWithColor(c);
+
+        const prodInfo = getBuildingEffectHtml(tile.type, tile.level, null, !!tile.ascended);
+
+        let storeInfo = "";
+        const prodSource = (tile.ascended && ASCENSION_BASE_STATS[tile.type]) ? ASCENSION_BASE_STATS[tile.type].prod : b.prod;
+        for (let r in prodSource) if (prodSource[r] > 0) {
+            storeInfo += `<div>${(r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : r == 'time_reduction' ? '⏳' : '💧')} ${Math.floor(tile.stored[r] || 0)}/${Math.floor(caps[r] || 0)}</div>`;
+        }
+
+        // Consumption Info for Stone Plant
+        let consumeInfo = "";
+        if (tile.type === 'stone_plant') {
+            const costScale = tile.level * Math.pow(1.05, tile.level - 1);
+            const mCost = (b.consume.money || 0) * costScale;
+            const fCost = (b.consume.food || 0) * costScale;
+            const wCost = (b.consume.wood || 0) * costScale;
+            consumeInfo = `
+                <div style="border-top:1px dashed #ccc; margin-top:5px; padding-top:5px; font-size:0.9em;">
+                    <strong>消費コスト:</strong><br>
+                    💰-${Math.floor(mCost)}/s 🌾-${Math.floor(fCost)}/s 🌲-${Math.floor(wCost)}/s
+                </div>
+            `;
+        }
+
+        const buildersBusy = getActiveBuilders() >= gameState.maxBuilders;
+
+        // Special Actions (Toggle)
+        let extraBtns = "";
+        if (tile.type === 'stone_plant') {
+            const isActive = tile.isActive;
+            extraBtns += `
+                <button class="action-btn" onclick="actTogglePlant()" style="background-color:${isActive ? '#e74c3c' : '#2ecc71'}; margin-bottom:5px;">
+                    ${isActive ? '⏸ 停止する' : '▶ 稼働開始'}
+                </button>
+            `;
+            if (isActive) {
+                consumeInfo += `<div style="color:#2ecc71; font-weight:bold; font-size:0.9em; margin-top:2px;">✅ 稼働中</div>`;
+            } else {
+                consumeInfo += `<div style="color:#95a5a6; font-weight:bold; font-size:0.9em; margin-top:2px;">⏹ 停止中</div>`;
+            }
+        }
+
+        content.innerHTML = `
+        <div style="text-align:center;">
+            <h3>${tile.ascended ? getBuildingName(tile.type, true) : b.name} (Lv.${tile.level})</h3>
+            <p style="font-size:0.85em; color:#666; margin:0 0 10px 0;">${b.desc}</p>
+            <div style="background:#f0f0f0; padding:5px; border-radius:5px; margin-bottom:5px;">
+                <strong>現在性能:</strong><br>${prodInfo}
+                ${consumeInfo}
+            </div>
+            ${storeInfo ? `<div style="background:#e8f4f8; padding:5px; border-radius:5px; margin-bottom:10px;">
+                <strong>貯蔵庫:</strong><br>${storeInfo}
+            </div>` : ''}
+            <div style="text-align:left; font-size:0.9em; margin-bottom:5px;">
+                 <strong>LvUP費用:</strong> ${costStr}<br>
+                 <strong>時間:</strong> ${formatTime(getBuildTime(tile.type, tile.level, !!tile.ascended) / 1000)}
+            </div>
+            ${buildersBusy ? '<p style="color:red; font-size:0.9em;">⚠️ 工事枠がいっぱいです</p>' : ''}
+            ${extraBtns}
+            ${(!tile.ascended && tile.level >= 30 && ASCENSION_BASE_STATS[tile.type]) ? `<button class="action-btn" onclick="actAscend()" style="background: linear-gradient(135deg, #f39c12, #e74c3c); margin-bottom:5px;">🔥 昇格する</button>` : ''}
+            <button class="action-btn" onclick="actBuild('${tile.type}')" ${afford && !buildersBusy ? '' : 'disabled'}>レベルアップ</button>
+            <button class="action-btn store-btn" onclick="actStore()">📦 回収（保管庫へ）</button>
+        </div>`;
+    }
+}
+
+// --- Multi-tile Helper Functions ---
+function getBuildingSize(type) {
+    const b = BUILDINGS[type];
+    return { w: b.w || 1, h: b.h || 1 };
+}
+
+function getGridPos(index) {
+    const s = gameState.gridSize;
+    return { x: index % s, y: Math.floor(index / s) };
+}
+
+function getIndexFromPos(x, y) {
+    const s = gameState.gridSize;
+    if (x < 0 || y < 0 || x >= s || y >= s) return -1;
+    return y * s + x;
+}
+
+function checkPlacement(index, type, rot = 0) {
+    const size = getBuildingSize(type);
+    const w = (rot % 2 === 0) ? size.w : size.h;
+    const h = (rot % 2 === 0) ? size.h : size.w;
+    const origin = getGridPos(index);
+
+    for (let dy = 0; dy < h; dy++) {
+        for (let dx = 0; dx < w; dx++) {
+            const tx = origin.x + dx;
+            const ty = origin.y + dy;
+            const tidx = getIndexFromPos(tx, ty);
+            if (tidx === -1) return false; // Out of bounds
+
+            // Check occupancy
+            // Target tile (index) is assumed to be the one we clicked, so it's nominally "available" (checked by UI)
+            // But we must ensure other tiles are also available.
+            // Also, must ensure tiles are Unlocked.
+            const t = gameState.tiles[tidx];
+            if (!t.unlocked) return false;
+            if (t.type || t.finishTime) {
+                // If checking the origin tile itself, it's fine (we are building on it)
+                // But wait, if we are upgrading, this function is not called for size check usually.
+                // If new build, origin tile must be empty.
+                // The UI calls actBuild only on selectedTileIndex.
+                // We should ensure we don't overwrite existing stuff unless we mean to.
+                // For new build, all tiles must be empty.
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+function setMultiTile(index, type, rot = 0) {
+    const size = getBuildingSize(type);
+    const w = (rot % 2 === 0) ? size.w : size.h;
+    const h = (rot % 2 === 0) ? size.h : size.w;
+    const origin = getGridPos(index);
+
+    for (let dy = 0; dy < h; dy++) {
+        for (let dx = 0; dx < w; dx++) {
+            const tidx = getIndexFromPos(origin.x + dx, origin.y + dy);
+            const t = gameState.tiles[tidx];
+            if (dx === 0 && dy === 0) {
+                // Master
+                t.type = type;
+                t.rotation = rot;
+                t.mas = true; // master flag
+            } else {
+                // Slave
+                t.type = type + '_part';
+                t.masterIndex = index;
+            }
+        }
+    }
+}
+
+function clearMultiTile(index) {
+    const t = gameState.tiles[index];
+    if (!t.type) return;
+
+    // If slave, redirect to master
+    if (t.type.endsWith('_part')) {
+        // Should have been handled by caller, but safety check
+        if (t.masterIndex !== undefined) clearMultiTile(t.masterIndex);
+        return;
+    }
+
+    // Master: clear self and all parts
+    // We need to know the size/rotation to find parts?
+    // Or just scan? Scanning is slow.
+    // Using currently stored rotation and type.
+    const size = getBuildingSize(t.type);
+    const rot = t.rotation || 0;
+    const w = (rot % 2 === 0) ? size.w : size.h;
+    const h = (rot % 2 === 0) ? size.h : size.w;
+    const origin = getGridPos(index);
+
+    for (let dy = 0; dy < h; dy++) {
+        for (let dx = 0; dx < w; dx++) {
+            const tidx = getIndexFromPos(origin.x + dx, origin.y + dy);
+            if (tidx !== -1) {
+                const part = gameState.tiles[tidx];
+                part.type = null;
+                part.level = 0;
+                part.finishTime = null;
+                part.stored = {};
+                part.mas = undefined;
+                part.masterIndex = undefined;
+                part.rotation = 0;
+            }
+        }
+    }
+}
+
+window.actCancelBuild = function () {
+    if (selectedTileIndex === null) return;
+    const t = gameState.tiles[selectedTileIndex];
+    if (!t.finishTime) return;
+
+    showConfirmModal("工事を中止しますか？\n費用の一部(50%)が返還されます。", () => {
+        const c = getCost(t.type, t.level, !!t.ascended);
+        let refundTxt = "";
+        for (let r in c) {
+            const amount = Math.floor(c[r] * 0.5);
+            if (amount > 0) {
+                gameState.resources[r] += amount;
+                const icon = (r == 'money' ? '💰' : r == 'food' ? '🌾' : r == 'wood' ? '🌲' : r == 'stone' ? '🪨' : r == 'iron' ? '🔩' : '💧');
+                refundTxt += `${icon}+${amount.toLocaleString()} `;
+            }
+        }
+
+        t.finishTime = null;
+        if (t.level === 0) {
+            clearMultiTile(selectedTileIndex);
+        }
+        SoundManager.playSE('cancel');
+
+        saveGame();
+        sync3DState();
+        updatePanelUI();
+        updateHeader();
+        showToast(`工事を中止しました ${refundTxt}`);
+    });
+}
+
+window.actAscend = function () {
+    if (selectedTileIndex === null) return;
+    const t = gameState.tiles[selectedTileIndex];
+
+    if (!t.ascended && t.level >= 30 && ASCENSION_BASE_STATS[t.type]) {
+        showConfirmModal("🔥 昇格を行いますか？\n\n・レベルが1に戻ります\n・外観が変化します\n・成長率が大幅に向上します\n・元に戻すことはできません", () => {
+            t.ascended = true;
+            t.level = 1;
+            t.finishTime = null; // No construction time for ascension itself? Or maybe instant?
+            // Spec didn't specify. Instant is cleaner for "Evolution".
+
+            SoundManager.playSE('save'); // Special sound?
+            // Maybe play a different sound if available, but save is okay.
+
+            sync3DState(); // Updates visual to <傑> model (if impl)
+            updatePanelUI();
+            showToast(`🔥 ${BUILDINGS[t.type].name}が昇格しました！`);
+            saveGame();
+        });
+    }
+};
+
+window.actBuild = function (type) {
+    if (selectedTileIndex === null) return;
+
+    if (getActiveBuilders() >= gameState.maxBuilders) {
+        showToast("⚠️ 大工が全員作業中です");
+        return;
+    }
+
+    const t = gameState.tiles[selectedTileIndex];
+    const lv = t.type === type ? t.level : 0;
+
+    let targetIndex = selectedTileIndex;
+    let detectedRotation = 0;
+
+    if (lv === 0) {
+        if (!checkBuildingLimit(type)) {
+            showToast("⚠️ この施設はこれ以上建設できません");
+            return;
+        }
+
+        const reqRank = getUnlockRank(type);
+        if (gameState.rank < reqRank) {
+            showToast(`⚠️ ${BUILDINGS[type].name}はランク${reqRank}から建設可能です`);
+            return;
+        }
+
+        // Smart Placement Logic (Updated)
+        // Priority:
+        // 1. Closest to Origin (dx=0, dy=0) -> "Build starting here"
+        // 2. Default Rotation (0) -> "Vertical/Standard"
+        let placed = false;
+        const size0 = getBuildingSize(type);
+
+        // Allow rotation trial
+        const allowedRotations = [0];
+        if (size0.w !== size0.h) allowedRotations.push(1);
+
+        // Generate all possible candidates: {r, dx, dy}
+        let candidates = [];
+
+        for (let r of allowedRotations) {
+            const w = (r % 2 === 0) ? size0.w : size0.h;
+            const h = (r % 2 === 0) ? size0.h : size0.w;
+
+            for (let dy = -(h - 1); dy <= 0; dy++) {
+                for (let dx = -(w - 1); dx <= 0; dx++) {
+                    candidates.push({ r: r, dx: dx, dy: dy });
+                }
+            }
+        }
+
+        // Sort candidates
+        candidates.sort((a, b) => {
+            const distA = Math.abs(a.dx) + Math.abs(a.dy);
+            const distB = Math.abs(b.dx) + Math.abs(b.dy);
+            if (distA !== distB) return distA - distB;
+            return a.r - b.r;
+        });
+
+        // Execute Search
+        const origin = getGridPos(selectedTileIndex);
+
+        for (let cand of candidates) {
+            const w = (cand.r % 2 === 0) ? size0.w : size0.h;
+            const h = (cand.r % 2 === 0) ? size0.h : size0.w;
+
+            const tx = origin.x + cand.dx;
+            const ty = origin.y + cand.dy;
+            const tidx = getIndexFromPos(tx, ty);
+
+            if (tidx !== -1 && checkPlacement(tidx, type, cand.r)) {
+                // Double check coverage
+                if (origin.x >= tx && origin.x < tx + w &&
+                    origin.y >= ty && origin.y < ty + h) {
+
+                    targetIndex = tidx;
+                    detectedRotation = cand.r;
+                    placed = true;
+                    break;
+                }
+            }
+        }
+
+        if (!placed) {
+            showToast("⚠️ 配置できません(スペース不足/障害物)");
+            return;
+        }
+    }
+
+    const c = getCost(type, lv, !!t.ascended);
+    if (checkAfford(c)) {
+        payCost(c);
+
+        if (lv === 0) {
+            setMultiTile(targetIndex, type, detectedRotation);
+            // Update UI focus to master
+            if (targetIndex !== selectedTileIndex) {
+                selectedTileIndex = targetIndex; // Update global selection
+            }
+        }
+
+        // Master tile properties
+        const tMaster = gameState.tiles[targetIndex]; // Re-fetch in case changed
+        tMaster.finishTime = Date.now() + getBuildTime(type, lv, !!t.ascended);
+        tMaster.stored = {}; // Reset storage
+        SoundManager.playSE('build');
+
+        saveGame();
+        sync3DState();
+
+        // Refresh UI with new selection
+        if (lv === 0 && targetIndex !== selectedTileIndex) {
+            showPanel(targetIndex);
+        } else {
+            updatePanelUI();
+        }
+        updateHeader();
+    }
+
+
+}
+
+window.actStore = function () {
+    if (selectedTileIndex === null) return;
+    const t = gameState.tiles[selectedTileIndex];
+    if (!t.type) return;
+
+    showConfirmModal("この施設を保管庫に戻しますか？", () => {
+        try {
+            collectResource(selectedTileIndex);
+            gameState.inventory.push({ type: t.type, level: t.level });
+            clearMultiTile(selectedTileIndex);
+
+            saveGame();
+            sync3DState();
+            updatePanelUI();
+            updateHeader();
+        } catch (err) {
+            console.error("actStore Error", err);
+            showToast("⚠️ システムエラーが発生しました");
+        }
+    });
+};
+
+window.actRestore = function (invIndex) {
+    console.log("actRestore called", invIndex);
+    if (selectedTileIndex === null) return;
+
+    if (getActiveBuilders() >= gameState.maxBuilders) {
+        showToast("⚠️ 大工が全員作業中です");
+        return;
+    }
+
+    if (invIndex < 0 || invIndex >= gameState.inventory.length) {
+        showToast("⚠️ アイテムが見つかりません");
+        return;
+    }
+
+    const item = gameState.inventory[invIndex];
+
+    // Placement Check with Rotation
+    let bestRot = -1;
+    // Try all 4 rotations to find one that fits
+    // Prefer 0 (default) -> 1 -> 2 -> 3
+    for (let r = 0; r < 4; r++) {
+        if (checkPlacement(selectedTileIndex, item.type, r)) {
+            bestRot = r;
+            break;
+        }
+    }
+
+    if (bestRot === -1) {
+        showToast("⚠️ ここには配置できません(スペース不足/障害物)");
+        return;
+    }
+
+    try {
+        // Remove from inventory ONLY if valid
+        gameState.inventory.splice(invIndex, 1);
+
+        // Use setMultiTile with the found rotation
+        setMultiTile(selectedTileIndex, item.type, bestRot);
+
+        const tNew = gameState.tiles[selectedTileIndex];
+        tNew.level = Math.max(0, item.level - 1);
+        tNew.finishTime = Date.now() + getBuildTime(item.type, tNew.level);
+        tNew.stored = {};
+
+        SoundManager.playSE('build');
+        saveGame();
+        sync3DState();
+        updatePanelUI();
+        updateHeader();
+        showToast("保管庫から配置しました");
+    } catch (e) {
+        console.error("actRestore Error", e);
+        showToast("⚠️ システムエラーが発生しました");
+        // On error, we technically lost the item since we spliced it. 
+        // But in a real crash loop, it's safer to just log. 
+        // Ideally we'd rollback splice, but we're inside the Try block that failed.
+    }
+};
+
+
+function getAdjacentTiles(index) {
+    const size = gameState.gridSize;
+    const row = Math.floor(index / size);
+    const col = index % size;
+    const adj = [];
+
+    // 上下左右
+    if (row > 0) adj.push(gameState.tiles[(row - 1) * size + col]);
+    if (row < size - 1) adj.push(gameState.tiles[(row + 1) * size + col]);
+    if (col > 0) adj.push(gameState.tiles[row * size + col - 1]);
+    if (col < size - 1) adj.push(gameState.tiles[row * size + col + 1]);
+
+    return adj;
+}
+
+window.actTogglePlant = function () {
+    if (selectedTileIndex === null) return;
+    const tile = gameState.tiles[selectedTileIndex];
+    if (tile.type !== 'stone_plant') return;
+
+    tile.isActive = !tile.isActive;
+    SoundManager.playSE('select');
+
+    if (tile.isActive) showToast("🏭 稼働を開始しました");
+    else showToast("⏹ 停止しました");
+
+    saveGame();
+    updatePanelUI();
+    // Optional: Update visual effects (smoke etc) -> sync3DState handled by next loop or manual call?
+    // sync3DState logic for stone_plant effect is not yet implemented in 3D, but status is saved.
+};
+
+window.actExpand = function () {
+    if (selectedTileIndex === null) return;
+    const c = getExpandCost(gameState.rank);
+    if (checkAfford(c)) {
+        payCost(c);
+        gameState.tiles[selectedTileIndex].unlocked = true;
+        SoundManager.playSE('build'); // Land construction sound
+        saveGame();
+
+        checkAndExpandWorld();
+
+        sync3DState();
+        updatePanelUI();
+    }
+}
+
+window.openMenu = function () {
+    SoundManager.playSE('select');
+    const modal = document.getElementById('modal-menu');
+    const content = document.getElementById('menu-content');
+
+    const builderCost = getBuilderCost();
+    const canBuyBuilder = gameState.resources.money >= builderCost;
+    const currentUid = currentUser ? currentUser.uid : "未接続(オフライン)";
+
+    const sharedUid = localStorage.getItem('kingdomBuilder_sharedId');
+    const displayUid = sharedUid ? `${sharedUid} (連携中)` : currentUid;
+
+    content.innerHTML = `
+    <div class="shop-item">
+        <button class="action-btn" onclick="openBuildingList()" style="width:100%; margin-bottom:10px; background-color:#3498db;">
+            📋 施設一覧 (所有)
+        </button>
+        <button class="action-btn" onclick="showCurrentEffects()" style="width:100%; margin-bottom:10px; background-color:#1abc9c;">
+            📊 現在の効果
+        </button>
+        <button class="action-btn" onclick="openCatalog()" style="width:100%; margin-bottom:10px; background-color:#9b59b6;">
+            📖 建設カタログ
+        </button>
+    </div>
+
+    <div class="shop-item">
+        <button class="action-btn" onclick="startMoveMode()" style="width:100%; margin-bottom:10px; background-color:#f39c12;">
+            🏗️ 施設を移動
+        </button>
+    </div>
+
+    <div class="shop-item">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <strong>👷 大工の増員</strong><br>
+                <span style="font-size:0.9em; color:#666;">現在の人数: ${gameState.maxBuilders}人</span>
+            </div>
+            <div style="text-align:right;">
+                <span style="font-size:1.1em; font-weight:bold; color:#e67e22;">💰${builderCost.toLocaleString()}</span>
+            </div>
+        </div>
+        <button class="action-btn" onclick="actBuyBuilder()" ${canBuyBuilder ? '' : 'disabled'}>
+            購入する
+        </button>
+    </div>
+    
+    <div class="shop-item">
+        <strong>🔄 ID連携 (同期プレイ)</strong>
+        <p style="font-size:0.8em; color:#666; margin:5px 0;">
+            現在のID (このIDを別端末に入力):<br>
+            <input type="text" value="${sharedUid || currentUid}" readonly style="width:100%; padding:5px; background:#eee; border:1px solid #ddd; border-radius:4px;" onclick="this.select();document.execCommand('copy');showToast('IDをコピーしました')">
+        </p>
+        <div style="margin-top:10px; border-top:1px dashed #ccc; padding-top:10px;">
+            <p style="font-size:0.8em; color:#666; margin:0 0 5px 0;">別端末のIDを入力して連携:</p>
+            <div style="display:flex; gap:5px;">
+                <input type="text" id="restore-uid-input" placeholder="連携するIDを入力" style="flex:1; padding:5px; border:1px solid #ddd; border-radius:4px;">
+                <button onclick="actLinkID()" style="padding:5px 10px; font-size:0.9em;">連携</button>
+            </div>
+            ${sharedUid ? '<div style="margin-top:5px;"><button onclick="actUnlinkID()" style="width:100%; background-color:#e74c3c;">連携を解除する</button></div>' : ''}
+        </div>
+    </div>
+
+    <div class="shop-item">
+        <strong>⚙️ 設定</strong>
+        <div style="margin-top:5px;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:2px;">
+                <span>🎵 BGM</span>
+                <span id="label-bgm-vol">${Math.floor(SoundManager.config.bgmVolume * 100)}%</span>
+            </div>
+            <input type="range" min="0" max="100" value="${SoundManager.config.bgmVolume * 100}" 
+                style="width:100%"
+                oninput="let v = this.value / 100; SoundManager.setBGMVolume(v); document.getElementById('label-bgm-vol').innerText = this.value + '%';">
+        </div>
+        <div style="margin-top:10px;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:2px;">
+                <span>🔊 効果音</span>
+                <span id="label-se-vol">${Math.floor(SoundManager.config.seVolume * 100)}%</span>
+            </div>
+            <input type="range" min="0" max="100" value="${SoundManager.config.seVolume * 100}" 
+                style="width:100%"
+                oninput="let v = this.value / 100; SoundManager.setSEVolume(v); document.getElementById('label-se-vol').innerText = this.value + '%';">
+        </div>
+    </div>
+
+    <div class="shop-item">
+        <strong>📝 ゲームについて</strong>
+        <p style="font-size:0.9em; color:#666;">
+            現在のマップサイズ: ${gameState.gridSize}x${gameState.gridSize}<br>
+            全て開拓すると世界が広がります！<br>
+            データはクラウドに保存されています☁️
+        </p>
+    </div>
+`;
+
+    modal.style.display = 'flex';
+};
+
+
+window.openCatalog = function () {
+    SoundManager.playSE('select');
+    closeModal('modal-menu');
+    const modal = document.getElementById('modal-catalog');
+    const content = document.getElementById('catalog-content');
+
+    let html = '<div class="catalog-grid">';
+
+    for (let k in BUILDINGS) {
+        const b = BUILDINGS[k];
+        const reqRank = getUnlockRank(k);
+        const isLocked = gameState.rank < reqRank;
+
+        if (isLocked) {
+            html += `
+                <div class="catalog-item" style="opacity:0.6; cursor:not-allowed;" onclick="showToast('⚠️ ランク${reqRank}で解放されます')">
+                    <div class="catalog-icon">🔒</div>
+                    <div class="catalog-name">Rank ${reqRank}</div>
+                </div>
+            `;
+        } else {
+            html += `
+                <div class="catalog-item" onclick="showCatalogDetail('${k}')">
+                    <div class="catalog-icon">${b.icon}</div>
+                    <div class="catalog-name">${b.name}</div>
+                </div>
+            `;
+        }
+    }
+
+    html += '</div>';
+    html += `
+        <div style="margin-top:15px; padding:10px; background:white; border-radius:8px; font-size:0.9em; color:#7f8c8d; text-align:center; border:1px dashed #ccc;">
+            施設アイコンをタップすると<br>詳細説明を確認できます
+        </div>
+    `;
+
+    content.innerHTML = html;
+    modal.style.display = 'flex';
+};
+
+window.showCatalogDetail = function (type) {
+    SoundManager.playSE('select');
+    const b = BUILDINGS[type];
+    const content = document.getElementById('catalog-content');
+
+    // Lv.1での効果を表示
+    const prodHtml = getBuildingEffectHtml(type, 1);
+
+    const costStr = formatCostWithColor(b.cost);
+
+    const typeIndex = BUILDING_KEYS.indexOf(type);
+    const isStandardLimited = (typeIndex >= LIMIT_START_INDEX && typeIndex !== -1);
+    const isSpecialLimited = ['well', 'inn', 'clocktower', 'bank', 'granary', 'lumber_hub', 'stone_plant', 'masonry_hub'].includes(type);
+
+    let limitStr = '無制限 (土地依存)';
+    if (type === 'directorate') limitStr = '1つまで';
+    else if (isSpecialLimited) limitStr = '2つまで';
+    else if (isStandardLimited) limitStr = '4つまで';
+
+    content.innerHTML = `
+        <button class="back-btn" onclick="openCatalog()">
+            <span>◀</span> 一覧に戻る
+        </button>
+        
+        <div class="detail-header">
+            <div class="detail-icon">${b.icon}</div>
+            <div class="detail-title">
+                <h4>${b.name}</h4>
+                <span class="detail-category">建設可能施設</span>
+            </div>
+        </div>
+        
+        <div class="detail-desc">
+            ${b.desc}
+            <div style="margin-top:10px; font-size:0.85em; color:#a1887f; border-top:1px solid #f9e79f; padding-top:5px;">
+                💡 ヒント: レベルアップで生産力が大幅に向上します。
+            </div>
+        </div>
+        
+        <div class="detail-stats-grid">
+            <div class="stat-card">
+                <span class="stat-label">生産能力 / 効果 (Lv.1)</span>
+                <div class="stat-content">
+                    ${prodHtml}
+                </div>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">建設コスト</span>
+                <div class="stat-content">
+                    ${costStr || '無料'}
+                </div>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">基本建設時間</span>
+                <div class="stat-content">
+                    ⏳ ${formatTime(b.baseTime / 1000)}
+                </div>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">最大設置数</span>
+                <div class="stat-content">
+                    ${limitStr}
+                </div>
+            </div>
+        </div>
+    `;
+};
+
+window.showCurrentEffects = function (includeConstruction = false) {
+    closeModal('modal-menu');
+    SoundManager.playSE('select');
+
+    // Calculate stats
+    const stats = {
+        money: { prod: 0, mult: 1 },
+        food: { prod: 0, mult: 1 },
+        wood: { prod: 0, mult: 1 },
+        stone: { prod: 0, mult: 1 },
+        iron: { prod: 0, mult: 1 },
+        water: { prod: 0, mult: 1 },
+        time_reduction: { prod: 0, mult: 1 }
+    };
+
+    // Global Multipliers Calculation (Mirrors gameLogicLoop)
+    const getBoost = (type) => {
+        let add = 0;
+        const targets = gameState.tiles.filter(t => {
+            if (t.type !== type) return false;
+            if (t.level > 0) return true; // Active or Upgrading
+            if (includeConstruction && t.finishTime) return true; // Under construction (New)
+            return false;
+        });
+
+        targets.forEach(t => {
+            let l = t.level;
+            if (includeConstruction && t.finishTime) {
+                l = (t.level === 0) ? 1 : t.level + 1;
+            } else if (l === 0) {
+                l = 1; // Fallback for safety if somehow logic slips, but usually filtered out
+            }
+            add += (0.27 + l * 0.03);
+        });
+        return 1.0 + add;
+    };
+
+    const bankMult = getBoost('bank');
+    const granaryMult = getBoost('granary');
+    const lumberMult = getBoost('lumber_hub');
+    const masonryMult = getBoost('masonry_hub');
+
+    // Clocktower
+    let globalSpeed = 1.0;
+    const clocks = gameState.tiles.filter(t => {
+        if (t.type !== 'clocktower') return false;
+        // Real mode: Must NOT be constructing
+        if (!includeConstruction && t.finishTime) return false;
+
+        if (t.level > 0) return true;
+        if (includeConstruction && t.finishTime) return true;
+        return false;
+    });
+    clocks.forEach(t => {
+        let l = t.level;
+        if (includeConstruction && t.finishTime) {
+            l = (t.level === 0) ? 1 : t.level + 1;
+        }
+        if (l === 0) l = 1;
+        globalSpeed += (0.02 + (l - 1) * 0.006);
+    });
+
+
+    // Iterate tiles for production
+    gameState.tiles.forEach((tile, i) => {
+        let isActive = false;
+        let level = tile.level;
+
+        if (tile.unlocked && tile.type) {
+            // Logic:
+            // 1. If includeConstruction is TRUE:
+            //    - Active if Level > 0 OR finishTime exists.
+            //    - Level is Target Level (Level+1).
+            // 2. If includeConstruction is FALSE:
+            //    - Active ONLY if Level > 0 AND !finishTime. (Production stops during upgrade).
+
+            if (includeConstruction) {
+                if (tile.level > 0 || tile.finishTime) {
+                    isActive = true;
+                    if (tile.finishTime) {
+                        level = (tile.level === 0) ? 1 : tile.level + 1;
+                    } else {
+                        level = tile.level;
+                    }
+                }
+            } else {
+                // Real Mode: No production if constructing/upgrading
+                if (tile.level > 0 && !tile.finishTime) {
+                    isActive = true;
+                    level = tile.level;
+                }
+            }
+        }
+
+        if (isActive) {
+            const b = BUILDINGS[tile.type];
+            if (!b) return;
+
+            let mult = globalSpeed;
+
+            // Adjacency Helpers
+            const countAdj = (type) => {
+                const adj = getAdjacentTiles(i);
+                // Filter logic similar to global boost
+                const valid = [...new Set(adj)].filter(t => {
+                    if (!t || t.type !== type) return false;
+                    if (t.level > 0) return true;
+                    if (includeConstruction && t.finishTime) return true;
+                    return false;
+                });
+                return valid;
+            };
+
+            const getMaxLvl = (list) => list.reduce((max, t) => {
+                let l = t.level;
+                if (includeConstruction && t.finishTime) l = (t.level === 0) ? 1 : t.level + 1;
+                if (l === 0) l = 1;
+                return Math.max(max, l);
+            }, 0);
+
+            // 1. Well -> Farm
+            if (tile.type === 'farm') {
+                const wells = countAdj('well');
+                const maxLvl = getMaxLvl(wells);
+                if (maxLvl > 0) mult *= (1 + 0.3 + (maxLvl - 1) * 0.03);
+            }
+
+            // 2. Inn -> Market/House (Assuming innate production always active if adjacent)
+            if (tile.type === 'inn') {
+                const markets = countAdj('market');
+                const houses = countAdj('house');
+                if (markets.length === 0 || houses.length === 0) mult = 0;
+            }
+
+            // 3. Forest -> Lumber
+            if (tile.type === 'forest') {
+                const adj = getAdjacentTiles(i);
+                const slaveOffset = (tile.rotation % 2 === 0) ? gameState.gridSize : 1;
+                const slaveIdx = i + slaveOffset;
+                if (gameState.tiles[slaveIdx] && gameState.tiles[slaveIdx].masterIndex === i) {
+                    getAdjacentTiles(slaveIdx).forEach(t => adj.push(t));
+                }
+                const unique = [...new Set(adj)];
+                const lumbers = unique.filter(t => {
+                    if (!t || t.type !== 'lumber') return false;
+                    if (t.level > 0) return true;
+                    if (t.finishTime) return true;
+                    return false;
+                });
+                if (lumbers.length > 0) mult *= (1 + 0.2 * lumbers.length);
+            }
+
+            const isAsc = tile.ascended;
+            const prodBase = (isAsc && ASCENSION_BASE_STATS[tile.type]) ? ASCENSION_BASE_STATS[tile.type].prod : b.prod;
+            const growth = (isAsc && ASCENSION_BASE_STATS[tile.type]) ? 1.10 : 1.05;
+
+            for (let r in prodBase) {
+                if (prodBase[r] > 0) {
+                    let finalMult = mult;
+                    if (r === 'money' && ['house', 'market', 'blacksmith', 'inn'].includes(tile.type)) finalMult *= bankMult;
+                    if (r === 'food' && ['farm'].includes(tile.type)) finalMult *= granaryMult;
+                    if (r === 'wood' && ['lumber', 'forest'].includes(tile.type)) finalMult *= lumberMult;
+                    if (r === 'stone' && ['quarry', 'stone_plant'].includes(tile.type)) finalMult *= masonryMult;
+
+                    const rawAmount = prodBase[r] * level * Math.pow(growth, level - 1);
+                    const actualAmount = rawAmount * finalMult;
+
+                    if (!stats[r]) stats[r] = { prod: 0, mult: 1, base: 0 };
+                    stats[r].prod += actualAmount;
+                    if (!stats[r].base) stats[r].base = 0;
+                    stats[r].base += rawAmount;
+                }
+            }
+
+            // Handles special production like Directorate (time_reduction)
+            if (tile.type === 'directorate') {
+                const rate = 0.4 * Math.pow(1.10, level - 1);
+                const actualRate = rate * mult; // global speed applies
+                if (!stats.time_reduction) stats.time_reduction = { prod: 0, mult: 1, base: 0 };
+                stats.time_reduction.prod += actualRate;
+                stats.time_reduction.base += rate;
+            }
+
+            // Handles Consumption (e.g. Stone Plant)
+            if (b.consume && isActive) {
+                // Check if specific conditions met (e.g. stone_plant isActive flag)
+                // For stone_plant, it needs to be toggled ON
+                let isConsuming = true;
+                if (tile.type === 'stone_plant' && !tile.isActive) isConsuming = false;
+
+                if (isConsuming) {
+                    const costScale = level * Math.pow(1.05, level - 1);
+                    for (let r in b.consume) {
+                        if (b.consume[r] > 0) {
+                            const amount = b.consume[r] * costScale;
+                            // Consumption is negative production
+                            if (!stats[r]) stats[r] = { prod: 0, mult: 1, base: 0 };
+                            stats[r].prod -= amount;
+                            // We don't touch 'base' or 'mult' for consumption typically, or maybe base negative?
+                            // Let's just affect the final prod total.
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    // Build UI
+    const modal = document.getElementById('modal-building-list');
+    const content = document.getElementById('building-list-content');
+
+    let html = `
+        <div style="text-align:center; margin-bottom:15px;">
+            <h3>📊 現在の効果一覧</h3>
+            <p style="font-size:0.9em; color:#666;">全施設の合計生産力と適用倍率</p>
+            <button class="action-btn" onclick="showCurrentEffects(${!includeConstruction})" style="background-color:${includeConstruction ? '#e74c3c' : '#2ecc71'}; width:auto; padding:5px 15px; font-size:0.9em; margin-top:5px;">
+                ${includeConstruction ? '建設中を含めない' : '建設中を含める (潜在能力)'}
+            </button>
+            ${includeConstruction ? '<p style="color:#e67e22; font-size:0.8em; margin-top:2px;">※建設中の施設が完成したと仮定した数値です</p>' : ''}
+        </div>
+        
+        <table style="width:100%; border-collapse: collapse; font-size:0.95em;">
+            <tr style="background:#f0f0f0; border-bottom:2px solid #ddd;">
+                <th style="padding:8px; text-align:left;">素材</th>
+                <th style="padding:8px; text-align:right;">合計生産/秒</th>
+                <th style="padding:8px; text-align:right;">倍率</th>
+            </tr>
+    `;
+
+    const resKeys = ['money', 'food', 'wood', 'stone', 'iron', 'water', 'time_reduction'];
+    const labels = { money: 'お金', food: '食料', wood: '木材', stone: '石材', iron: '鉄', water: '水', time_reduction: '工事短縮' };
+    const icons = { money: '💰', food: '🌾', wood: '🌲', stone: '🪨', iron: '🔩', water: '💧', time_reduction: '⏳' };
+
+    resKeys.forEach(key => {
+        const s = stats[key];
+        // Show if producing (base > 0), consuming (prod < 0), or if it's money (always show)
+        if (s.base > 0 || s.prod !== 0 || key === 'money') {
+            // Logic Change: Display effective GLOBAL multiplier, not average.
+            // For Money: globalSpeed * bankMult
+            // For Food: globalSpeed * granaryMult
+            // For Wood: globalSpeed * lumberMult
+            // For others: globalSpeed
+
+            let displayMult = globalSpeed;
+            if (key === 'money') displayMult *= bankMult;
+            if (key === 'food') displayMult *= granaryMult;
+            if (key === 'wood') displayMult *= lumberMult;
+            if (key === 'stone') displayMult *= masonryMult;
+
+            let prodDisplay = s.prod.toFixed(1);
+            if (key === 'time_reduction') prodDisplay = s.prod.toFixed(2);
+
+            html += `
+                <tr style="border-bottom:1px solid #eee;">
+                    <td style="padding:8px;">${icons[key]} ${labels[key]}</td>
+                    <td style="padding:8px; text-align:right; font-weight:bold;">${prodDisplay}${key === 'time_reduction' ? 'x' : '/s'}</td>
+                    <td style="padding:8px; text-align:right; color:#2980b9;">x${displayMult.toFixed(2)}</td>
+                </tr>
+            `;
+        }
+    });
+
+    html += `</table>
+        <div style="margin-top:20px; text-align:center;">
+            <button onclick="openMenu()" style="padding:8px 20px; border:none; background:#eee; border-radius:5px;">戻る</button>
+        </div>
+    `;
+
+    content.innerHTML = html;
+    document.getElementById('modal-building-list').style.display = 'flex';
+};
+
+window.openBuildingList = function () {
+    SoundManager.playSE('select');
+    closeModal('modal-menu');
+    const modal = document.getElementById('modal-building-list');
+    const content = document.getElementById('building-list-content');
+
+    let html = '<div style="font-weight:bold; margin-bottom:5px; color:#2c3e50;">🌍 マップ上の施設</div>';
+
+    let mapBuildings = [];
+    gameState.tiles.forEach((t, i) => {
+        if (t.type && !t.type.endsWith('_part')) {
+            mapBuildings.push({ tile: t, index: i });
+        }
+    });
+
+    const getResScore = (type) => {
+        const b = BUILDINGS[type];
+        if (b.prod.money) return 1;
+        if (b.prod.food) return 2;
+        if (b.prod.wood) return 3;
+        if (b.prod.stone) return 4;
+        if (b.prod.iron) return 5;
+        return 6;
+    };
+    const sortFn = (a, b) => {
+        const typeA = a.tile ? a.tile.type : a.type;
+        const lvlA = a.tile ? a.tile.level : a.level;
+        const typeB = b.tile ? b.tile.type : b.type;
+        const lvlB = b.tile ? b.tile.level : b.level;
+
+        const sA = getResScore(typeA);
+        const sB = getResScore(typeB);
+
+        if (sA !== sB) return sA - sB;
+        return lvlB - lvlA;
+    };
+
+    mapBuildings.sort(sortFn);
+
+    if (mapBuildings.length === 0) {
+        html += '<p style="color:#999; font-size:0.9em;">施設はありません</p>';
+    } else {
+        mapBuildings.forEach(item => {
+            const b = BUILDINGS[item.tile.type];
+            const level = item.tile.level;
+
+            const prodStr = getBuildingEffectHtml(item.tile.type, level, null, !!item.tile.ascended);
+
+            html += `
+            <div class="building-item" style="background:white; margin-bottom:5px;">
+                <div class="building-info">
+                    <strong>${b.icon} ${b.name} (Lv.${level})</strong>
+                    <span style="font-size:0.8em; color:#666;">${prodStr}</span>
+                </div>
+                <button onclick="focusTile(${item.index})" style="padding:5px 10px; font-size:0.8em;">詳細</button>
+            </div>
+        `;
+        });
+    }
+
+    html += '<div style="font-weight:bold; margin-top:15px; margin-bottom:5px; color:#7f8c8d; border-top:1px dashed #ccc; padding-top:10px;">📦 保管庫の施設</div>';
+
+    if (gameState.inventory.length === 0) {
+        html += '<p style="color:#999; font-size:0.9em;">保管庫は空です</p>';
+    } else {
+        let sortedInv = [...gameState.inventory];
+        sortedInv.sort(sortFn);
+
+        sortedInv.forEach(item => {
+            const b = BUILDINGS[item.type];
+            const prodStr = getBuildingEffectHtml(item.type, item.level, null, !!item.ascended);
+            const displayName = item.ascended ? getBuildingName(item.type, true) : b.name;
+
+            html += `
+            <div class="building-item" style="background:#f5f5f5; color:#666;">
+                <div class="building-info">
+                    <strong>${b.icon} ${displayName} (Lv.${item.level})</strong>
+                    <span style="font-size:0.8em;">${prodStr}</span>
+                </div>
+                <span style="font-size:0.8em; background:#eee; padding:3px 6px; border-radius:4px;">保管中</span>
+            </div>
+        `;
+        });
+    }
+
+    content.innerHTML = html;
+    modal.style.display = 'flex';
+};
+
+window.focusTile = function (index) {
+    closeModal('modal-building-list');
+    selectTile(index);
+
+    const tObj = tileMeshes[index];
+    if (tObj && camera) {
+        const targetX = tObj.mesh.position.x;
+        const targetZ = tObj.mesh.position.z;
+
+        camera.position.x = targetX + 20;
+        camera.position.z = targetZ + 20;
+        camera.updateProjectionMatrix();
+    }
+};
+
+window.actLinkID = function () {
+    SoundManager.playSE('select');
+    const input = document.getElementById('restore-uid-input');
+    const targetUid = input.value.trim();
+    if (!targetUid) return showToast("⚠️ IDを入力してください");
+
+    if (!confirm("⚠️ ID連携モード\n\n入力したIDのデータを『共有』してプレイします。\n複数の端末で同じデータを同期できます。\n(※Firebaseのルール設定が必要です)\n\n切り替えますか？")) return;
+
+    localStorage.setItem('kingdomBuilder_sharedId', targetUid);
+    location.reload();
+};
+
+window.actUnlinkID = function () {
+    SoundManager.playSE('cancel');
+    if (!confirm("連携を解除し、本来の自分のIDに戻りますか？")) return;
+    localStorage.removeItem('kingdomBuilder_sharedId');
+    location.reload();
+}
+
+window.actBuyBuilder = function () {
+    const cost = getBuilderCost();
+    if (gameState.resources.money >= cost) {
+        gameState.resources.money -= cost;
+        gameState.maxBuilders++;
+        SoundManager.playSE('collect'); // Investment sound
+        saveGame();
+        updateHeader();
+        openMenu();
+    }
+};
+
+function updateHeader() {
+    for (let k in gameState.resources) document.getElementById('display-' + k).innerText = Math.floor(gameState.resources[k]).toLocaleString();
+    document.getElementById('display-rank').innerText = gameState.rank;
+    document.getElementById('display-next-xp').innerText = (getNextRankXP(gameState.rank) - gameState.xp).toLocaleString();
+    document.getElementById('display-xp-bar').style.width = Math.min(100, (gameState.xp / getNextRankXP(gameState.rank)) * 100) + '%';
+
+    const active = getActiveBuilders();
+    const max = gameState.maxBuilders;
+    const builderEl = document.getElementById('display-builders');
+    builderEl.innerText = `${active}/${max}`;
+    builderEl.style.color = active >= max ? 'red' : '#2c3e50';
+}
+
+function onWindowResize() {
+    const c = document.getElementById('game-container');
+    if (!c) return;
+    const width = c.clientWidth || window.innerWidth;
+    const height = c.clientHeight || window.innerHeight;
+    const aspect = width / height;
+    const d = 10;
+
+    if (camera && renderer) {
+        camera.left = -d * aspect;
+        camera.right = d * aspect;
+        camera.top = d;
+        camera.bottom = -d;
+        camera.updateProjectionMatrix();
+        renderer.setSize(width, height);
+    }
+}
+
+function processOfflineProgress() {
+    try {
+        const now = Date.now();
+        const totalOfflineSec = (now - gameState.lastSaveTime) / 1000;
+
+        if (totalOfflineSec > 10) {
+            let rep = ""; let built = 0; let earn = {};
+            const completionTimes = new Map();
+
+            // 1. Event Pre-scan: Identify completions and update levels
+            gameState.tiles.forEach((t, i) => {
+                if (t.finishTime && t.finishTime <= now) {
+                    completionTimes.set(i, t.finishTime);
+                    t.level++;
+                    t.finishTime = null;
+                    built++;
+                    gameState.xp += Math.floor(getBuildTime(t.type, t.level - 1, !!t.ascended) / 1000);
+                }
+            });
+
+            // 2. Calculate Weighted Global Buffs (using completion data)
+            const globalBuffs = getWeightedGlobalBuffs(totalOfflineSec, gameState.lastSaveTime, completionTimes);
+            const offlineCtx = { totalSeconds: totalOfflineSec, lastSaveTime: gameState.lastSaveTime, completionTimes };
+
+            // 3. Production Loop
+            gameState.tiles.forEach((t, i) => {
+                let activeSeconds = totalOfflineSec;
+                const finishedAt = completionTimes.get(i); // Check if this tile finished
+
+                if (finishedAt) {
+                    // Finished during offline
+                    const finishDelayV = (finishedAt - gameState.lastSaveTime) / 1000;
+                    activeSeconds = totalOfflineSec - finishDelayV;
+                    if (activeSeconds < 0) activeSeconds = 0;
+                } else if (t.finishTime) {
+                    // Still building
+                    activeSeconds = 0;
+                }
+
+                // Production Logic
+                if (t.type && t.level > 0 && !t.finishTime) {
+                    const b = BUILDINGS[t.type];
+
+                    // Stone Plant Offline Simulation
+                    if (t.type === 'stone_plant') {
+                        if (t.isActive) {
+                            const costScale = t.level * Math.pow(1.05, t.level - 1);
+                            // Base Cons: M:50, F:20, W:20
+                            const mCost = (b.consume.money || 0) * costScale;
+                            const fCost = (b.consume.food || 0) * costScale;
+                            const wCost = (b.consume.wood || 0) * costScale;
+
+                            // Max run time limited by resources
+                            let maxTime = activeSeconds;
+                            if (mCost > 0) maxTime = Math.min(maxTime, gameState.resources.money / mCost);
+                            if (fCost > 0) maxTime = Math.min(maxTime, gameState.resources.food / fCost);
+                            if (wCost > 0) maxTime = Math.min(maxTime, gameState.resources.wood / wCost);
+
+                            if (maxTime > 0) {
+                                // Consume
+                                gameState.resources.money -= mCost * maxTime;
+                                gameState.resources.food -= fCost * maxTime;
+                                gameState.resources.wood -= wCost * maxTime;
+
+                                // Produce Stone (4x spec = 20 base)
+                                const pVal = (b.prod.stone || 0) * t.level * Math.pow(1.05, t.level - 1) * globalBuffs.masonry_hub;
+                                const prodTotal = pVal * maxTime;
+
+                                const caps = getStorageCapacity(t.type, t.level, i, globalBuffs);
+                                const current = t.stored.stone || 0;
+                                const space = Math.max(0, caps.stone - current);
+                                const actualAdd = Math.min(prodTotal, space);
+
+                                t.stored.stone = current + actualAdd;
+                                if (!earn.stone) earn.stone = 0;
+                                earn.stone += actualAdd;
+
+                                // If ran out of resources (or close enough), turn off
+                                if (maxTime < activeSeconds - 1) { // -1 tolerance
+                                    t.isActive = false;
+                                }
+                            } else {
+                                t.isActive = false;
+                            }
+                        }
+                        return; // Skip standard building logic
+                    }
+
+                    // Use index 'i' for adjacency checks. Pass globalBuffs!
+                    const caps = getStorageCapacity(t.type, t.level, i, globalBuffs);
+
+                    // Check Efficiency
+                    const efficiency = getTileProductionMultiplier(i, globalBuffs, true, offlineCtx); // Pass ctx
+
+                    if (efficiency > 0 && activeSeconds > 0) {
+                        // Ascension Logic Setup
+                        const isAsc = t.ascended;
+                        const prodBase = (isAsc && ASCENSION_BASE_STATS[t.type]) ? ASCENSION_BASE_STATS[t.type].prod : b.prod;
+                        const growth = (isAsc && ASCENSION_BASE_STATS[t.type]) ? 1.10 : 1.05;
+
+                        for (let r in prodBase) if (prodBase[r] > 0) {
+                            if (!earn[r]) earn[r] = 0;
+
+                            let finalMult = efficiency;
+                            if (r === 'money' && ['house', 'market', 'blacksmith', 'inn'].includes(t.type)) finalMult *= globalBuffs.bank;
+                            if (r === 'food' && ['farm'].includes(t.type)) finalMult *= globalBuffs.granary;
+                            if (r === 'wood' && ['lumber', 'forest'].includes(t.type)) finalMult *= globalBuffs.lumber_hub;
+
+                            // Use activeSeconds for production duration
+                            const amountPerSec = prodBase[r] * t.level * Math.pow(growth, t.level - 1) * finalMult;
+                            const add = Math.min(caps[r] - (t.stored[r] || 0), amountPerSec * activeSeconds);
+
+                            if (add > 0) { t.stored[r] = (t.stored[r] || 0) + add; earn[r] += add; }
+                        }
+                    }
+                }
+            });
+            if (built > 0) rep += `<div>🏗️ ${built}件完了</div>`;
+            for (let r in earn) if (earn[r] > 1) rep += `<div>+${Math.floor(earn[r]).toLocaleString()} ${r}</div>`;
+            if (rep) { document.getElementById('offline-report').innerHTML = rep; document.getElementById('modal-offline').style.display = 'flex'; }
+            addXP(0); // ランクアップチェック
+            gameState.lastSaveTime = now;
+            saveGame(); // オフライン経過分を保存
+        }
+    } catch (e) {
+        console.error(e);
+    }
+}
+
