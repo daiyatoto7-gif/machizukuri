@@ -2070,7 +2070,7 @@ const createCone = (r, h, mat, x, y, z, rotY = 0) => {
 };
 
 const createPillar = (h, x, y, z) => {
-    return createCyl(0.1, 0.1, h, MATERIALS.pillarRed, x, y, z);
+    return createCyl(0.045, 0.055, h, MATERIALS.pillarRed, x, y, z); // スリム化: 上細下太の伝統的比率
 };
 
 const createChineseRoof = (w, d, h, mat, x, y, z, tier = 1) => {
@@ -2507,8 +2507,8 @@ function createBuildingMesh(type, level, isAscended = false) {
                 // Well (Lathe-turned pottery style)
                 const well = new THREE.Group();
                 well.position.set(0.3, 0.05, 0.3);
-                well.add(createCyl(0.2, 0.2, 0.15, MATERIALS.stone, 0, 0.075, 0)); // Well head
-                well.add(createCyl(0.15, 0.15, 0.1, MATERIALS.water, 0, 0.06, 0)); // Water
+                well.add(createCyl(0.12, 0.12, 0.25, MATERIALS.stone, 0, 0.125, 0)); // Well head（高さ改善）
+                well.add(createCyl(0.08, 0.08, 0.22, MATERIALS.water, 0, 0.11, 0)); // Water
                 group.add(well);
 
                 // Machinery: Shadoof (Well Sweep)
@@ -2824,8 +2824,8 @@ function createBuildingMesh(type, level, isAscended = false) {
                 group.add(createBox(0.4, 0.02, 0.05, MATERIALS.wood, 0, 0.1, 0.4));
 
             } else { // Tier 2: Ironworks
-                // Blast Furnace (Tall cylinder/cone structure) - distinctive profile
-                group.add(createCyl(0.4, 0.3, 1.0, MATERIALS.stone, 0, 0.5, -0.1));
+                // Blast Furnace (Tall cylinder/cone structure) - distinctive profile（幅を縮小）
+                group.add(createCyl(0.22, 0.15, 1.0, MATERIALS.stone, 0, 0.5, -0.1));
                 // Fire glow at base
                 group.add(createBox(0.2, 0.2, 0.1, MATERIALS.gold, 0, 0.2, 0.15));
 
@@ -2997,9 +2997,9 @@ function createBuildingMesh(type, level, isAscended = false) {
             // Ground: Paving stones - Thin
             group.add(createBox(0.8, 0.02, 0.8, MATERIALS.pavingStone, 0, 0.01, 0));
 
-            // Well Base
-            group.add(createCyl(0.35, 0.35, 0.3, MATERIALS.stone, 0, 0.15, 0, 0, 8));
-            group.add(createCyl(0.28, 0.28, 0.31, MATERIALS.water, 0, 0.15, 0, 0, 8));
+            // Well Base（縦横比改善: 幅を縮小し高さを増やす）
+            group.add(createCyl(0.20, 0.20, 0.42, MATERIALS.stone, 0, 0.21, 0, 0, 8));
+            group.add(createCyl(0.14, 0.14, 0.40, MATERIALS.water, 0, 0.21, 0, 0, 8));
 
             if (tier >= 2) {
                 // Roof over well (Small shrine style) - 2 pillars
