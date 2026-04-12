@@ -2171,11 +2171,11 @@ function createExaltedFarm(level) {
     // Central Pavilion
     const pav = new THREE.Group();
     pav.position.set(0, 0.1, 0);
-    pav.add(createPillar(0.8, -0.2, 0.4, -0.2));
-    pav.add(createPillar(0.8, 0.2, 0.4, -0.2));
-    pav.add(createPillar(0.8, -0.2, 0.4, 0.2));
-    pav.add(createPillar(0.8, 0.2, 0.4, 0.2));
-    pav.add(createChineseRoof(0.7, 0.7, 0.5, MATERIALS.gold, 0, 0.9, 0, 2));
+    pav.add(createPillar(0.8, -0.3, 0.4, -0.3));
+    pav.add(createPillar(0.8, 0.3, 0.4, -0.3));
+    pav.add(createPillar(0.8, -0.3, 0.4, 0.3));
+    pav.add(createPillar(0.8, 0.3, 0.4, 0.3));
+    pav.add(createChineseRoof(0.85, 0.85, 0.5, MATERIALS.gold, 0, 0.9, 0, 2));
     g.add(pav);
 
     return g;
